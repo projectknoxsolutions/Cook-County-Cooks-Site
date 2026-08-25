@@ -13,9 +13,9 @@
         "y": 0.62
       },
       "still": {
-        "avif": "frames/pass/still.avif",
-        "webp": "frames/pass/still.webp",
-        "hero": "frames/pass/hero.avif"
+        "avif": "/frames/pass/still.avif",
+        "webp": "/frames/pass/still.webp",
+        "hero": "/frames/pass/hero.avif"
       },
       "transitions": {
         "host": {
@@ -33,9 +33,9 @@
         "y": 0.45
       },
       "still": {
-        "avif": "frames/host/still.avif",
-        "webp": "frames/host/still.webp",
-        "hero": "frames/host/hero.avif"
+        "avif": "/frames/host/still.avif",
+        "webp": "/frames/host/still.webp",
+        "hero": "/frames/host/hero.avif"
       },
       "transitions": {
         "dining": {
@@ -53,9 +53,9 @@
         "y": 0.42
       },
       "still": {
-        "avif": "frames/dining/still.avif",
-        "webp": "frames/dining/still.webp",
-        "hero": "frames/dining/hero.avif"
+        "avif": "/frames/dining/still.avif",
+        "webp": "/frames/dining/still.webp",
+        "hero": "/frames/dining/hero.avif"
       },
       "transitions": {
         "prep": {
@@ -73,9 +73,9 @@
         "y": 0.42
       },
       "still": {
-        "avif": "frames/prep/still.avif",
-        "webp": "frames/prep/still.webp",
-        "hero": "frames/prep/hero.avif"
+        "avif": "/frames/prep/still.avif",
+        "webp": "/frames/prep/still.webp",
+        "hero": "/frames/prep/hero.avif"
       },
       "transitions": {
         "office": {
@@ -93,9 +93,9 @@
         "y": 0.5
       },
       "still": {
-        "avif": "frames/office/still.avif",
-        "webp": "frames/office/still.webp",
-        "hero": "frames/office/hero.avif"
+        "avif": "/frames/office/still.avif",
+        "webp": "/frames/office/still.webp",
+        "hero": "/frames/office/hero.avif"
       },
       "transitions": {
         "breakroom": {
@@ -113,9 +113,9 @@
         "y": 0.45
       },
       "still": {
-        "avif": "frames/breakroom/still.avif",
-        "webp": "frames/breakroom/still.webp",
-        "hero": "frames/breakroom/hero.avif"
+        "avif": "/frames/breakroom/still.avif",
+        "webp": "/frames/breakroom/still.webp",
+        "hero": "/frames/breakroom/hero.avif"
       },
       "transitions": {
         "freezer": {
@@ -133,14 +133,14 @@
         "y": 0.5
       },
       "still": {
-        "avif": "frames/freezer/still.avif",
-        "webp": "frames/freezer/still.webp",
-        "hero": "frames/freezer/hero.avif"
+        "avif": "/frames/freezer/still.avif",
+        "webp": "/frames/freezer/still.webp",
+        "hero": "/frames/freezer/hero.avif"
       },
       "transitions": {},
       "locked": {
-        "avif": "frames/freezer/locked.avif",
-        "webp": "frames/freezer/locked.webp",
+        "avif": "/frames/freezer/locked.avif",
+        "webp": "/frames/freezer/locked.webp",
         "focal": {
           "x": 0.42,
           "y": 0.5

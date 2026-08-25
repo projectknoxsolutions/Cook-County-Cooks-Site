@@ -111,7 +111,7 @@
     {
       "slug": "porting-guide",
       "label": "PortPro — Porting Guide",
-      "url": "tools/porting-guide/",
+      "url": "/tools/porting-guide/",
       "room": "prep",
       "object": "recipe-card-1",
       "audience": "rep",
@@ -147,7 +147,7 @@
     {
       "slug": "printouts",
       "label": "Print Outs",
-      "url": "tools/printouts/",
+      "url": "/tools/printouts/",
       "room": "office",
       "object": "printer",
       "audience": "rep",
@@ -210,7 +210,7 @@
     {
       "slug": "employee-of-week",
       "label": "Employee of the Week",
-      "url": "tools/employee-of-week/",
+      "url": "/tools/employee-of-week/",
       "room": "breakroom",
       "object": "photo-wall",
       "audience": "rep",
