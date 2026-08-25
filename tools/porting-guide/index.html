@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PortPro | Cook County Cooks</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        .carrier-card {
+            transition: all 0.2s ease-in-out;
+            border: 1px solid #e2e8f0;
+        }
+
+        .carrier-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border-color: #3b82f6;
+        }
+
+        .search-container {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        }
+
+        .badge-tier1 { background-color: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+        .badge-mvno { background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        .badge-hard { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .badge-cable { background-color: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+
+        details summary::-webkit-details-marker { display:none; }
+    </style>
+</head>
+<body class="text-slate-900">
+
+    <!-- Top Navigation -->
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-lg overflow-hidden">
+                        <img id="navLogo" src="Cook County Cooks Logo.jpeg" alt="C" class="w-full h-full object-cover" onerror="this.style.display='none'; this.parentElement.innerHTML='C';">
+                    </div>
+                    <div>
+                        <span class="text-lg font-extrabold tracking-tight text-slate-800">PortPro</span>
+                        <span class="hidden sm:inline-block ml-2 px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-500 rounded uppercase tracking-wider">Internal Reference</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
+                    Cook County Cooks
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Header & Search -->
+    <div class="search-container py-12 px-4 text-center">
+        <div class="max-w-3xl mx-auto">
+            <h1 class="text-3xl md:text-4xl font-bold text-white mb-4 tracking-tight">Carrier Porting Directory</h1>
+            <p class="text-slate-400 mb-8 text-lg">Instant account formats, transfer pins, and unlock policies.</p>
+            
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
+                    <svg xmlns="https://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                </div>
+                <input type="text" id="searchInput" 
+                    placeholder="Search any carrier (Verizon, Tello, Google Voice, PureTalk...)" 
+                    class="w-full bg-slate-800 border border-slate-700 text-white rounded-2xl py-4 pl-12 pr-4 focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-lg placeholder:text-slate-500">
+            </div>
+
+            <div class="flex flex-wrap justify-center gap-2 mt-6" id="filterPills">
+                <button data-filter="all" class="pill active px-4 py-2 rounded-full text-[10px] font-black bg-blue-600 text-white transition-all shadow-lg shadow-blue-900/40 uppercase tracking-widest">All</button>
+                <button data-filter="tier1" class="pill px-4 py-2 rounded-full text-[10px] font-black bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all uppercase tracking-widest">Tier 1</button>
+                <button data-filter="mvno" class="pill px-4 py-2 rounded-full text-[10px] font-black bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all uppercase tracking-widest">Prepaid/MVNO</button>
+                <button data-filter="cable" class="pill px-4 py-2 rounded-full text-[10px] font-black bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all uppercase tracking-widest">Cable</button>
+                <button data-filter="hard" class="pill px-4 py-2 rounded-full text-[10px] font-black bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all uppercase tracking-widest text-red-400">Hard Ports</button>
+            </div>
+        </div>
+    </div>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        
+        <!-- Checklist Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+            <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="p-2 bg-blue-50 rounded-lg text-blue-600">
+                        <svg xmlns="https://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    </div>
+                    <h2 class="text-xl font-bold">Quick Rep Tip (Confirm Every Time)</h2>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✔</div>
+                        <p class="text-sm font-semibold text-slate-700 tracking-tight">Account Number (Check IMEI if Tracfone)</p>
+                    </div>
+                    <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✔</div>
+                        <p class="text-sm font-semibold text-slate-700 tracking-tight">Correct Transfer PIN (Check Expiry)</p>
+                    </div>
+                    <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✔</div>
+                        <p class="text-sm font-semibold text-slate-700 tracking-tight">Phone Fully Unlocked (Device vs Number)</p>
+                    </div>
+                    <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✔</div>
+                        <p class="text-sm font-semibold text-slate-700 tracking-tight">Correct Billing ZIP Code (Try 33178 for TF)</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Troubleshooting -->
+            <div class="bg-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+                <div class="relative z-10">
+                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <svg xmlns="https://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-400"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        Troubleshooting
+                    </h2>
+                    <div class="space-y-4">
+                        <details class="group cursor-pointer">
+                            <summary class="text-sm font-semibold flex justify-between items-center text-slate-300 group-hover:text-white">
+                                Failed Instantly
+                                <span class="text-blue-500 transition-transform group-open:rotate-180">▼</span>
+                            </summary>
+                            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Usually wrong Account or wrong PIN. Check if "Number Lock" (VZ), "Line Lock" (Visible), or "Port Protection" (TM) is active.</p>
+                        </details>
+                        <details class="group cursor-pointer">
+                            <summary class="text-sm font-semibold flex justify-between items-center text-slate-300 group-hover:text-white">
+                                Stuck Pending
+                                <span class="text-blue-500 transition-transform group-open:rotate-180">▼</span>
+                            </summary>
+                            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Google Voice numbers must be manually UNLOCKED at google.com/voice/unlock. VOIP ports can take 24-72 hours.</p>
+                        </details>
+                        <details class="group cursor-pointer">
+                            <summary class="text-sm font-semibold flex justify-between items-center text-slate-300 group-hover:text-white">
+                                Tracfone / Hard Ports
+                                <span class="text-blue-500 transition-transform group-open:rotate-180">▼</span>
+                            </summary>
+                            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Text <b>IMEI</b> to 611611 for account #. Text <b>NTP</b> to 611611 for PIN. Corporate ZIP: <b>33178</b>.</p>
+                        </details>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Carrier Grid -->
+        <div id="carrierGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <!-- Injected by JS -->
+        </div>
+
+        <div id="emptyState" class="hidden text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+            <p class="text-slate-400 font-bold uppercase tracking-widest">No matching carriers found</p>
+        </div>
+
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-12 mt-10">
+        <div class="max-w-7xl mx-auto px-4 text-center">
+            <p class="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mb-4">Internal Reference Tool v2.3</p>
+            <p class="text-slate-500 text-xs">Confirm all data before processing. Carrier policies update frequently.</p>
+        </div>
+    </footer>
+
+    <script>
+        const carriers = [
+            {
+                name: "Verizon",
+                tags: ["tier1"],
+                logoSlug: "verizon",
+                logoColor: "ff0000",
+                account: "• Bill or My Verizon app (Profile & Settings)",
+                port: "App: Turn off 'Number Lock' → Security → Transfer PIN\nPhone: Dial #PORT (#7678)",
+                unlock: "• Automatic 60 days after activation (even if not paid off)",
+                badges: [{text:"Tier 1", cls:"badge-tier1"}],
+                links: [{label: "Port Help", url: "https://www.verizon.com/support/port-out-faqs/"}]
+            },
+            {
+                name: "AT&T",
+                tags: ["tier1"],
+                logoSlug: "att",
+                logoColor: "00a8e0",
+                account: "• Prepaid: 12-digit | Postpaid: 9/12 digit",
+                port: "App: Profile → People & Permissions → Transfer Number → PIN\nPhone: Dial *PORT (*7678)\nNote: Prepaid uses 4-digit security PIN",
+                unlock: "• att.com/deviceunlock\n• Postpaid: Paid off + 60 days\n• Prepaid: 6 months active",
+                badges: [{text:"Tier 1", cls:"badge-tier1"}],
+                links: [{label: "Unlock Request", url: "https://www.att.com/deviceunlock/"}]
+            },
+            {
+                name: "T-Mobile",
+                tags: ["tier1"],
+                logoSlug: "tmobile",
+                logoColor: "e20074",
+                account: "• Found on bill or account dashboard",
+                port: "T-Life App: Manage → Gear → Permissions → Transfer PIN\n⚠ Toggle OFF 'Port Out Protection' first",
+                unlock: "• Postpaid: Paid off + 40 days\n• Prepaid: 1 year (or $100 refills)\n• Android: Unlock App | iPhone: Automatic",
+                badges: [{text:"Tier 1", cls:"badge-tier1"}],
+                links: [{label: "Protection Help", url: "https://www.t-mobile.com/support/plans-features/sim-protection"}]
+            },
+            {
+                name: "Sprint (Legacy)",
+                tags: ["tier1"],
+                logoSlug: "sprint",
+                logoColor: "fee100",
+                account: "• Found on physical bill",
+                port: "Use T-Life App (same steps as T-Mobile)\nManage → Gear → Permissions → Transfer PIN",
+                unlock: "• Automatic for eligible devices (Paid off + 40 days active)",
+                badges: [{text:"Tier 1", cls:"badge-tier1"}],
+                links: [{label: "T-Mobile Support", url: "https://www.t-mobile.com/support"}]
+            },
+            {
+                name: "Cricket Wireless",
+                tags: ["mvno"],
+                logoSlug: "cricketwireless",
+                logoColor: "008752",
+                account: "• Found in the myCricket app",
+                port: "• Dial *PORT (*7678) or check App settings",
+                unlock: "• Requires 6 months service\n• Android: Unlock App | iPhone: Online Portal",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Unlock Portal", url: "https://www.cricketwireless.com/support/account-management/device-unlock"}]
+            },
+            {
+                name: "Metro by T-Mobile",
+                tags: ["mvno"],
+                logoSlug: "metropcs",
+                logoColor: "4c2e91",
+                account: "• Bill or online account portal",
+                port: "• Call 611 or visit corporate store (Identity check required)",
+                unlock: "• Requires 365 days active service\n• Android: Unlock App | iPhone: Automatic",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Support", url: "https://www.metrobyt-mobile.com/support"}]
+            },
+            {
+                name: "Boost Mobile",
+                tags: ["mvno"],
+                logoSlug: "boost",
+                logoColor: "ff6600",
+                account: "• Account portal or physical bill",
+                port: "• MUST call support: 1-833-502-6678 to request PIN verbally",
+                unlock: "• Requires 12 months service\n• Must call support to request manually",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Support", url: "https://www.boostmobile.com/support"}]
+            },
+            {
+                name: "Straight Talk / Tracfone",
+                tags: ["hard", "mvno"],
+                logoSlug: "straighttalk",
+                logoColor: "f05a28",
+                account: "• IMEI (Text IMEI to 611611 for last 4 digits on file)\n• If fail: Use last 15 digits of SIM card",
+                port: "• Text NTP to 611611 (Do NOT text twice!)\n• ZIP fail? Try purchase zip or 33178",
+                unlock: "• VZ Network: 60 days auto\n• Others: 365 days (check tfwunlockpolicy.com)",
+                badges: [{text:"Hard Port", cls:"badge-hard"}, {text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Unlock Status", url: "https://www.tfwunlockpolicy.com"}]
+            },
+            {
+                name: "Visible",
+                tags: ["mvno"],
+                logoSlug: "visible",
+                logoColor: "0000ff",
+                account: "• Visible App → Account tab",
+                port: "• Toggle 'Line Lock' to Unlocked in app\n• Request PIN via email in Account section",
+                unlock: "• Automatic 60 days after activation",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Help", url: "https://www.visible.com/help"}]
+            },
+            {
+                name: "Google Voice",
+                tags: ["mvno"],
+                logoSlug: "googlevoice",
+                logoColor: "34a853",
+                account: "• Provided on GV unlock page",
+                port: "• NUMBER IS LOCKED BY DEFAULT\n• Must manually unlock at google.com/voice/unlock ($3 fee)",
+                unlock: "• Number Unlock ONLY (Device is separate)",
+                badges: [{text:"Hard Port", cls:"badge-hard"}, {text:"VOIP", cls:"badge-mvno"}],
+                links: [{label: "Voice Unlock", url: "https://www.google.com/voice/unlock"}]
+            },
+            {
+                name: "PureTalk",
+                tags: ["mvno"],
+                logoSlug: "",
+                logoColor: "002d72",
+                account: "• Online Portal → Plan tab → Request PIN",
+                port: "• PIN arrives by text (Expires in 10 days)\n• Porting Dept: 770-818-3919",
+                unlock: "• Sells GSM unlocked devices\n• Cannot unlock phones from other carriers",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Support", url: "https://www.puretalk.com/contact"}]
+            },
+            {
+                name: "Mint Mobile",
+                tags: ["mvno"],
+                logoSlug: "mintmobile",
+                logoColor: "00d8b4",
+                account: "• Top right of bill or online portal",
+                port: "• App: Support → Chat → Ask 'Fox bot' for Account/PIN",
+                unlock: "• Locked 60 days after purchase\n• Call support to initiate",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Mint Help", url: "https://www.mintmobile.com/help/"}]
+            },
+            {
+                name: "Spectrum Mobile",
+                tags: ["cable"],
+                logoSlug: "spectrum",
+                logoColor: "00629b",
+                account: "• Found on billing statement",
+                port: "• App: Services → Mobile → Line → Get PIN",
+                unlock: "• Paid Off + 60 days active\n• Request online or by phone",
+                badges: [{text:"Cable", cls:"badge-cable"}],
+                links: [{label: "Spectrum Help", url: "https://www.spectrum.net/support/mobile"}]
+            },
+            {
+                name: "Xfinity Mobile",
+                tags: ["cable"],
+                logoSlug: "xfinity",
+                logoColor: "ee3224",
+                account: "• Found in Xfinity app",
+                port: "• Call support for PIN: 888-936-4968",
+                unlock: "• Automatic once device is paid off",
+                badges: [{text:"Cable", cls:"badge-cable"}],
+                links: [{label: "Xfinity Help", url: "https://www.xfinity.com/mobile/support"}]
+            },
+            {
+                name: "Google Fi",
+                tags: ["mvno"],
+                logoSlug: "googlefi",
+                logoColor: "4285f4",
+                account: "• Provided during 'Leave' flow in App",
+                port: "• Account → Manage Plan → Leave Fi → Transfer\n• 5-digit Account + 5-digit PIN",
+                unlock: "• Most Fi devices are sold unlocked",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Fi Support", url: "https://support.google.com/fi/"}]
+            },
+            {
+                name: "LycaMobile",
+                tags: ["mvno"],
+                logoSlug: "",
+                logoColor: "23215c",
+                account: "• Call support for PIN release",
+                port: "• Dial 322 from phone | 1-866-277-3221",
+                unlock: "• Call support for eligibility\n• Original carrier handles BYOD unlocks",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Lyca Help", url: "https://www.lycamobile.us/en/help/contact-us/"}]
+            },
+            {
+                name: "Ultra Mobile",
+                tags: ["mvno"],
+                logoSlug: "",
+                logoColor: "f47920",
+                account: "• Request via chat or 888-777-0446",
+                port: "• Information routed through live care agents",
+                unlock: "• Automatic 60 days after activation for paid devices",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Ultra Help", url: "https://www.ultramobile.com/support/"}]
+            },
+            {
+                name: "Tello",
+                tags: ["mvno"],
+                logoSlug: "",
+                logoColor: "ec1c24",
+                account: "• Online Account only (Not App)",
+                port: "• Web: Number Transfer → Port Out → Retrieve Info",
+                unlock: "• BYOD Focused; check with original carrier",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Tello Help", url: "https://tello.com/help_center"}]
+            },
+            {
+                name: "Ting Mobile",
+                tags: ["mvno"],
+                logoSlug: "ting",
+                logoColor: "00adef",
+                account: "• Settings → Port out or cancel service",
+                port: "• Select 'Porting out?' for Account # and PIN",
+                unlock: "• 60-90 days active + paid off\n• Follow original carrier unlock rules",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Ting Help", url: "https://help.ting.com/"}]
+            },
+            {
+                name: "Consumer Cellular",
+                tags: ["mvno"],
+                logoSlug: "",
+                logoColor: "ef4444",
+                account: "• Top right corner of invoice",
+                port: "• Usually last 4 of SSN or 0000\n• If fail: 1-888-345-5509",
+                unlock: "• 12 months service required\n• Call support to request manually",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "CC Help", url: "https://www.consumercellular.com/help"}]
+            },
+            {
+                name: "US Cellular",
+                tags: ["mvno"],
+                logoSlug: "uscellular",
+                logoColor: "003366",
+                account: "• Found on invoice or online profile",
+                port: "• Call 888-944-9400 or visit store for PIN",
+                unlock: "• Automatic after 120 days service",
+                badges: [{text:"MVNO", cls:"badge-mvno"}],
+                links: [{label: "Support", url: "https://www.uscellular.com/support"}]
+            },
+            {
+                name: "Optimum Mobile",
+                tags: ["cable"],
+                logoSlug: "alticeusa",
+                logoColor: "000000",
+                account: "• Found in online account portal",
+                port: "• Account # and PIN both found online",
+                unlock: "• Paid Off + 60 days active",
+                badges: [{text:"Cable", cls:"badge-cable"}],
+                links: [{label: "Optimum Help", url: "https://www.optimum.net/mobile/"}]
+            },
+            {
+                name: "Cox Mobile",
+                tags: ["cable"],
+                logoSlug: "cox",
+                logoColor: "005495",
+                account: "• Found in online account portal",
+                port: "• Disable 'Number Lock' first in portal\n• PIN available online",
+                unlock: "• 60 days active + manual request in portal",
+                badges: [{text:"Cable", cls:"badge-cable"}],
+                links: [{label: "Cox Help", url: "https://www.cox.com/mobile"}]
+            }
+        ];
+
+        const grid = document.getElementById('carrierGrid');
+        const searchInput = document.getElementById('searchInput');
+        const emptyState = document.getElementById('emptyState');
+        const pills = document.querySelectorAll('.pill');
+
+        let activeFilter = 'all';
+
+        function render() {
+            const query = searchInput.value.toLowerCase();
+            const filtered = carriers.filter(c => {
+                const matchesSearch = c.name.toLowerCase().includes(query);
+                const matchesFilter = activeFilter === 'all' || c.tags.includes(activeFilter);
+                return matchesSearch && matchesFilter;
+            });
+
+            grid.innerHTML = filtered.map(c => {
+                // Determine if we should show an image or an initial
+                const logoHtml = c.logoSlug 
+                    ? `<img src="https://cdn.simpleicons.org/${c.logoSlug}/${c.logoColor || '334155'}" 
+                             alt="${c.name}" class="w-full h-full object-contain" 
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                       <span class="hidden w-full h-full items-center justify-center text-xl font-black text-slate-400 bg-slate-50 uppercase">${c.name[0]}</span>`
+                    : `<span class="flex w-full h-full items-center justify-center text-xl font-black text-slate-400 bg-slate-50 uppercase">${c.name[0]}</span>`;
+
+                return `
+                <div class="carrier-card bg-white rounded-2xl p-6 flex flex-col gap-6 shadow-sm border border-slate-100">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4">
+                            <div class="w-12 h-12 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center p-2 overflow-hidden">
+                                ${logoHtml}
+                            </div>
+                            <h3 class="font-black text-lg text-slate-800 tracking-tight">${c.name}</h3>
+                        </div>
+                        <div class="flex flex-col items-end gap-1">
+                            ${c.badges.map(b => `<span class="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${b.cls}">${b.text}</span>`).join('')}
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div class="bg-blue-50/50 p-3 rounded-xl border border-blue-100/50">
+                            <p class="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Account Number</p>
+                            <p class="text-xs font-bold text-slate-700 leading-relaxed whitespace-pre-line">${c.account}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Transfer PIN</p>
+                            <p class="text-xs font-semibold text-slate-600 leading-relaxed whitespace-pre-line">${c.port}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Device Unlock</p>
+                            <p class="text-xs font-semibold text-slate-600 leading-relaxed whitespace-pre-line">${c.unlock}</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-auto pt-4 border-t border-slate-50 flex gap-2">
+                        ${c.links.map(l => `
+                            <a href="${l.url}" target="_blank" class="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-blue-600 text-white text-[10px] font-bold rounded-lg transition-all uppercase tracking-wider">
+                                ${l.label}
+                                <svg xmlns="https://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 22 3 22 10"/><line x1="10" y1="14" x2="22" y2="2"/></svg>
+                            </a>
+                        `).join('')}
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            emptyState.classList.toggle('hidden', filtered.length > 0);
+        }
+
+        searchInput.addEventListener('input', render);
+
+        pills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                pills.forEach(p => p.classList.remove('bg-blue-600', 'text-white', 'active', 'shadow-lg', 'shadow-blue-900/40'));
+                pills.forEach(p => p.classList.add('bg-slate-800', 'text-slate-300'));
+                
+                pill.classList.remove('bg-slate-800', 'text-slate-300');
+                pill.classList.add('bg-blue-600', 'text-white', 'active', 'shadow-lg', 'shadow-blue-900/40');
+                
+                activeFilter = pill.dataset.filter;
+                render();
+            });
+        });
+
+        render();
+    </script>
+</body>
+</html>

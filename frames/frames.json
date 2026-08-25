@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "generated": "2026-08-25T02:02:36.545Z",
+  "stillWidth": 1600,
+  "heroWidth": 2752,
+  "rooms": [
+    {
+      "id": "pass",
+      "width": 2752,
+      "height": 1536,
+      "focal": {
+        "x": 0.34,
+        "y": 0.62
+      },
+      "still": {
+        "avif": "/frames/pass/still.avif",
+        "webp": "/frames/pass/still.webp",
+        "hero": "/frames/pass/hero.avif"
+      },
+      "transitions": {
+        "host": {
+          "count": 0,
+          "frames": []
+        }
+      }
+    },
+    {
+      "id": "host",
+      "width": 800,
+      "height": 450,
+      "focal": {
+        "x": 0.52,
+        "y": 0.45
+      },
+      "still": {
+        "avif": "/frames/host/still.avif",
+        "webp": "/frames/host/still.webp",
+        "hero": "/frames/host/hero.avif"
+      },
+      "transitions": {
+        "dining": {
+          "count": 0,
+          "frames": []
+        }
+      }
+    },
+    {
+      "id": "dining",
+      "width": 800,
+      "height": 450,
+      "focal": {
+        "x": 0.38,
+        "y": 0.42
+      },
+      "still": {
+        "avif": "/frames/dining/still.avif",
+        "webp": "/frames/dining/still.webp",
+        "hero": "/frames/dining/hero.avif"
+      },
+      "transitions": {
+        "prep": {
+          "count": 0,
+          "frames": []
+        }
+      }
+    },
+    {
+      "id": "prep",
+      "width": 800,
+      "height": 450,
+      "focal": {
+        "x": 0.62,
+        "y": 0.42
+      },
+      "still": {
+        "avif": "/frames/prep/still.avif",
+        "webp": "/frames/prep/still.webp",
+        "hero": "/frames/prep/hero.avif"
+      },
+      "transitions": {
+        "office": {
+          "count": 0,
+          "frames": []
+        }
+      }
+    },
+    {
+      "id": "office",
+      "width": 800,
+      "height": 450,
+      "focal": {
+        "x": 0.38,
+        "y": 0.5
+      },
+      "still": {
+        "avif": "/frames/office/still.avif",
+        "webp": "/frames/office/still.webp",
+        "hero": "/frames/office/hero.avif"
+      },
+      "transitions": {
+        "breakroom": {
+          "count": 0,
+          "frames": []
+        }
+      }
+    },
+    {
+      "id": "breakroom",
+      "width": 800,
+      "height": 450,
+      "focal": {
+        "x": 0.55,
+        "y": 0.45
+      },
+      "still": {
+        "avif": "/frames/breakroom/still.avif",
+        "webp": "/frames/breakroom/still.webp",
+        "hero": "/frames/breakroom/hero.avif"
+      },
+      "transitions": {
+        "freezer": {
+          "count": 0,
+          "frames": []
+        }
+      }
+    },
+    {
+      "id": "freezer",
+      "width": 800,
+      "height": 450,
+      "focal": {
+        "x": 0.48,
+        "y": 0.5
+      },
+      "still": {
+        "avif": "/frames/freezer/still.avif",
+        "webp": "/frames/freezer/still.webp",
+        "hero": "/frames/freezer/hero.avif"
+      },
+      "transitions": {},
+      "locked": {
+        "avif": "/frames/freezer/locked.avif",
+        "webp": "/frames/freezer/locked.webp",
+        "focal": {
+          "x": 0.42,
+          "y": 0.5
+        }
+      }
+    }
+  ]
+}

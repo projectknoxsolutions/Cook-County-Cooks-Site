@@ -1,0 +1,61 @@
+{
+  "comment": "Normalized hotspot regions (x/y/w/h in 0..1 image space) on each room's master still. Tuned against the dressed renders: pass=pass_master.png, host=m3_cam_02, dining=m2_cam_03, prep=m3_cam_04, office=m2_cam_05, breakroom=m3_cam_06, freezer=m2_cam_07 (locked door=contact_cam_07door). 'gate' regions are active while the room is locked.",
+  "rooms": {
+    "pass": [
+      { "slug": "quote-6th-gen", "x": 0.150, "y": 0.640, "w": 0.100, "h": 0.215 },
+      { "slug": "quote-upgrade", "x": 0.330, "y": 0.615, "w": 0.095, "h": 0.205 },
+      { "slug": "quote-internet", "x": 0.652, "y": 0.515, "w": 0.062, "h": 0.095 },
+      { "slug": "discount-close", "x": 0.432, "y": 0.485, "w": 0.078, "h": 0.105 }
+    ],
+    "host": [
+      { "slug": "daily-sales", "x": 0.531, "y": 0.098, "w": 0.138, "h": 0.348 },
+      { "slug": "tsheet-submissions", "x": 0.492, "y": 0.492, "w": 0.033, "h": 0.028 },
+      { "slug": "yesterdays-conversion", "x": 0.559, "y": 0.472, "w": 0.054, "h": 0.042 },
+      { "slug": "commission-payouts", "x": 0.523, "y": 0.440, "w": 0.035, "h": 0.073 }
+    ],
+    "dining": [
+      { "slug": "wtw-chicago", "x": 0.194, "y": 0.256, "w": 0.176, "h": 0.337 },
+      { "slug": "wtw-big-south", "x": 0.377, "y": 0.256, "w": 0.143, "h": 0.337 },
+      { "slug": "nps", "x": 0.310, "y": 0.660, "w": 0.155, "h": 0.112 }
+    ],
+    "prep": [
+      { "slug": "porting-guide", "x": 0.706, "y": 0.208, "w": 0.035, "h": 0.074 },
+      { "slug": "credit-limit", "x": 0.786, "y": 0.216, "w": 0.028, "h": 0.070 },
+      { "slug": "bapis", "x": 0.871, "y": 0.216, "w": 0.033, "h": 0.074 },
+      { "slug": "bp-access", "x": 0.975, "y": 0.218, "w": 0.025, "h": 0.078 }
+    ],
+    "office": [
+      { "slug": "printouts", "x": 0.004, "y": 0.560, "w": 0.180, "h": 0.230 },
+      { "slug": "exception-report", "x": 0.585, "y": 0.605, "w": 0.120, "h": 0.090 },
+      { "slug": "fall-off", "x": 0.232, "y": 0.090, "w": 0.188, "h": 0.280 }
+    ],
+    "breakroom": [
+      { "slug": "training-xfinity", "x": 0.463, "y": 0.118, "w": 0.068, "h": 0.164 },
+      { "slug": "training-straight-line", "x": 0.541, "y": 0.105, "w": 0.072, "h": 0.176 },
+      { "slug": "training-tsheet", "x": 0.633, "y": 0.096, "w": 0.077, "h": 0.190 },
+      { "slug": "employee-of-week", "x": 0.732, "y": 0.090, "w": 0.216, "h": 0.222 },
+      { "slug": "fox-run", "x": 0.162, "y": 0.122, "w": 0.128, "h": 0.480 }
+    ],
+    "freezer": [
+      { "slug": "punch-audit", "x": 0.375, "y": 0.418, "w": 0.085, "h": 0.088 },
+      { "slug": "monday-ops", "x": 0.046, "y": 0.415, "w": 0.096, "h": 0.175 },
+      { "slug": "daily-goals", "x": 0.183, "y": 0.447, "w": 0.033, "h": 0.062 },
+      { "slug": "interview-guide", "x": 0.538, "y": 0.183, "w": 0.050, "h": 0.094 },
+      { "slug": "open-orders", "x": 0.233, "y": 0.556, "w": 0.128, "h": 0.365 },
+      { "slug": "target-planner", "x": 0.545, "y": 0.400, "w": 0.073, "h": 0.100 },
+      { "slug": "rally-call", "x": 0.399, "y": 0.178, "w": 0.080, "h": 0.098 },
+      { "slug": "scorecards", "x": 0.143, "y": 0.444, "w": 0.038, "h": 0.076 },
+      { "slug": "payment-reversal", "x": 0.825, "y": 0.514, "w": 0.086, "h": 0.067 },
+      { "slug": "accessory-order", "x": 0.756, "y": 0.487, "w": 0.099, "h": 0.047 },
+      { "slug": "price-tags", "x": 0.741, "y": 0.447, "w": 0.061, "h": 0.052 },
+      { "slug": "brinks", "x": 0.467, "y": 0.392, "w": 0.056, "h": 0.110 },
+      { "slug": "missing-inventory", "x": 0.101, "y": 0.184, "w": 0.041, "h": 0.070 },
+      { "slug": "chicago-remote-order", "x": 0.757, "y": 0.650, "w": 0.151, "h": 0.164 }
+    ]
+  },
+  "gates": {
+    "freezer": [
+      { "id": "keypad", "label": "Enter freezer code", "x": 0.183, "y": 0.400, "w": 0.062, "h": 0.115 }
+    ]
+  }
+}
