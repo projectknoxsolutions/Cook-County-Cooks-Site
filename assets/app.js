@@ -170,4 +170,6 @@ function loop(){
  requestAnimationFrame(loop)
 }
 requestAnimationFrame(loop);
+setInterval(function(){window.__walkDebug.ticks||loop()},400);
+setInterval(loop,900);
 });
