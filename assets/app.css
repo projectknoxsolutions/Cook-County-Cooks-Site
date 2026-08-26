@@ -48,3 +48,5 @@ section[id^=room-].live .tv-screen,section[id^=room-].live .chef-frame{animation
 .walk-sticky canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .walk-cap{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);font-family:'Space Grotesk',monospace;letter-spacing:.32em;font-size:11px;color:#f4e7cfb3;text-transform:uppercase;white-space:nowrap;text-shadow:0 1px 8px #000}
 @media (max-width:900px){.walk-leg{height:150vh}}
+
+.walk-sticky img.walk-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}

@@ -137,46 +137,37 @@
     </nav>`}async function Oe(){const e=await ae();ne(e),Ie(e),he(e),ue(e),qe(e),K(()=>ne(e)),we(e),Ce(),document.getElementById("kitchen").addEventListener("click",t=>{const o=t.target,s=o.closest("[data-slug]")?.dataset.slug;if(s){const n=e.tools.find(u=>u.slug===s);k(n);return}o.closest('[data-act="unlock-freezer"]')&&j()}),document.getElementById("site-footer").addEventListener("click",t=>{const o=t.target.closest("[data-footer-slug]");if(!o)return;const s=e.tools.find(n=>n.slug===o.dataset.footerSlug);s&&!b(s)&&(t.preventDefault(),k(s))})}Oe()})();
 ;window.__cccWhenRooms=function(cb){var n=0,t=setInterval(function(){if(document.getElementById("room-freezer")){clearInterval(t);try{cb()}catch(e){}}else if(++n>150){clearInterval(t)}},100)};__cccWhenRooms(function(){var rm=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;if(rm)return;var secs=document.querySelectorAll("section[id^=room-]");if(!("IntersectionObserver"in window)||!secs.length)return;var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add("live")}else{en.target.classList.remove("live")}})},{rootMargin:"-18% 0px -18% 0px",threshold:0});secs.forEach(function(x){io.observe(x)})});
 ;__cccWhenRooms(function(){
-var rm=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
-if(rm||!document.createElement("canvas").getContext)return;
+var rm=matchMedia("(prefers-reduced-motion: reduce)").matches;if(rm)return;
 var LEGS=[["pass","host",1,62],["host","dining",62,120],["dining","prep",120,160],["prep","office",160,210],["office","breakroom",210,238],["breakroom","freezer",238,320]];
-var FW=1280,FH=714,cache={},want={};
-function url(i){return "frames/walk/w"+String(i).padStart(4,"0")+".webp"}
-function ensure(i){if(i<1||i>350||cache[i]||want[i])return;want[i]=1;var im=new Image();im.decoding="async";im.onload=function(){cache[i]=im};im.src=url(i)}
-function nearest(i,a,b){if(cache[i])return cache[i];for(var d=1;d<40;d++){if(i-d>=a&&cache[i-d])return cache[i-d];if(i+d<=b&&cache[i+d])return cache[i+d]}return null}
+var cache={},want={};window.__walkDebug={ticks:0,swaps:0,loads:0,legs:0};
+function url(i){return "frames/walk/w"+("000"+i).slice(-4)+".webp"}
+function ensure(i){if(i<1||i>350||cache[i]||want[i])return;want[i]=1;window.__walkDebug.loads++;var im=new Image();im.decoding="async";im.onload=function(){cache[i]=im};im.src=url(i)}
+function nearest(i,a,b){if(cache[i])return cache[i];for(var d=1;d<50;d++){if(i-d>=a&&cache[i-d])return cache[i-d];if(i+d<=b&&cache[i+d])return cache[i+d]}return null}
 var legs=[];
 LEGS.forEach(function(L){
  var secA=document.getElementById("room-"+L[0]),secB=document.getElementById("room-"+L[1]);
  if(!secA||!secB)return;
  var wrap=document.createElement("div");wrap.className="walk-leg";
- wrap.innerHTML='<div class="walk-sticky"><canvas></canvas><div class="walk-cap">Walking to '+L[1].replace("breakroom","the break room").replace("freezer","the freezer")+'</div></div>';
+ var cap=L[1]==="breakroom"?"the break room":L[1]==="freezer"?"the freezer":"the "+L[1];
+ wrap.innerHTML='<div class="walk-sticky"><img class="walk-frame" alt="" decoding="async"/><div class="walk-cap">Walking to '+cap+'</div></div>';
  secA.insertAdjacentElement("afterend",wrap);
- var cv=wrap.querySelector("canvas");
- legs.push({el:wrap,cv:cv,cx:cv.getContext("2d"),a:L[2],b:L[3],last:-1});
+ legs.push({el:wrap,img:wrap.querySelector("img"),a:L[2],b:L[3],cur:""});
 });
+window.__walkDebug.legs=legs.length;
 if(!legs.length)return;
-var pre=new IntersectionObserver(function(es){es.forEach(function(en){if(!en.isIntersecting)return;var lg=legs.find(function(l){return l.el===en.target});if(!lg)return;var n=lg.a;var t=setInterval(function(){for(var k=0;k<10&&n<=lg.b;k++,n++)ensure(n);if(n>lg.b)clearInterval(t)},120)})},{rootMargin:"180% 0px 180% 0px"});
-legs.forEach(function(l){pre.observe(l.el)});
-function draw(lg,f){
- var im=nearest(f,lg.a,lg.b);if(!im)return;
- var vw=lg.cv.clientWidth,vh=lg.cv.clientHeight;
- if(lg.cv.width!==vw||lg.cv.height!==vh){lg.cv.width=vw;lg.cv.height=vh}
- var s=Math.max(vw/FW,vh/FH),w=FW*s,h=FH*s;
- lg.cx.drawImage(im,(vw-w)/2,(vh-h)/2,w,h);
-}
-var tick=false;
-function onscroll(){if(tick)return;tick=true;requestAnimationFrame(function(){tick=false;
+function loop(){
+ window.__walkDebug.ticks++;
  var vh=innerHeight;
- legs.forEach(function(lg){
-  var r=lg.el.getBoundingClientRect();
-  if(r.bottom<-50||r.top>vh+50)return;
+ for(var k=0;k<legs.length;k++){
+  var lg=legs[k],r=lg.el.getBoundingClientRect();
+  if(r.bottom<-vh||r.top>vh*2)continue;
   var span=r.height-vh,p=span>0?Math.min(1,Math.max(0,-r.top/span)):0;
   var f=Math.round(lg.a+p*(lg.b-lg.a));
-  ensure(f);ensure(f+3);ensure(f-3);ensure(f+8);
-  if(f!==lg.last||lg.cv.width===0){lg.last=f;draw(lg,f)}
- });
-});}
-addEventListener("scroll",onscroll,{passive:true});
-addEventListener("resize",onscroll,{passive:true});
-setTimeout(onscroll,400);
+  for(var j=0;j<8;j++)ensure(f+j);ensure(f-2);ensure(f-4);
+  var im=nearest(f,lg.a,lg.b);
+  if(im&&lg.cur!==im.src){lg.cur=im.src;lg.img.src=im.src;window.__walkDebug.swaps++}
+ }
+ requestAnimationFrame(loop)
+}
+requestAnimationFrame(loop);
 });
