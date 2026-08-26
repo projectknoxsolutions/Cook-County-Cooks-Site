@@ -20,9 +20,9 @@
 ::selection{background:#e0a35f55}
 /* === v2.1: rooms come alive on scroll === */
 section[id^=room-] .room-art{overflow:hidden}
-section[id^=room-] .room-art-bg,section[id^=room-] .room-art-layer{transform:scale(1.045);transform-origin:52% 46%}
-section[id^=room-].live .room-art-bg,section[id^=room-].live .room-art-layer{animation:kenburns 26s ease-in-out infinite alternate}
-@keyframes kenburns{0%{transform:scale(1.045) translate(0,0)}100%{transform:scale(1.09) translate(-1.4%,-1%)}}
+
+
+
 section[id^=room-] .room-title{opacity:0;transform:translateY(14px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
 section[id^=room-].live .room-title{opacity:1;transform:none}
 section[id^=room-] .tool-card{opacity:0;transform:translateY(18px);transition:opacity .55s ease,transform .55s cubic-bezier(.2,.7,.2,1)}
