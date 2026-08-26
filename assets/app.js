@@ -135,8 +135,8 @@
       </ul>
       <p class="footer-note">Cook County Cooks &middot; the C&sup3; kitchen &middot; photoreal rooms coming in a later course.</p>
     </nav>`}async function Oe(){const e=await ae();ne(e),Ie(e),he(e),ue(e),qe(e),K(()=>ne(e)),we(e),Ce(),document.getElementById("kitchen").addEventListener("click",t=>{const o=t.target,s=o.closest("[data-slug]")?.dataset.slug;if(s){const n=e.tools.find(u=>u.slug===s);k(n);return}o.closest('[data-act="unlock-freezer"]')&&j()}),document.getElementById("site-footer").addEventListener("click",t=>{const o=t.target.closest("[data-footer-slug]");if(!o)return;const s=e.tools.find(n=>n.slug===o.dataset.footerSlug);s&&!b(s)&&(t.preventDefault(),k(s))})}Oe()})();
-;(function(){try{var rm=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;if(rm)return;var secs=document.querySelectorAll("section[id^=room-]");if(!("IntersectionObserver"in window)||!secs.length)return;var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add("live")}else{en.target.classList.remove("live")}})},{rootMargin:"-18% 0px -18% 0px",threshold:0});secs.forEach(function(x){io.observe(x)})}catch(e){}})();
-;(function(){try{
+;window.__cccWhenRooms=function(cb){var n=0,t=setInterval(function(){if(document.getElementById("room-freezer")){clearInterval(t);try{cb()}catch(e){}}else if(++n>150){clearInterval(t)}},100)};__cccWhenRooms(function(){var rm=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;if(rm)return;var secs=document.querySelectorAll("section[id^=room-]");if(!("IntersectionObserver"in window)||!secs.length)return;var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add("live")}else{en.target.classList.remove("live")}})},{rootMargin:"-18% 0px -18% 0px",threshold:0});secs.forEach(function(x){io.observe(x)})});
+;__cccWhenRooms(function(){
 var rm=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
 if(rm||!document.createElement("canvas").getContext)return;
 var LEGS=[["pass","host",1,62],["host","dining",62,120],["dining","prep",120,160],["prep","office",160,210],["office","breakroom",210,238],["breakroom","freezer",238,320]];
@@ -179,4 +179,4 @@ function onscroll(){if(tick)return;tick=true;requestAnimationFrame(function(){ti
 addEventListener("scroll",onscroll,{passive:true});
 addEventListener("resize",onscroll,{passive:true});
 setTimeout(onscroll,400);
-}catch(e){}})();
+});
