@@ -1,0 +1,165 @@
+{
+  "generated_at": "2026-08-26T04:16:23.645Z",
+  "sources": [
+    {
+      "deck": "chicago",
+      "region": "Chicago",
+      "source": "wtw_decks",
+      "last_modified": null,
+      "slide_count": 4
+    },
+    {
+      "deck": "big-south",
+      "region": "Big South",
+      "source": "wtw_decks",
+      "last_modified": null,
+      "slide_count": 1
+    }
+  ],
+  "headchefs": [
+    {
+      "region_deck": "Chicago",
+      "slide_index": 0,
+      "slide_title": "Head Chef Of The Week — North Side",
+      "name": "Linda Weeks",
+      "store_role": "Glenview • Assistant Manager",
+      "stats": [
+        {
+          "value": "$3,985",
+          "label": "GP $"
+        },
+        {
+          "value": "100%",
+          "label": "Plus"
+        },
+        {
+          "value": "100%",
+          "label": "GIG Attach"
+        },
+        {
+          "value": "$2.94",
+          "label": "Accy $/Box"
+        }
+      ],
+      "writeup": "- Always at the top of the ranker\n-200 T charts for the month\n- Always providing the best customer experience\n-Ready to win every day\n-Looking for opportunities in every account",
+      "is_xfinity": false,
+      "has_photo": false,
+      "photo_file": null
+    },
+    {
+      "region_deck": "Chicago",
+      "slide_index": 1,
+      "slide_title": "Head Chef Of The Week — Outlawz",
+      "name": "Hammond",
+      "store_role": "Store • National Rank #1",
+      "stats": [
+        {
+          "value": "$92,989",
+          "label": "GP $ Trend"
+        },
+        {
+          "value": "9.96%",
+          "label": "MCR"
+        },
+        {
+          "value": "89.7%",
+          "label": "Plus"
+        },
+        {
+          "value": "82.9%",
+          "label": "NPS"
+        },
+        {
+          "value": "100.0%",
+          "label": "GIG"
+        },
+        {
+          "value": "$12.13",
+          "label": "Accy"
+        },
+        {
+          "value": "39",
+          "label": "Mobile"
+        },
+        {
+          "value": "15.70%",
+          "label": "FCR"
+        }
+      ],
+      "writeup": "#1 store in the company\n$92,988 GP trend\n9.8% MCR",
+      "is_xfinity": false,
+      "has_photo": true,
+      "photo_file": "photos/chicago-1.jpg"
+    },
+    {
+      "region_deck": "Chicago",
+      "slide_index": 2,
+      "slide_title": "Head Chef Of The Week — The South Side",
+      "name": "Antonio Carradine",
+      "store_role": "Burbank • New Hire",
+      "stats": [
+        {
+          "value": "$1,345",
+          "label": "GP $"
+        },
+        {
+          "value": "0%",
+          "label": "Plus"
+        },
+        {
+          "value": "100%",
+          "label": "GIG Attach"
+        },
+        {
+          "value": "$-12.80",
+          "label": "Accy $/Box"
+        }
+      ],
+      "writeup": "He brings in a positive attitude every single day, Which has helped lead Burbank to an NPS of over 80% the last six months. He’s currently top 5 in the district on the sales ranker. And lastly, he’s been able to help the district out by helping other stores in need. He’s a true team player and I can’t thank you enough.",
+      "is_xfinity": false,
+      "has_photo": true,
+      "photo_file": "photos/chicago-2.jpg"
+    },
+    {
+      "region_deck": "Chicago",
+      "slide_index": 3,
+      "slide_title": "⭐ Xfinity Head Chef Of The Week",
+      "name": "Alexis Bell",
+      "store_role": "Xfinity Head Chef • Greater Chicago",
+      "stats": [],
+      "writeup": "I would like to nominate Alexis Bell out of our branded partner Hammond location. She is the definition of consistency and shows what a determined leader can do month in and month out. Over 10% XM close rate, 85 NPS & over 95% premium attach!! Amazing work Alexis!",
+      "is_xfinity": true,
+      "has_photo": true,
+      "photo_file": "photos/chicago-3.jpg"
+    },
+    {
+      "region_deck": "Big South",
+      "slide_index": 0,
+      "slide_title": "Head Chef Of The Week — Big South",
+      "name": "Jahsi Simon",
+      "store_role": "South Knoxville • Sales Represenative",
+      "stats": [
+        {
+          "value": "$2,870",
+          "label": "GP $"
+        },
+        {
+          "value": "0%",
+          "label": "Plus"
+        },
+        {
+          "value": "75%",
+          "label": "GIG Attach"
+        },
+        {
+          "value": "$2.38",
+          "label": "Accy $/Box"
+        }
+      ],
+      "writeup": "Jahsi Simon\nOver $16K and 52 XM for his first full month\nFully immersed in the process\nStays hungry to finish strong even when dealing with nothing but cancelations for several hours\nStays fully engaged in the chat and stays on top of new to the business",
+      "is_xfinity": false,
+      "has_photo": true,
+      "photo_file": "photos/big-south-0.jpg"
+    }
+  ]
+}

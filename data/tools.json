@@ -111,7 +111,7 @@
     {
       "slug": "porting-guide",
       "label": "PortPro — Porting Guide",
-      "url": "/tools/porting-guide/",
+      "url": "tools/porting-guide/",
       "room": "prep",
       "object": "recipe-card-1",
       "audience": "rep",
@@ -147,11 +147,12 @@
     {
       "slug": "printouts",
       "label": "Print Outs",
-      "url": "/tools/printouts/",
+      "url": "https://netorgft3272928-my.sharepoint.com/:f:/g/personal/jbilbrey_blufoxmobile_com/Ejz2lXceN4RCiKtlowYhAoABmBPIf_Gc3QTIGKnkXnELDw?e=RjYwzs",
       "room": "office",
       "object": "printer",
       "audience": "rep",
-      "blurb": "Printable forms, signage, and store paperwork — everything that comes out of the office printer."
+      "external_only": true,
+      "blurb": "Printable forms, signage, and store paperwork — the shared Print Outs folder in Microsoft 365."
     },
     {
       "slug": "exception-report",
@@ -209,12 +210,12 @@
     },
     {
       "slug": "employee-of-week",
-      "label": "Employee of the Week",
-      "url": "/tools/employee-of-week/",
+      "label": "Head Chef Wall",
+      "url": "tools/employee-of-week/",
       "room": "breakroom",
       "object": "photo-wall",
       "audience": "rep",
-      "blurb": "The wall of fame — who earned the frame this week and why."
+      "blurb": "The real wall of fame — Head Chef of the Week, synced from the Win the Weekend decks."
     },
     {
       "slug": "punch-audit",

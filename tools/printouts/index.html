@@ -15,26 +15,44 @@
       min-height: 100vh; display: flex; flex-direction: column;
       align-items: center; justify-content: center; padding: 2rem; text-align: center;
     }
+    .card {
+      max-width: 30rem; border: 1px solid #232c58; border-radius: 16px;
+      background: linear-gradient(170deg, #161d40, #0d1230);
+      padding: 2.2rem 2rem 2rem; box-shadow: 0 30px 80px rgba(0,0,0,.5);
+    }
     .badge {
       font-family: 'Space Grotesk', sans-serif; font-size: .75rem; letter-spacing: .2em;
       text-transform: uppercase; color: #1E8FE0; border: 1px solid #1E8FE066;
-      border-radius: 999px; padding: .35rem 1rem; margin-bottom: 1.25rem;
+      border-radius: 999px; padding: .35rem 1rem; margin-bottom: 1.25rem; display: inline-block;
     }
-    h1 { font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.6rem, 4vw, 2.4rem); margin-bottom: .75rem; }
-    p { color: #9AA6C4; max-width: 34rem; line-height: 1.6; }
-    .printer { font-size: 3rem; margin-bottom: 1rem; }
+    h1 { font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.5rem, 4vw, 2rem); margin-bottom: .75rem; }
+    p { color: #9AA6C4; line-height: 1.6; margin-bottom: 1.5rem; }
+    .m365 { margin-bottom: 1rem; }
+    .btn {
+      display: inline-flex; align-items: center; gap: .5rem;
+      appearance: none; border: 1px solid #1E8FE0; background: #1E8FE0;
+      color: #06132a; font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+      font-size: .9rem; border-radius: 8px; padding: .75rem 1.4rem; cursor: pointer;
+      text-decoration: none;
+    }
+    .btn:hover { filter: brightness(1.12); }
     a.back {
-      margin-top: 2rem; color: #1E8FE0; text-decoration: none; font-weight: 500;
-      border: 1px solid #1E8FE055; border-radius: 8px; padding: .6rem 1.2rem;
+      display: block; margin-top: 1.5rem; color: #9aa6c4; text-decoration: none; font-size: .85rem;
     }
-    a.back:hover, a.back:focus-visible { background: #1E8FE01a; outline: 2px solid #1E8FE0; outline-offset: 2px; }
+    a.back:hover, a.back:focus-visible { color: #1E8FE0; }
   </style>
 </head>
 <body>
-  <div class="printer" aria-hidden="true">🖨️</div>
-  <div class="badge">Back Office</div>
-  <h1>Print Outs</h1>
-  <p>Printable forms, signage, and store paperwork will live here. The tray is warming up — check back soon.</p>
-  <a class="back" href="../../index.html">&larr; Back to the Kitchen</a>
+  <div class="card">
+    <svg class="m365" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="9" height="9" fill="#4c9c2e"/><rect x="13" y="2" width="9" height="9" fill="#1a80c4"/>
+      <rect x="2" y="13" width="9" height="9" fill="#f0b91d"/><rect x="13" y="13" width="9" height="9" fill="#c4392a"/>
+    </svg>
+    <div class="badge">Back Office</div>
+    <h1>Print Outs</h1>
+    <p>Opens in Microsoft 365 — store login required. This is the shared SharePoint/OneDrive folder with printable forms, signage, and store paperwork, so it can't be embedded here.</p>
+    <a class="btn" href="https://netorgft3272928-my.sharepoint.com/:f:/g/personal/jbilbrey_blufoxmobile_com/Ejz2lXceN4RCiKtlowYhAoABmBPIf_Gc3QTIGKnkXnELDw?e=RjYwzs" target="_blank" rel="noopener">Open Print Outs &#8599;</a>
+    <a class="back" href="../../">&larr; Back to the Kitchen</a>
+  </div>
 </body>
 </html>

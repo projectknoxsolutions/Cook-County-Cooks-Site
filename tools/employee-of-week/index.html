@@ -3,43 +3,174 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Employee of the Week | Cook County Cooks</title>
+  <title>Head Chef Wall | Cook County Cooks</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
   <style>
     * { box-sizing: border-box; margin: 0; }
+    :root {
+      --bar:#0B1026; --accent:#1E8FE0; --ink:#e8ecf6; --ink-dim:#9aa6c4;
+      --card:#141a38; --card-edge:#232c58; --gold:#c9a24b;
+    }
     body {
       font-family: 'DM Sans', system-ui, sans-serif;
-      background: #0B1026; color: #E8ECF6;
-      min-height: 100vh; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; padding: 2rem; text-align: center;
-    }
-    .badge {
-      font-family: 'Space Grotesk', sans-serif; font-size: .75rem; letter-spacing: .2em;
-      text-transform: uppercase; color: #1E8FE0; border: 1px solid #1E8FE066;
-      border-radius: 999px; padding: .35rem 1rem; margin-bottom: 1.5rem;
-    }
-    h1 { font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.6rem, 4vw, 2.4rem); margin-bottom: .75rem; }
-    p { color: #9AA6C4; max-width: 34rem; line-height: 1.6; }
-    .frame {
-      width: 200px; height: 240px; margin-bottom: 1.5rem; border: 6px solid #C9A24B;
-      border-radius: 4px; background: linear-gradient(160deg, #141A38, #0E1330);
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 12px 30px rgba(0,0,0,.5); font-size: 4rem;
+      background: var(--bar); color: var(--ink);
+      min-height: 100vh; padding: 2.5rem clamp(1rem,4vw,3rem) 4rem;
     }
     a.back {
-      margin-top: 2rem; color: #1E8FE0; text-decoration: none; font-weight: 500;
-      border: 1px solid #1E8FE055; border-radius: 8px; padding: .6rem 1.2rem;
+      display: inline-flex; align-items: center; gap: .4rem; color: var(--accent);
+      text-decoration: none; font-weight: 600; font-family: 'Space Grotesk', sans-serif;
+      font-size: .85rem; margin-bottom: 2rem;
     }
-    a.back:hover, a.back:focus-visible { background: #1E8FE01a; outline: 2px solid #1E8FE0; outline-offset: 2px; }
+    .badge {
+      font-family: 'Space Grotesk', sans-serif; font-size: .72rem; letter-spacing: .2em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: .5rem;
+    }
+    h1 { font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.8rem,4vw,2.6rem); margin-bottom: .6rem; }
+    .sub { color: var(--ink-dim); max-width: 40rem; line-height: 1.55; margin-bottom: 2.25rem; }
+    .wall {
+      display: flex; flex-wrap: wrap; gap: 1.5rem; max-width: 1100px;
+    }
+    .frame {
+      appearance: none; cursor: pointer; text-align: left; color: inherit; font: inherit;
+      width: 190px; background: linear-gradient(160deg, var(--card), #10163000 140%), var(--card);
+      border: 1px solid var(--card-edge); border-radius: 10px; padding: .6rem .6rem .8rem;
+      display: flex; flex-direction: column; gap: .5rem; transition: transform .15s ease, border-color .15s ease;
+    }
+    .frame:hover { transform: translateY(-4px); border-color: var(--accent); }
+    .frame.is-xfinity { border-color: var(--gold); }
+    .photo {
+      width: 100%; aspect-ratio: 4/5; border-radius: 6px; overflow: hidden;
+      background: linear-gradient(160deg,#2b3358,#12162c); border: 3px solid #3a4372;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .placeholder { display: flex; flex-direction: column; align-items: center; gap: .4rem; color: #9aa6c4; }
+    .placeholder span {
+      width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #cfd6e6, #7c869e 70%);
+      display: flex; align-items: center; justify-content: center; color: #232c58; font-weight: 700; font-family: 'Space Grotesk', sans-serif;
+    }
+    .placeholder em { font-style: normal; font-size: .68rem; text-align: center; text-transform: uppercase; letter-spacing: .06em; }
+    .plate b { display: block; font-family: 'Space Grotesk', sans-serif; font-size: .92rem; }
+    .plate i { font-style: normal; color: var(--ink-dim); font-size: .75rem; }
+
+    .lb-scrim {
+      position: fixed; inset: 0; z-index: 50; background: rgba(4,7,18,.75); backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .lb-scrim.open { display: flex; }
+    .lb {
+      width: min(820px, 96vw); max-height: 92vh; overflow: auto;
+      background: linear-gradient(170deg, #161d40, #0d1230); border: 1px solid var(--card-edge);
+      border-radius: 16px; display: grid; grid-template-columns: 260px 1fr; position: relative;
+    }
+    @media (max-width: 640px) { .lb { grid-template-columns: 1fr; } }
+    .lb-media { background: #060919; display: flex; align-items: center; justify-content: center; min-height: 220px; }
+    .lb-media img { width: 100%; height: 100%; object-fit: cover; }
+    .lb-body { padding: 1.6rem 1.7rem; }
+    .lb-close {
+      position: absolute; top: .7rem; right: .7rem; width: 34px; height: 34px; border-radius: 8px;
+      border: 1px solid var(--card-edge); background: rgba(8,12,30,.6); color: var(--ink); font-size: 1.2rem; cursor: pointer;
+    }
+    .lb-kicker { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: .4rem; }
+    .lb-body h2 { font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem; margin-bottom: .2rem; }
+    .lb-role { color: var(--ink-dim); margin-bottom: 1rem; }
+    .lb-stats { display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; margin-bottom: 1rem; }
+    .lb-stats span { display: flex; flex-direction: column; }
+    .lb-stats b { font-family: 'Space Grotesk', sans-serif; font-size: 1.05rem; }
+    .lb-stats i { font-style: normal; font-size: .68rem; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .06em; }
+    .lb-writeup { color: #cfd6e6; line-height: 1.55; font-size: .92rem; margin-bottom: 1.1rem; white-space: pre-line; }
+    .lb-deck { color: var(--accent); text-decoration: none; font-weight: 600; font-size: .85rem; }
+    .lb-deck:hover { text-decoration: underline; }
+    .empty { color: var(--ink-dim); }
   </style>
 </head>
 <body>
-  <div class="frame" aria-hidden="true">⭐</div>
-  <div class="badge">Break Room Wall</div>
-  <h1>Employee of the Week</h1>
-  <p>The frame is hung and the wall is ready. This week's winner gets announced here — photo, name, and the numbers that earned it.</p>
-  <a class="back" href="../../index.html">&larr; Back to the Kitchen</a>
+  <a class="back" href="../../">&larr; Back to the Kitchen</a>
+  <div class="badge">Break Room</div>
+  <h1>Head Chef Wall</h1>
+  <p class="sub">Head Chef of the Week, pulled straight from the live Win the Weekend decks — Chicago and Big South. Tap a frame for the full write-up.</p>
+  <div class="wall" id="wall"><p class="empty">Loading the wall…</p></div>
+  <div class="lb-scrim" id="lb">
+    <div class="lb" role="dialog" aria-modal="true">
+      <button type="button" class="lb-close" id="lb-close" aria-label="Close">&times;</button>
+      <div class="lb-media" id="lb-media"></div>
+      <div class="lb-body" id="lb-body"></div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var DATA_URL = '../../headchefs/headchefs.json';
+      var PHOTO_BASE = '../../headchefs/';
+      var DECK_URLS = {
+        'chicago': 'https://blufoxmobile.github.io/Win-The-Weekend---Chicago/',
+        'big south': 'https://blufoxmobile.github.io/Win-The-Weekend---Big-South/'
+      };
+
+      function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+      function initials(name) {
+        var parts = String(name).trim().split(/\s+/).filter(Boolean);
+        if (!parts.length) return '?';
+        return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+      }
+      function regionShort(deck, title) {
+        var m = /—\s*(.+)$/.exec(title || '');
+        return m ? m[1].trim() : deck;
+      }
+
+      fetch(DATA_URL).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (data) {
+          var wall = document.getElementById('wall');
+          if (!data.headchefs || !data.headchefs.length) {
+            wall.innerHTML = '<p class="empty">No head chefs on file yet.</p>';
+            return;
+          }
+          wall.innerHTML = '';
+          data.headchefs.forEach(function (c) {
+            var region = regionShort(c.region_deck, c.slide_title);
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'frame' + (c.is_xfinity ? ' is-xfinity' : '');
+            btn.setAttribute('aria-label', 'Head Chef of the Week — ' + c.name + ', ' + region);
+            var media = (c.has_photo && c.photo_file)
+              ? '<img src="' + PHOTO_BASE + c.photo_file + '" alt="' + esc(c.name) + '" loading="lazy" />'
+              : '<div class="placeholder"><span>' + esc(initials(c.name)) + '</span><em>' + esc(region) + '</em></div>';
+            btn.innerHTML = '<div class="photo">' + media + '</div>' +
+              '<div class="plate"><b>' + esc(c.name) + '</b><i>' + esc(region) + '</i></div>';
+            btn.addEventListener('click', function () { openLightbox(c); });
+            wall.appendChild(btn);
+          });
+        })
+        .catch(function () {
+          document.getElementById('wall').innerHTML = '<p class="empty">Couldn\'t load the wall right now.</p>';
+        });
+
+      function openLightbox(c) {
+        var region = regionShort(c.region_deck, c.slide_title);
+        var deck = DECK_URLS[String(c.region_deck).toLowerCase()];
+        var media = document.getElementById('lb-media');
+        media.innerHTML = (c.has_photo && c.photo_file)
+          ? '<img src="' + PHOTO_BASE + c.photo_file + '" alt="' + esc(c.name) + '" />'
+          : '<div class="placeholder" style="padding:2rem"><span style="width:80px;height:80px;font-size:1.4rem">' + esc(initials(c.name)) + '</span></div>';
+        var stats = (c.stats || []).map(function (s) {
+          return '<span><b>' + esc(s.value) + '</b><i>' + esc(s.label) + '</i></span>';
+        }).join('');
+        var body = document.getElementById('lb-body');
+        body.innerHTML =
+          '<p class="lb-kicker">' + (c.is_xfinity ? '⭐ Xfinity Head Chef Of The Week' : 'Head Chef Of The Week') + ' &middot; ' + esc(region) + '</p>' +
+          '<h2>' + esc(c.name) + '</h2>' +
+          '<p class="lb-role">' + esc(c.store_role) + '</p>' +
+          (stats ? '<div class="lb-stats">' + stats + '</div>' : '') +
+          (c.writeup ? '<p class="lb-writeup">' + esc(c.writeup) + '</p>' : '') +
+          (deck ? '<a class="lb-deck" href="' + deck + '" target="_blank" rel="noopener">View the full Win the Weekend deck &rarr;</a>' : '');
+        document.getElementById('lb').classList.add('open');
+      }
+      document.getElementById('lb-close').addEventListener('click', close);
+      document.getElementById('lb').addEventListener('click', function (e) { if (e.target.id === 'lb') close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      function close() { document.getElementById('lb').classList.remove('open'); }
+    })();
+  </script>
 </body>
 </html>
