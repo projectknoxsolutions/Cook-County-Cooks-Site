@@ -37,9 +37,12 @@
  * ========================================================================== */
 
 import { initEngine, scrollToRoom, onRoomChange } from './engine.js';
-import { initOverlay, mountRoomScreens, openTool } from './overlay.js';
+import { initOverlay, openTool } from './overlay.js';
+import { mountRoomScreens } from './screens.js';
 import { initChefWall } from './chefwall.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES } from '../rooms.js';
+import { initLabels } from './labels.js';
+import { initFreezer } from './freezer.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -501,21 +504,23 @@ function buildHotspot(spot, data) {
     const host = el('div', {
       'data-screen': spot.slug,
       'data-screen-title': spot.label || (tool && tool.label) || '',
+      // screens.js reads these three; see the `mode` note at the top of rooms.js.
+      'data-screen-mode': spot.mode || null,
+      'data-screen-name': spot.name || null,
+      'data-screen-width': spot.width || null,
       'data-screen-quad': spot.quad ? JSON.stringify(spot.quad) : null,
-      // position:absolute is forced INLINE and is not optional. overlay.js
-      // injects `.ccc-screen { position: relative }` into a stylesheet appended
-      // after theme.css, so at equal specificity it beats theme.css's
-      // `.hotspots > * { position: absolute }`. A relative host offsets from its
-      // NORMAL FLOW position, which stacks the second screen in a room below the
-      // first — the Big South board rendered 172px under its bezel, hanging in
-      // mid-air over the banquettes. Inline wins over both sheets. Absolute is
-      // still a positioned ancestor, so mountScreen() is satisfied either way.
+      // position:absolute is forced INLINE and is not optional. A relative host
+      // offsets from its NORMAL FLOW position, which stacks the second screen in
+      // a room below the first — the Big South board rendered 172px under its
+      // bezel, hanging in mid-air over the banquettes. Inline wins over both
+      // sheets. Absolute is still a positioned ancestor, so mountScreen() is
+      // satisfied either way.
       style: (spot.quad
         ? FULL_BLEED
         // Axis-aligned screens are hit-tested through their own host, and
         // .hotspots is pointer-events:none, so the host has to opt back in.
-        // (Quad screens must NOT: overlay's .ccc-screen--quad rule makes the
-        // full-bleed reference box click-through on purpose.)
+        // (Quad screens must NOT: the full-bleed reference box stays
+        // click-through on purpose — only the warped plane is solid.)
         : boxVars(spot.x, spot.y, spot.w, spot.h) + ';pointer-events:auto'
       ) + ';position:absolute'
     });
@@ -555,6 +560,35 @@ function buildHotspot(spot, data) {
  * a tool with no hotspot — every one of the freezer's manager tools, the head
  * chef wall — is still one tap away here, and below 900px theme.css turns this
  * same list into the full-width drawer because hotspots are suppressed there.
+ *
+ * ── THE ONE EXCEPTION: THE WALK-IN WHILE IT IS SHUT ────────────────────────
+ * The freezer's brief is "I want to actually see a freezer door that is CLOSED …
+ * when someone types in the password it will OPEN the freezer door to this
+ * screen. I want to have all of the manager tools HERE ON THIS SCREEN." The
+ * tools arrive AFTER the door. Fourteen padlocked chips rendered up front
+ * stacked seven rows deep across the left half of the leaf — spoiling the
+ * reveal and burying the most cinematic frame on the site under its own table
+ * of contents.
+ *
+ * So while the gate is shut the rail carries ONE row, not fourteen: the same
+ * locked affordance the C³ menu and the footer index have always shown. This is
+ * not a new gating rule, it is the existing one applied consistently —
+ * renderList() in §5 and renderGroups() in §6 both already collapse the freezer
+ * to a single `[data-freezer-lock]` control off this same predicate and both
+ * re-render the full list through onFreezerUnlock(). The rail is the third
+ * surface and it now behaves like the other two; playUnlockBeat() is its
+ * re-render, and it is also the reveal.
+ *
+ * NOTHING BECOMES UNREACHABLE BY DOING THIS, and that is load-bearing:
+ *   · the door is not the only route in — this chip, the C³ menu's locked row
+ *     and the footer's button all open the same keypad, from any scroll
+ *     position, with the keyboard, and without ever seeing the door;
+ *   · the gate itself is untouched. overlay.js still evaluates canOpen/onRefused
+ *     inside openTool(), so a `#/tool/<slug>` deep link into a freezer tool on a
+ *     cold load still refuses and still routes through the keypad;
+ *   · the instant the predicate flips, all fourteen are listed here, in the C³
+ *     menu and in the footer — and the footer's are plain `<a href>`s, which is
+ *     the no-JS, no-cinema path.
  */
 function buildRail(roomId, index, data) {
   const meta = data.roomById.get(roomId) || { label: roomId, tagline: '' };
@@ -567,9 +601,12 @@ function buildRail(roomId, index, data) {
     class: 'rail-chips',
     // Room labels carry their own article ("The Pass"), so there is no "the"
     // here — with one it read "Tools in the The Pass".
-    'aria-label': `Tools in ${meta.label}`,
+    'aria-label': gated ? `${meta.label} — locked` : `Tools in ${meta.label}`,
+    // The hook playUnlockBeat() re-renders against. It is on the LIST, not on
+    // the chips: what is gated here is the list's existence, not each row.
+    'data-locked': gated ? '' : null,
     'data-room-chips': roomId
-  }, tools.map((tool, i) => buildChip(tool, gated, i)));
+  }, gated ? [buildLockChip(tools.length)] : tools.map((tool, i) => buildChip(tool, false, i)));
 
   return el('div', { class: 'rail' }, [
     // The ticket rail numbers the seven rooms 01..07; `index` counts the hero as
@@ -593,44 +630,70 @@ const PADLOCK_SVG =
   'fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 
 /**
- * One rail chip.
- *
- * A gated chip has to announce itself BEFORE it is pressed — a chip identical to
- * every other chip that then produces an unexpected modal is a worse affordance
- * than a visibly locked one. So it carries a padlock, a dimmed ground, an
- * accessible name that says "locked", and `aria-haspopup="dialog"` so assistive
- * tech warns that a dialog is coming rather than a page.
- *
- * `data-locked` is the hook theme.css can style properly; the inline opacity is
- * a stopgap until it does, and it doubles as the transition the unlock beat
- * below animates.
+ * One rail chip. `staged` starts it at opacity 0 with a per-chip delay, which is
+ * the only thing `i` is for: it is what turns the freezer's reveal into a ripple
+ * rather than a flash. Every other room passes false and gets a plain chip.
  */
-function buildChip(tool, gated, i) {
+function buildChip(tool, staged, i) {
   const chip = el('button', {
     type: 'button',
     class: 'chip',
     'data-tool': tool.slug,
-    'data-locked': gated ? '' : null,
-    'aria-haspopup': gated ? 'dialog' : null,
-    'aria-label': gated ? `${tool.label} — locked` : null,
-    // The per-chip delay is what turns the unlock into a beat, not a flash.
-    style: gated
-      ? `opacity:.72;transition:opacity 420ms var(--ease-out) ${i * 30}ms`
+    // Reveal state, only ever set by playUnlockBeat() as it inserts the chip.
+    style: staged
+      ? `opacity:0;transition:opacity 420ms var(--ease-out) ${i * 30}ms`
       : null
   });
-  if (gated) chip.insertAdjacentHTML('afterbegin', PADLOCK_SVG);
   chip.append(tool.label);
   return chip;
 }
 
 /**
- * The reward beat when the door opens.
+ * The freezer's locked row: the one control the rail shows while the door is
+ * shut. Same wording, same `[data-freezer-lock]` hook and same delegated
+ * handler as the C³ menu's locked row and the footer's button, so all three
+ * lead to the same keypad.
  *
- * The chips are mutated IN PLACE rather than re-rendered, and that is the whole
- * point: re-rendering swaps the elements out, so there is nothing to transition
- * and the freezer just blinks. This way the padlocks drop out and fourteen chips
- * come up to full strength in a short left-to-right ripple — the room visibly
- * opening, using nothing but opacity.
+ * It announces itself BEFORE it is pressed — a chip identical to every other
+ * chip that then produces an unexpected modal is a worse affordance than a
+ * visibly locked one. So it carries the padlock, says how many tools are behind
+ * it, and takes `aria-haspopup="dialog"` so assistive tech warns that a dialog
+ * is coming rather than a page.
+ */
+function buildLockChip(count) {
+  const chip = el('button', {
+    type: 'button',
+    class: 'chip',
+    'data-freezer-lock': '',
+    'data-locked': '',
+    'aria-haspopup': 'dialog',
+    'aria-label': `Enter freezer code — ${count} manager tools are locked`
+  });
+  chip.insertAdjacentHTML('afterbegin', PADLOCK_SVG);
+  chip.append('Enter freezer code');
+  return chip;
+}
+
+/**
+ * The reward beat when the door opens — the rail's half of the reveal.
+ *
+ * "When someone types in the password, it will open the freezer door TO THIS
+ * SCREEN. I want to have all of the manager tools HERE ON THIS SCREEN." So this
+ * is the moment the fourteen actually arrive: the locked row is swapped for the
+ * real list, which is then brought up to full strength in a short left-to-right
+ * ripple — the room visibly filling, using nothing but opacity.
+ *
+ * WHY THE INSERT AND THE RIPPLE ARE THE SAME FUNCTION. A re-render on its own
+ * blinks: the elements are new, so there is nothing for a transition to run
+ * from. The chips are therefore inserted already carrying `opacity: 0` and
+ * their staggered `transition`, and raised on the next frame, which is the same
+ * beat the previous version got by mutating chips that were already on screen.
+ * There is exactly one of these; freezer.js takes it as `onRevealed` and fires
+ * it at the end of the door animation (or immediately when there is no door),
+ * and it is idempotent, so a second unlock event is a no-op.
+ *
+ * Under reduced motion the list is simply there — no fade, no stagger — which
+ * matches the door, which under that query is simply open.
  *
  * The keypad hotspot goes at the same time. It was the freezer's only hotspot
  * and, once unlocked, `if (isFreezerUnlocked()) return;` left it a dead object
@@ -641,14 +704,27 @@ function buildChip(tool, gated, i) {
  */
 function playUnlockBeat() {
   const rail = document.querySelector('[data-room-chips="freezer"]');
-  if (rail) {
-    for (const chip of rail.querySelectorAll('.chip[data-locked]')) {
-      chip.style.opacity = '1';
-      chip.removeAttribute('data-locked');
-      chip.removeAttribute('aria-haspopup');
-      chip.removeAttribute('aria-label');
-      const lock = chip.querySelector('svg');
-      if (lock) lock.remove();
+  if (rail && rail.hasAttribute('data-locked')) {
+    const meta = FREEZER_RAIL_META;
+    const tools = (meta && meta.tools) || [];
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    fill(rail, tools.map((tool, i) => buildChip(tool, !reduce, i)));
+    rail.removeAttribute('data-locked');
+    rail.setAttribute('aria-label', `Tools in ${(meta && meta.label) || 'Walk-In Freezer'}`);
+
+    if (!reduce) {
+      // ONE DELIBERATE REFLOW, and it must be a reflow rather than a pair of
+      // rAFs. A freshly inserted element has no previous computed style, so a
+      // transition only runs if the browser resolves style once at opacity 0
+      // before it is raised. rAF would do that too — but rAF does not fire in a
+      // background tab, and this beat can be triggered from the footer index
+      // with the room off screen, which would leave fourteen tools inserted at
+      // opacity 0 and never raised. Reading a layout property forces the flush
+      // synchronously and cannot be starved. This is not the hot path: it
+      // happens once, on unlock, outside the engine's frame.
+      void rail.offsetWidth;
+      for (const chip of rail.children) chip.style.opacity = '1';
     }
   }
 
@@ -657,6 +733,9 @@ function playUnlockBeat() {
 
   announce('Cold storage open. Manager tools are unlocked.');
 }
+
+/** What playUnlockBeat() needs to render the fourteen; set once, in boot(). */
+let FREEZER_RAIL_META = null;
 
 /** One polite live region for the whole page, created on first use. */
 let liveRegion = null;
@@ -1047,8 +1126,25 @@ async function boot() {
   }
   const data = indexTools(raw.tools);
 
+  // playUnlockBeat() is handed to freezer.js as a bare callback and runs long
+  // after boot() has returned, so the one thing it cannot do is close over a
+  // local. It gets the freezer's tools and label here instead.
+  FREEZER_RAIL_META = {
+    tools: data.byRoom.get('freezer') || [],
+    label: (data.roomById.get('freezer') || {}).label || 'Walk-In Freezer'
+  };
+
   /* ---- 1. markup ---------------------------------------------------------- */
   buildKitchen(data);
+  // The eight blank sheets in the photographs — the prep station's four recipe
+  // cards, the back office's two clipboards and its printer output, the card on
+  // the pass — get the name of the tool they open printed onto them, on their
+  // own plane and in their own light. It appends one aria-hidden child to each
+  // EXISTING hotspot button: no new elements over the objects, no change to the
+  // click target, the reticle, the focus ring or the accessible name. It reads
+  // no layout and starts no animation, so it can run here, before the engine
+  // measures, and it changes no document height.
+  initLabels();
   buildTicketRail(data);
   buildC3Menu(data);
   buildFooter(data);
@@ -1064,6 +1160,25 @@ async function boot() {
     openKeypad();
   });
 
+  // The walk-in door. freezer.js replaces what the LOCKED freezer looks like:
+  // a closed insulated door with the keypad on the wall beside it, which swings
+  // open on a correct code. It owns none of the gate above — it reads
+  // isFreezerUnlocked() and never writes it — and if its plate is missing or
+  // the module throws, the freezer falls straight back to the v3 behaviour.
+  //
+  // playUnlockBeat is handed over as `onRevealed` rather than being subscribed
+  // to the unlock directly, so the fourteen chips ripple as the door finishes
+  // opening instead of while it is still shut. When there is no door (no art,
+  // reduced motion, the room off screen) freezer.js calls it immediately, which
+  // is exactly the old timing.
+  const freezer = initFreezer({
+    room: $('#room-freezer'),
+    geometry: FREEZER_DOOR,
+    isUnlocked: isFreezerUnlocked,
+    onUnlock: onFreezerUnlock,
+    onRevealed: playUnlockBeat
+  });
+
   if (isFreezerUnlocked()) {
     // Already open from earlier in this session. The chips, the footer and the
     // C³ list all rendered unlocked because they read live state at render time,
@@ -1072,8 +1187,6 @@ async function boot() {
     // would be a lie to a screen reader.
     const keypad = $('#room-freezer .hotspot[data-freezer-lock]');
     if (keypad) keypad.remove();
-  } else {
-    onFreezerUnlock(playUnlockBeat);
   }
 
   /* ---- 3. the tool viewer ------------------------------------------------- */
@@ -1095,16 +1208,23 @@ async function boot() {
     // first frame instead of after a network round-trip.
     tools: data.tools,
     canOpen: (slug) => !gatedSlugs.has(slug) || isFreezerUnlocked(),
-    onRefused: (slug, { retry }) => { openKeypad().then((ok) => { if (ok) retry(); }); }
+    // The retry waits for the door. Without whenOpen() a locked deep link
+    // unlocks, the tool opens over the top on the next tick, and the set piece
+    // the client paid for plays out behind a full-screen overlay. whenOpen()
+    // resolves immediately when there is no door to wait for.
+    onRefused: (slug, { retry }) => {
+      openKeypad().then((ok) => { if (ok) freezer.whenOpen().then(retry); });
+    }
   });
 
   /* ---- 4. the cinema ------------------------------------------------------ */
   const engine = initEngine();
 
-  /* ---- 5. the live screens ------------------------------------------------ */
-  // The dining boards and the host stand's Daily Sales Report become real,
-  // running iframes inside the photographs.
-  mountRoomScreens();
+  /* ---- 5. the screens ----------------------------------------------------- */
+  // Every TV, monitor and tablet in the building. screens.js picks a renderer
+  // per `data-screen-mode` (see rooms.js) and hands the tools array straight in
+  // so a screen never waits on a network round-trip for its own label.
+  mountRoomScreens(document, { tools: data.tools });
 
   /* ---- 6. the head chef wall ---------------------------------------------- */
   const breakroom = $('#room-breakroom');
@@ -1136,7 +1256,7 @@ async function boot() {
   }
 
   // Expose a tiny handle for debugging in a store — never for other modules.
-  window.CCC = Object.assign(window.CCC || {}, { engine, data, openTool });
+  window.CCC = Object.assign(window.CCC || {}, { engine, data, openTool, freezer });
 }
 
 /* The module is loaded with type="module", which is deferred by definition, so

@@ -1,19 +1,17 @@
 /* =============================================================================
  * Cook County Cooks — v3 "Cinema"
- * assets/overlay.js  ·  Agent B  ·  tool viewer + live room screens
+ * assets/overlay.js  ·  Agent B  ·  the full-screen tool viewer
  * -----------------------------------------------------------------------------
- * Two systems live in this file because they are two halves of one idea:
- * a tool should never feel like "a github.io link". It should feel like a
- * thing inside the restaurant that you walked up to and switched on.
+ * A tool should never feel like "a github.io link". It should feel like a thing
+ * inside the restaurant that you walked up to and switched on.
  *
- *   1. initOverlay()   — the full-screen tool viewer. Clicking any
- *                        [data-tool="<slug>"] opens that tool in a framed,
- *                        chrome-wrapped, deep-linkable, modal viewer.
+ *   initOverlay()  — the full-screen tool viewer. Clicking any
+ *                    [data-tool="<slug>"] opens that tool in a framed,
+ *                    chrome-wrapped, deep-linkable, modal viewer.
  *
- *   2. mountScreen()   — mounts a *live*, scaled-down iframe onto a blank
- *                        black-glass TV rectangle in a room plate photo, so
- *                        the TVs in the photograph appear to be playing the
- *                        real dashboards. Clicking a screen opens system #1.
+ * The room screens used to live here too. They are assets/screens.js now; the
+ * only thing that connects the two is `data-tool` on a screen's hit target,
+ * which the delegated handler below picks up like any other trigger.
  *
  * Contract notes (see SPEC.md):
  *   · Plain ES module. No dependencies. No build step.
@@ -23,9 +21,7 @@
  *   · prefers-reduced-motion is honoured for every animation here.
  *
  * Exports:
- *   initOverlay(options)                 -> { open, close, isOpen, registry }
- *   mountScreen({ host, slug, url, title, width })  -> { destroy, refresh }
- *   mountRoomScreens(root)               -> Array<screen handle>
+ *   initOverlay(options)  -> { open, close, isOpen, setGate, registry, ready }
  *   openTool(slug), closeTool()
  * ========================================================================== */
 
@@ -35,12 +31,6 @@
 
 /** How long we wait for a framed tool before we assume it refused to frame. */
 const FRAME_TIMEOUT_MS = 6000;
-
-/** Hard ceiling on simultaneously mounted screen iframes. iPads are real. */
-const MAX_LIVE_SCREENS = 4;
-
-/** Virtual desktop width the screen iframes are rendered at before scaling. */
-const SCREEN_RENDER_WIDTH = 1280;
 
 /** Deep-link shape: #/tool/<slug> */
 const HASH_RE = /^#\/tool\/([A-Za-z0-9_-]+)\/?$/;
@@ -151,8 +141,6 @@ const state = {
   locked: false,
   /** frame watchdog */
   frameTimer: 0,
-  /** all mounted/monitored screens */
-  screens: new Set(),
   /** optional access gate — see initOverlay({ canOpen, onRefused }) */
   canOpen: null,
   onRefused: null,
@@ -292,8 +280,7 @@ body.ccc-locked {
 }
 .ccc-ov__btn:hover { background: rgba(255,255,255,.11); border-color: rgba(255,255,255,.24); }
 .ccc-ov__btn:active { transform: translateY(1px); }
-.ccc-ov__btn:focus-visible,
-.ccc-screen__hit:focus-visible {
+.ccc-ov__btn:focus-visible {
   outline: 2px solid var(--ccc-focus, #e8b45a);
   outline-offset: 3px;
 }
@@ -380,130 +367,9 @@ body.ccc-locked {
 }
 .ccc-ov__fb-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
 
-/* ==========================================================================
-   LIVE ROOM SCREENS
-   The host element is positioned/sized by the room layout (Agent A / theme).
-   We only ever paint *inside* it.
-   ========================================================================== */
-.ccc-screen {
-  position: relative;              /* defensive: host should already be positioned */
-  overflow: hidden;
-  background: #05060a;             /* black glass, the resting state */
-  isolation: isolate;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* The screen PLANE. Every visible layer lives inside it, so when a quad is
-   supplied the single matrix3d on this wrapper carries the glass, the
-   reflection, the bezel AND the hit target onto the wall plane together —
-   the reflection stays welded to the screen instead of sliding off it. */
-.ccc-screen__plane {
-  position: absolute; inset: 0;
-  transform-origin: 0 0;           /* the homography is solved for this origin */
-  border-radius: inherit;
-}
-
-/* Perspective mode: the host becomes a full-bleed, click-through reference
-   box over the plate, and only the transformed plane is solid and clickable. */
-.ccc-screen--quad {
-  overflow: visible;
-  background: transparent;
-  pointer-events: none;
-}
-.ccc-screen--quad .ccc-screen__plane {
-  inset: auto;
-  top: 0; left: 0;                 /* width/height are written in px by JS */
-  background: #05060a;
-  pointer-events: auto;
-  overflow: hidden;
-  -webkit-backface-visibility: hidden;
-          backface-visibility: hidden;
-}
-
-/* The viewport that clips the oversized, scaled-down iframe. */
-.ccc-screen__glass {
-  position: absolute; inset: 0;
-  overflow: hidden;
-  background:
-    linear-gradient(160deg, #0b0d12 0%, #05060a 55%, #090a0f 100%);
-  transform: translateZ(0);        /* own layer; keeps the scale cheap */
-}
-.ccc-screen__frame {
-  position: absolute; top: 0; left: 0;
-  border: 0; display: block;
-  transform-origin: top left;
-  background: #fff;
-  opacity: 0;
-  transition: opacity .7s ease;
-  pointer-events: none;            /* the whole screen is one big button */
-}
-.ccc-screen.is-live .ccc-screen__frame { opacity: 1; }
-
-/* Ambient brightness drift — a powered-on panel is never perfectly steady. */
-.ccc-screen.is-live .ccc-screen__glass {
-  animation: ccc-ambient 19s ease-in-out infinite;
-}
-@keyframes ccc-ambient {
-  0%, 100% { filter: brightness(.96) saturate(.98); }
-  37%      { filter: brightness(1.03) saturate(1.02); }
-  68%      { filter: brightness(.99) saturate(1); }
-}
-
-/* Faint glass reflection: a soft diagonal wipe + a cool top sheen. */
-.ccc-screen__sheen {
-  position: absolute; inset: 0; pointer-events: none; z-index: 2;
-  background:
-    linear-gradient(196deg, rgba(255,255,255,.13) 0%, rgba(255,255,255,.045) 18%, rgba(255,255,255,0) 42%),
-    linear-gradient(12deg, rgba(150,190,255,.07) 0%, rgba(255,255,255,0) 46%);
-  mix-blend-mode: screen;
-  opacity: .9;
-}
-/* A very slow travelling highlight, as if the room lights breathe. */
-.ccc-screen__sheen::after {
-  content: ""; position: absolute; inset: -30%;
-  background: linear-gradient(74deg, transparent 40%, rgba(255,255,255,.07) 50%, transparent 60%);
-  transform: translate3d(-18%, 0, 0);
-  animation: ccc-sheen 26s ease-in-out infinite alternate;
-}
-@keyframes ccc-sheen { to { transform: translate3d(18%, 0, 0); } }
-
-/* Bezel: inner shadow + a hairline edge so it sits *in* the photo. */
-.ccc-screen__bezel {
-  position: absolute; inset: 0; pointer-events: none; z-index: 3;
-  border-radius: inherit;
-  box-shadow:
-    inset 0 0 0 1px rgba(0,0,0,.55),
-    inset 0 0 14px 4px rgba(0,0,0,.55),
-    inset 0 1px 0 rgba(255,255,255,.06);
-}
-/* Scanline/pixel grain, extremely faint — kills the "screenshot on a wall" look. */
-.ccc-screen__bezel::before {
-  content: ""; position: absolute; inset: 0;
-  background: repeating-linear-gradient(0deg, rgba(0,0,0,.12) 0 1px, transparent 1px 3px);
-  opacity: .28;
-}
-
-/* The real, focusable control that covers the whole screen. */
-.ccc-screen__hit {
-  position: absolute; inset: 0; z-index: 4;
-  -webkit-appearance: none; appearance: none;
-  border: 0; padding: 0; margin: 0;
-  background: transparent; color: inherit;
-  cursor: pointer;
-  border-radius: inherit;
-  transition: box-shadow .25s ease, background-color .25s ease;
-}
-.ccc-screen__hit:hover {
-  background: rgba(255,255,255,.05);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.22), 0 0 34px -6px rgba(180,210,255,.4);
-}
-
-/* Reduced motion: still a lit screen, just a still one. */
 @media (prefers-reduced-motion: reduce) {
-  .ccc-ov, .ccc-ov__panel, .ccc-ov__frame, .ccc-screen__frame { transition: none; }
-  .ccc-ov__skel::after,
-  .ccc-screen.is-live .ccc-screen__glass,
-  .ccc-screen__sheen::after { animation: none; }
+  .ccc-ov, .ccc-ov__panel, .ccc-ov__frame { transition: none; }
+  .ccc-ov__skel::after { animation: none; }
   .ccc-ov__panel { transform: none; }
 }
 `;
@@ -1219,7 +1085,6 @@ export function initOverlay(options = {}) {
       for (const tool of list) if (tool && tool.slug) state.registry.set(tool.slug, tool);
       markReady();
       if (deepLink) syncFromLocation();          // deep link opens straight in
-      refreshScreenLabels();                     // screens waiting on titles
       return state.registry;
     })
     .catch((err) => {
@@ -1243,549 +1108,15 @@ export function initOverlay(options = {}) {
 }
 
 /* =============================================================================
- * 11. LIVE ROOM SCREENS
+ * 11. THE SCREENS MOVED OUT
+ * -----------------------------------------------------------------------------
+ * mountScreen() / mountRoomScreens() used to live here, and the v3 header above
+ * still describes them. They are now assets/screens.js, which renders four
+ * different kinds of surface (title card, promo image, live data board, real
+ * iframe) instead of the one kind this file knew how to make.
  *
- * The room plates are photographs with genuinely blank (black glass) TVs in
- * them. A host element has already been positioned and sized over each blank
- * rectangle by the room layout. We drop a real, live, scaled-down iframe into
- * that box.
- *
- * The trick that makes this look right: render the iframe at a true desktop
- * width (1280px) and CSS-scale it down to fit. Sizing the iframe to the tiny
- * host box instead would trip the dashboard's mobile breakpoints and you'd get
- * a cramped single-column phone layout on a wall-mounted TV — instantly fake.
+ * The two modules still meet in exactly one place: every screen's hit target
+ * carries `data-tool`, so onDocumentClick() below opens the tool. That means the
+ * freezer gate, the deep-link router and the focus-return all keep working with
+ * no knowledge of screens at all. Do not re-add a screen API here.
  * ========================================================================== */
-
-/** The three screens in this build, by slug (see data/tools.json). */
-const SCREEN_SLUGS = ['wtw-chicago', 'wtw-big-south', 'daily-sales'];
-
-/* -----------------------------------------------------------------------------
- * 11a. Perspective maths — fitting a flat rectangle onto a photographed wall
- *
- * The TVs in the plates are shot at an angle. An axis-aligned rectangle laid
- * over one of them visibly floats in front of the wall instead of sitting in
- * it. The fix is a 2D projective transform (a homography): the unique 8-DOF
- * map that sends our flat W x H iframe rectangle onto the four measured screen
- * corners in the photograph.
- *
- * Solve, then hand it to the compositor as a CSS matrix3d — the browser does
- * the per-pixel warp on the GPU, and hit-testing follows the transform, so the
- * button inside the plane stays clickable right up to a slanted corner.
- * -------------------------------------------------------------------------- */
-
-/**
- * Solve A x = b by Gaussian elimination with partial pivoting.
- * Returns null for a singular / near-singular system rather than NaNs — a NaN
- * inside a transform blanks the element, which is a far worse failure than
- * quietly falling back to the axis-aligned box.
- *
- * @param {number[][]} A  n x n, mutated in place
- * @param {number[]}   b  length n, mutated in place
- * @returns {number[]|null}
- */
-function solveLinearSystem(A, b) {
-  const n = b.length;
-
-  // Pivot tolerance has to be relative: the matrix mixes pixel coordinates
-  // (~1e3) with products of them (~1e6), so a fixed epsilon is meaningless.
-  let magnitude = 0;
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    const v = Math.abs(A[r][c]);
-    if (v > magnitude) magnitude = v;
-  }
-  const tol = 1e-12 * (magnitude || 1);
-
-  for (let col = 0; col < n; col++) {
-    // --- partial pivoting: swap in the largest available pivot -------------
-    let pivot = col;
-    for (let r = col + 1; r < n; r++) {
-      if (Math.abs(A[r][col]) > Math.abs(A[pivot][col])) pivot = r;
-    }
-    if (!(Math.abs(A[pivot][col]) > tol)) return null;   // singular
-    if (pivot !== col) {
-      const rowTmp = A[pivot]; A[pivot] = A[col]; A[col] = rowTmp;
-      const bTmp = b[pivot];   b[pivot] = b[col];  b[col] = bTmp;
-    }
-    // --- eliminate below ----------------------------------------------------
-    const p = A[col][col];
-    for (let r = col + 1; r < n; r++) {
-      const f = A[r][col] / p;
-      if (!f) continue;
-      for (let c = col; c < n; c++) A[r][c] -= f * A[col][c];
-      b[r] -= f * b[col];
-    }
-  }
-
-  // --- back substitution ----------------------------------------------------
-  const x = new Array(n).fill(0);
-  for (let r = n - 1; r >= 0; r--) {
-    let sum = b[r];
-    for (let c = r + 1; c < n; c++) sum -= A[r][c] * x[c];
-    x[r] = sum / A[r][r];
-    if (!Number.isFinite(x[r])) return null;
-  }
-  return x;
-}
-
-/**
- * The 8-DOF projective solve.
- *
- * For each correspondence (x,y) -> (u,v), with h8 pinned to 1:
- *     u = (h0x + h1y + h2) / (h6x + h7y + 1)
- *     v = (h3x + h4y + h5) / (h6x + h7y + 1)
- * Cross-multiplied, that is two linear rows per point:
- *     h0x + h1y + h2                   - h6xu - h7yu = u
- *                     h3x + h4y + h5   - h6xv - h7yv = v
- * Four points give the 8x8 system.
- *
- * @param {Array<[number,number]>} src four source points
- * @param {Array<[number,number]>} dst four destination points
- * @returns {number[]|null} h0..h8 (h8 === 1), or null if degenerate
- */
-function computeHomography(src, dst) {
-  const A = [];
-  const b = [];
-  for (let i = 0; i < 4; i++) {
-    const [x, y] = src[i];
-    const [u, v] = dst[i];
-    A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]); b.push(u);
-    A.push([0, 0, 0, x, y, 1, -x * v, -y * v]); b.push(v);
-  }
-  const h = solveLinearSystem(A, b);
-  if (!h || h.some((n) => !Number.isFinite(n))) return null;
-  h.push(1);                                   // h8
-  return h;
-}
-
-/**
- * Lay a 3x3 homography into a CSS matrix3d.
- *
- * matrix3d is column-major 4x4. Our transform lives entirely in z=0, so the
- * third row/column is the identity and h6/h7 become the perspective terms in
- * the w row:  [h0,h3,0,h6,  h1,h4,0,h7,  0,0,1,0,  h2,h5,0,h8]
- *
- * Values are printed at 10 significant figures, NOT fixed decimals: h6/h7 are
- * on the order of 1e-4 and toFixed(6) would round the perspective away.
- */
-function homographyToMatrix3d(h) {
-  const m = [h[0], h[3], 0, h[6],
-             h[1], h[4], 0, h[7],
-             0,    0,    1, 0,
-             h[2], h[5], 0, h[8]];
-  if (m.some((n) => !Number.isFinite(n))) return null;
-  return `matrix3d(${m.map((n) => Number(n.toPrecision(10))).join(',')})`;
-}
-
-/** Is this a usable quad: four finite points, convex, and non-degenerate area? */
-function validQuad(quad) {
-  if (!Array.isArray(quad) || quad.length !== 4) return false;
-  return quad.every((pt) =>
-    Array.isArray(pt) && pt.length >= 2 &&
-    Number.isFinite(Number(pt[0])) && Number.isFinite(Number(pt[1])));
-}
-
-/** Convexity + area check on the resolved pixel quad (catches collinear input). */
-function isSaneQuad(pts) {
-  let area = 0;
-  let sign = 0;
-  for (let i = 0; i < 4; i++) {
-    const a = pts[i], b = pts[(i + 1) % 4], c = pts[(i + 2) % 4];
-    area += a[0] * b[1] - b[0] * a[1];
-    const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
-    if (Math.abs(cross) < 1e-6) return false;             // three points collinear
-    const s = Math.sign(cross);
-    if (sign === 0) sign = s;
-    else if (s !== sign) return false;                    // bow-tie / concave
-  }
-  return Math.abs(area / 2) > 16;                         // at least 16 px^2
-}
-
-const dist2d = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
-
-/**
- * Parse `data-screen-quad` — eight numbers, TL,TR,BR,BL, in % of the plate:
- *   data-screen-quad="47,11.5, 84,5.6, 84,58.6, 47,57"
- * Also accepts a JSON array of pairs. Returns null when absent or malformed.
- */
-function parseQuadAttr(raw) {
-  if (!raw) return null;
-  const text = String(raw).trim();
-  if (text.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(text);
-      return validQuad(parsed) ? parsed : null;
-    } catch { return null; }
-  }
-  const nums = text.split(/[\s,]+/).filter(Boolean).map(Number);
-  if (nums.length !== 8 || nums.some((n) => !Number.isFinite(n))) return null;
-  return [[nums[0], nums[1]], [nums[2], nums[3]], [nums[4], nums[5]], [nums[6], nums[7]]];
-}
-
-
-
-/**
- * Mount a live screen onto a blank TV rectangle.
- *
- * Two geometries are supported:
- *
- *  · AXIS-ALIGNED (default) — `host` is positioned and sized directly over the
- *    screen rectangle. Right for near-frontal TVs, e.g. the two dining-room
- *    boards (Chicago at x 31.2 y 25.9 w 17.7 h 20.6, Big South at
- *    x 52.5 y 27.8 w 15.3 h 16.7).
- *
- *  · PERSPECTIVE — pass `quad`, four corners TL/TR/BR/BL in PERCENT of the
- *    plate, and the screen is warped onto the wall plane with a homography.
- *    Right for angled TVs, e.g. the host stand's Daily Sales Report at
- *    [[47.0,11.5],[84.0,5.6],[84.0,58.6],[47.0,57.0]].
- *    In this mode `host` is used only as the PERCENT REFERENCE BOX, so it
- *    should be a full-bleed layer over the plate (it is made click-through;
- *    only the warped plane is solid). Pass `quadRef` to measure the percentages
- *    against a different element instead.
- *
- * @param {object}  cfg
- * @param {Element} cfg.host        positioned element (screen box, or plate box with `quad`)
- * @param {string}  cfg.slug        tool slug (drives the click-through)
- * @param {Array<[number,number]>} [cfg.quad]  TL,TR,BR,BL in % of the reference box
- * @param {Element} [cfg.quadRef]   element the % are measured against (default: host)
- * @param {string}  [cfg.url]       defaults to the tool's url from tools.json
- * @param {string}  [cfg.title]     defaults to the tool's label
- * @param {number}  [cfg.width]     virtual render width, default 1280
- * @returns {{destroy:Function, refresh:Function, host:Element, slug:string}}
- */
-export function mountScreen({
-  host, slug, url, title, quad = null, quadRef = null, width = SCREEN_RENDER_WIDTH
-} = {}) {
-  if (!host || !host.nodeType) {
-    console.warn('[overlay] mountScreen: no host element');
-    return { destroy: noop, refresh: noop, host: null, slug };
-  }
-  injectStyles();
-
-  // --- layers ---------------------------------------------------------------
-  host.classList.add('ccc-screen');
-  if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-
-  const glass = el('div', { class: 'ccc-screen__glass' });
-  const sheen = el('div', { class: 'ccc-screen__sheen', 'aria-hidden': 'true' });
-  const bezel = el('div', { class: 'ccc-screen__bezel', 'aria-hidden': 'true' });
-
-  // A real button, with a real accessible name. The decorative iframe below
-  // is hidden from assistive tech entirely — this is the only thing AT sees.
-  const label = el('span', { class: 'ccc-sr' });
-  const hit = el('button', { class: 'ccc-screen__hit', type: 'button' }, [label]);
-  hit.setAttribute('data-tool', slug);           // delegated handler picks it up
-
-  // Everything visible goes inside ONE wrapper. In perspective mode that
-  // wrapper carries the matrix3d, so glass, reflection, bezel and hit target
-  // are warped together and stay locked to the screen plane. The hit button
-  // lives inside it too, which means the browser's own hit-testing follows the
-  // transform — a click on a slanted corner lands correctly, no clip-path
-  // bookkeeping required.
-  const plane = el('div', { class: 'ccc-screen__plane' }, [glass, sheen, bezel, hit]);
-  host.append(plane);
-
-  const rec = {
-    host, slug, glass, hit, label, plane,
-    quad: validQuad(quad) ? quad.map((pt) => [Number(pt[0]), Number(pt[1])]) : null,
-    quadRef: quadRef && quadRef.nodeType ? quadRef : null,
-    quadApplied: false,
-    quadWarned: false,
-    planeW: 0,
-    planeH: 0,
-    url: url || null,
-    title: title || null,
-    width,
-    frame: null,
-    mounted: false,
-    wantsMount: false,
-    destroyed: false,
-    resizeObs: null,
-    io: null
-  };
-  if (quad && !rec.quad) console.warn(`[overlay] screen "${slug}": malformed quad, using the host box`);
-  state.screens.add(rec);
-  applyGeometry(rec);                            // sizes the plane before any frame lands
-
-  // Resolve url/title from the registry when it lands (may already be there).
-  applyScreenMeta(rec);
-  if (!state.ready) whenReady().then(() => applyScreenMeta(rec));
-
-  // --- lazy mount gate -------------------------------------------------------
-  // Only bring a screen to life when it is roughly within one-and-a-half
-  // viewports. Anything further away is not worth a live iframe on an iPad.
-  if ('IntersectionObserver' in window) {
-    rec.io = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        rec.wantsMount = entry.isIntersecting;
-      }
-      reconcileScreens();
-    }, { root: null, rootMargin: '150% 0px 150% 0px', threshold: 0 });
-    // Observe the PLANE, not the host: with a quad the host is a full-bleed
-    // plate-sized box, so observing it would report the whole room.
-    rec.io.observe(plane);
-  } else {
-    rec.wantsMount = true;
-    reconcileScreens();
-  }
-
-  // Keep the scale honest through resizes / orientation changes.
-  // The host is the size source (the quad is in % of it), so resize-watch that.
-  if ('ResizeObserver' in window) {
-    rec.resizeObs = new ResizeObserver(() => applyGeometry(rec));
-    rec.resizeObs.observe(rec.quadRef || host);
-    if ((rec.quadRef || host) !== host) rec.resizeObs.observe(host);
-  }
-
-  return {
-    host, slug,
-    refresh: () => applyGeometry(rec),
-    destroy() {
-      if (rec.destroyed) return;
-      rec.destroyed = true;
-      unmountScreen(rec);
-      if (rec.io) rec.io.disconnect();
-      if (rec.resizeObs) rec.resizeObs.disconnect();
-      state.screens.delete(rec);
-      plane.remove();
-      host.classList.remove('ccc-screen', 'ccc-screen--quad', 'is-live');
-    }
-  };
-}
-
-/** Pull url/title off the registry once it exists. */
-function applyScreenMeta(rec) {
-  const tool = getTool(rec.slug);
-  if (tool) {
-    rec.url = rec.url || tool.url;
-    rec.title = rec.title || tool.label;
-  }
-  const name = rec.title || rec.slug;
-  rec.label.textContent = `Open ${name}`;
-  rec.hit.setAttribute('aria-label', `Open ${name}`);
-  if (rec.mounted && rec.frame && !rec.frame.src && rec.url) rec.frame.src = rec.url;
-}
-
-function refreshScreenLabels() {
-  for (const rec of state.screens) applyScreenMeta(rec);
-}
-
-/**
- * Decide which screens are live right now.
- * Never more than MAX_LIVE_SCREENS iframes exist at once; when the budget is
- * tight, the screens nearest the viewport win.
- */
-function reconcileScreens() {
-  const all = Array.from(state.screens).filter((r) => !r.destroyed);
-
-  // 1. Retire anything that has scrolled away.
-  for (const rec of all) if (rec.mounted && !rec.wantsMount) unmountScreen(rec);
-
-  // 2. Rank the candidates by distance from the viewport's centre.
-  //    (A layout read, yes — but only in an IntersectionObserver callback,
-  //    never inside the engine's rAF loop. SPEC rule respected.)
-  const mid = window.innerHeight / 2;
-  const dist = (rec) => {
-    // The plane's rect is the warped bounding box in perspective mode, and
-    // exactly the host box otherwise — right answer either way.
-    const r = (rec.plane || rec.host).getBoundingClientRect();
-    return Math.abs((r.top + r.height / 2) - mid);
-  };
-
-  let live = all.filter((r) => r.mounted);
-  const waiting = all.filter((r) => r.wantsMount && !r.mounted)
-    .map((r) => ({ rec: r, d: dist(r) }))
-    .sort((a, b) => a.d - b.d);
-
-  for (const cand of waiting) {
-    if (live.length >= MAX_LIVE_SCREENS) {
-      // Evict the furthest live screen, but only if it's genuinely further
-      // away than the newcomer — otherwise thrashing.
-      let worst = null, worstD = -1;
-      for (const rec of live) { const d = dist(rec); if (d > worstD) { worstD = d; worst = rec; } }
-      if (!worst || worstD <= cand.d) break;
-      unmountScreen(worst);
-      live = live.filter((r) => r !== worst);
-    }
-    mountFrame(cand.rec);
-    live.push(cand.rec);
-  }
-}
-
-/** Create the live iframe for a screen. */
-function mountFrame(rec) {
-  if (rec.mounted || rec.destroyed) return;
-
-  const frame = el('iframe', {
-    class: 'ccc-screen__frame',
-    // Decorative. It is a picture of a TV, not content — AT must not see it.
-    'aria-hidden': 'true',
-    tabindex: '-1',
-    loading: 'lazy',
-    scrolling: 'no',
-    title: '',
-    referrerpolicy: 'no-referrer-when-downgrade'
-  });
-  frame.setAttribute('role', 'presentation');
-
-  rec.frame = frame;
-  rec.mounted = true;
-  rec.glass.append(frame);
-  applyGeometry(rec);
-
-  frame.addEventListener('load', () => {
-    if (rec.destroyed) return;
-    // Fade the panel up as if it just woke from standby.
-    rec.host.classList.add('is-live');
-    applyGeometry(rec);
-  }, { once: true });
-
-  if (rec.url) frame.src = rec.url;              // else applyScreenMeta sets it
-}
-
-function unmountScreen(rec) {
-  if (!rec.mounted) return;
-  rec.mounted = false;
-  rec.host.classList.remove('is-live');
-  if (rec.frame) {
-    // Just remove it. Removing an <iframe> destroys its nested browsing
-    // context, which unloads the document and stops its timers and network on
-    // the spot — and unlike navigating it to about:blank first (which is what
-    // this used to do) it pushes NOTHING onto the session history. Same defect
-    // class as the viewer frame: a screen unmounting on scroll was quietly
-    // stacking entries that closeTool()'s history.back() would then unwind.
-    rec.frame.remove();
-    rec.frame = null;
-  }
-}
-
-/**
- * Resolve the quad's percentages into host-local pixels.
- * Returns null if the reference box has no size yet, or if the resulting quad
- * is degenerate (collinear / bow-tie) — the caller then falls back cleanly.
- */
-function resolveQuadPx(rec, hostRect) {
-  const ref = rec.quadRef;
-  let ox = 0, oy = 0, rw = hostRect.width, rh = hostRect.height;
-
-  if (ref && ref !== rec.host) {
-    const rb = ref.getBoundingClientRect();
-    if (!rb.width || !rb.height) return null;
-    ox = rb.left - hostRect.left;                // into the host's own frame
-    oy = rb.top - hostRect.top;
-    rw = rb.width; rh = rb.height;
-  }
-  if (!rw || !rh) return null;
-
-  const pts = rec.quad.map(([x, y]) => [ox + (x / 100) * rw, oy + (y / 100) * rh]);
-  return isSaneQuad(pts) ? pts : null;
-}
-
-/**
- * Position the screen plane, then fit the iframe inside it.
- *
- * PERSPECTIVE PATH: the plane is given a flat W x H pixel box (W and H taken
- * from the averaged edge lengths of the target quad, so the pre-warp render
- * resolution is close to the on-screen size and text stays crisp), then warped
- * onto the measured corners with a matrix3d. `transform-origin: 0 0` is what
- * makes the solve valid — the homography is derived for a source rectangle
- * whose top-left corner is the origin.
- *
- * If anything about the quad is degenerate we fall back to the axis-aligned
- * box rather than emit NaN into a transform (which blanks the element).
- */
-function applyGeometry(rec) {
-  if (rec.destroyed || !rec.plane) return;
-
-  const hostRect = rec.host.getBoundingClientRect();
-  if (!hostRect.width || !hostRect.height) return;   // not laid out yet
-
-  let applied = false;
-
-  if (rec.quad) {
-    const dst = resolveQuadPx(rec, hostRect);
-    if (dst) {
-      // Averaged opposing edges: the best single flat size for this quad.
-      const W = Math.max(8, Math.round((dist2d(dst[0], dst[1]) + dist2d(dst[3], dst[2])) / 2));
-      const H = Math.max(8, Math.round((dist2d(dst[0], dst[3]) + dist2d(dst[1], dst[2])) / 2));
-      const h = computeHomography([[0, 0], [W, 0], [W, H], [0, H]], dst);
-      const matrix = h && homographyToMatrix3d(h);
-      if (matrix) {
-        rec.plane.style.width = `${W}px`;
-        rec.plane.style.height = `${H}px`;
-        rec.plane.style.transform = matrix;
-        rec.planeW = W;
-        rec.planeH = H;
-        applied = true;
-      }
-    }
-    if (!applied && !rec.quadWarned) {
-      rec.quadWarned = true;
-      console.warn(`[overlay] screen "${rec.slug}": degenerate quad, falling back to the host box`);
-    }
-  }
-
-  if (!applied) {
-    rec.plane.style.width = '';
-    rec.plane.style.height = '';
-    rec.plane.style.transform = '';
-    rec.planeW = hostRect.width;
-    rec.planeH = hostRect.height;
-  }
-
-  rec.quadApplied = applied;
-  rec.host.classList.toggle('ccc-screen--quad', applied);
-  fitFrame(rec);
-}
-
-/**
- * Scale the iframe so a 1280px-wide desktop render exactly fills the plane.
- * transform-origin:top left keeps the maths trivial: the frame's top-left is
- * the plane's top-left, and everything else falls out of one uniform scale.
- *
- * Note we use the plane's UNTRANSFORMED size (planeW/planeH), never a
- * getBoundingClientRect — under matrix3d that rect is the warped bounding box
- * and would feed the wrong number straight back into the scale.
- */
-function fitFrame(rec) {
-  if (!rec.frame || rec.destroyed) return;
-  const w = rec.planeW, h = rec.planeH;
-  if (!w || !h) return;
-
-  const scale = w / rec.width;                   // uniform: no distortion
-  const vh = Math.round(h / scale);              // virtual height that fills it
-
-  rec.frame.style.width = `${rec.width}px`;
-  rec.frame.style.height = `${vh}px`;
-  rec.frame.style.transform = `scale(${scale.toFixed(5)})`;
-}
-
-/**
- * Convenience for the integrator: mount every `[data-screen="<slug>"]` box
- * found under `root`. In this build that is three elements —
- * `wtw-chicago` and `wtw-big-south` side by side in the dining room, and
- * `daily-sales` on the big screen at the host stand.
- *
- * @param {ParentNode} [root=document]
- * @returns {Array} screen handles
- */
-export function mountRoomScreens(root = document) {
-  const hosts = Array.from(root.querySelectorAll('[data-screen]'));
-  return hosts
-    .filter((host) => !host.classList.contains('ccc-screen'))
-    .map((host) => mountScreen({
-      host,
-      slug: host.getAttribute('data-screen'),
-      url: host.getAttribute('data-screen-url') || undefined,
-      title: host.getAttribute('data-screen-title') || undefined,
-      quad: parseQuadAttr(host.getAttribute('data-screen-quad')),
-      width: Number(host.getAttribute('data-screen-width')) || SCREEN_RENDER_WIDTH
-    }));
-}
-
-/* Re-rank screens after orientation changes (the iPad case). Cheap and rare. */
-window.addEventListener('orientationchange', () => {
-  setTimeout(() => { for (const rec of state.screens) applyGeometry(rec); reconcileScreens(); }, 200);
-});
-
-/** Exposed for the integrator / debugging. */
-export const SCREENS = SCREEN_SLUGS;

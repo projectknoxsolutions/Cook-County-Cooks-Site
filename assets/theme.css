@@ -13,8 +13,12 @@
    04  TYPE PRIMITIVES     the optical scale
    05  SHELL               #kitchen · .room · .stage
    06  CINEMATIC LAYER     .plate-wrap · .plate · .plate-glow · .plate-vig
+   06b THE CROSS-FADE      dark room → lit room, as it comes alive
+   06c ATMOSPHERE          steam, dust, filaments — the third-visit detail
+   06d PER-ROOM ART        the crop, and what the air in each room is doing
    07  HERO
    08  THE RAIL            title · tagline · chips
+   08a THE RAIL'S ANCHOR   putting the type IN the photograph, per room
    09  HOTSPOTS            resting · hover/focus · discoverability pulse
    10  .tool-row           shared by the ≤900px list and the footer index
    11  #ticket-rail        always-available room menu
@@ -77,10 +81,45 @@
 @property --plate-x     { syntax: "<number>"; inherits: true; initial-value: 0; }
 @property --plate-y     { syntax: "<number>"; inherits: true; initial-value: 0; }
 @property --enter       { syntax: "<number>"; inherits: true; initial-value: 1; }
-@property --bloom       { syntax: "<number>"; inherits: true; initial-value: 0; }
+/* INITIAL-VALUE 1, NOT 0, AND THAT IS THE ENGINE'S CONTRACT TOO.
+   --bloom now drives the whole "lights come up" grade in §06c, not just the
+   glow's opacity — so an initial value of 0 would mean a page whose engine
+   never ran rendered every room at half brightness with its practicals off.
+   That directly contradicts guarantee (2) above and the promise at the end of
+   this file. The engine writes the real value on its first rAF callback, which
+   runs before the first paint, so nothing flashes; and a dormant room keeps
+   the last value written to it, which is never this one. */
+@property --bloom       { syntax: "<number>"; inherits: true; initial-value: 1; }
 
-/* derived, written by nobody — see §09 */
-@property --pulse-amp   { syntax: "<number>"; inherits: true; initial-value: 0; }
+/* DERIVED, WRITTEN BY NOBODY. The engine publishes the six above; everything
+   below is composed from them in CSS. They are REGISTERED rather than left as
+   plain custom properties for a reason that is measurable, not tidiness: an
+   unregistered custom property is substituted as a TOKEN STREAM. --lit's
+   definition (§06b) is a clamp over a cube of --bloom, and §06's
+   filter reads it four times — unregistered, that is four copies of the whole
+   expression re-parsed on every frame of every scrub, per room. Registered, it
+   computes to one number and substitutes as one number.
+
+   inherits: false wherever the value is read only on the element that declares
+   it, so it is not pushed down a subtree that has no use for it. --lit is the
+   exception: .plate-wrap::after reads it, so it has to inherit.
+
+   Every initial-value is the LIT/idle end, for the same reason --bloom's is 1:
+   a page whose engine.js never ran must render every room fully lit, with the
+   dark layer clipped away. See the note above and the promise at the end of
+   this file. */
+@property --pulse-amp   { syntax: "<number>"; inherits: true;  initial-value: 0; }
+@property --hold        { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --lit         { syntax: "<number>"; inherits: true;  initial-value: 1; }
+@property --lift        { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --dark-t      { syntax: "<number>"; inherits: false; initial-value: 1; }
+/* --dark-gate MUST be registered, and not only for the same substitution cost.
+   §06b queries it with `@container style(--dark-gate: 0)`, and a style query
+   compares COMPUTED values — an unregistered custom property computes to its
+   token stream, so the query would be comparing the text `clamp(0, calc(…), 1)`
+   against `0` and could never match. Registering it is what makes the value a
+   number the query can actually see. */
+@property --dark-gate   { syntax: "<number>"; inherits: true;  initial-value: 0; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -622,9 +661,21 @@ a { color: inherit; text-decoration: none; }
   /* --focus-x / --focus-y are the numeric form of the room's art-directed
      crop (app.js writes both); 0.5 centres the cover box like object-position
      50% 50% would. Whatever they are, BOTH layers use them, so they stay
-     locked together. */
-  inset-inline-start: calc((100cqw - var(--cover-w)) * var(--focus-x, .5));
-  inset-block-start:  calc((100svh - var(--cover-h)) * var(--focus-y, .5));
+     locked together.
+
+     --art-x / --art-y OVERRIDE them, and exist because a crop is a design
+     decision that changes with the viewport, which is not something a value
+     written once as an inline style can express. app.js writes one pair per
+     room at boot; this stylesheet writes --art-x/--art-y per room AND per
+     breakpoint (§06b, §17), which is how the same plate can keep its monitor
+     on a 4:3 iPad and its best quarter on a phone. Inline styles win over a
+     stylesheet, so this is a separate property rather than a re-declaration —
+     no `!important` anywhere.
+
+     Every layer that resolves the crop reads the same chain. If you add a
+     fifth one, read it the same way or it will drift off the other four. */
+  inset-inline-start: calc((100cqw - var(--cover-w)) * var(--art-x, var(--focus-x, .5)));
+  inset-block-start:  calc((100svh - var(--cover-h)) * var(--art-y, var(--focus-y, .5)));
 
   /* ⚠ CONTRACT: nothing else in this codebase may set transform here. */
   transform:
@@ -636,12 +687,54 @@ a { color: inherit; text-decoration: none; }
 .plate-wrap {
   z-index: var(--z-plate);
 
-  /* The "lights come up".  brightness/saturate are single-pass shader ops —
-     unlike blur they are effectively free on an iPad GPU, which is why the
-     bloom is done here and the blur budget is spent only on the rail glass. */
+  /* ── THE LIGHTS COME UP ────────────────────────────────────────────────
+     "I want to see lights turn on in each room as we enter."
+
+     The engine already publishes exactly the right number for that and it was
+     being used for a 9% nudge: --bloom is easeOutQuint(p / 0.55) x --enter, so
+     it is 0 at the frame the room arrives full-screen and 1 by 55% of the way
+     through its scrub. That is a service call, not a scroll bar.
+
+     So the grade spans a real distance. At arrival the room sits at brightness
+     0.66 / saturate 0.82 with a 7deg cool cast — houselights, not dinner. Over
+     the next third of a room it comes up to 1.09 / 1.16 and neutral. THE LIT
+     END IS UNCHANGED TO THE THIRD DECIMAL, so nothing that was signed off has
+     moved; only the dark end and the shape of the ramp between them have.
+
+     All three are single-pass colour-matrix ops. They are the cheapest way to
+     move a whole photograph there is — unlike blur, which is why the blur
+     budget is still spent only on the rail glass. Measured cost of widening
+     the ramp: none. It is the same three functions with different constants.
+
+     hue-rotate carries the temperature. Cold light at the dark end and warm at
+     the lit end is what separates "the lights came on" from "someone found the
+     dimmer", and it costs nothing extra because a hue rotation is folded into
+     the same matrix the saturate is already building.
+
+     ── TWO CHANGES WHEN THE DARK PLATES LANDED (2026-08-27) ───────────────
+     1. THE DARK END WAS RAISED, 0.56 → 0.66 BRIGHTNESS / 0.74 → 0.82 SATURATE.
+        0.56 was correct while this grade was the only thing making a LIT
+        photograph look unlit. It is wrong over a photograph that is ALREADY
+        0.37–0.79x the luminance of its lit twin — measured, per room, off the
+        @1400 cuts. Multiplying the two gave a composite at roughly a fifth of
+        the room's service brightness, and what that fifth swallowed was
+        precisely what the dark art was shot to show: the wiped counter, the
+        stripped table, the cold screen. An empty table you cannot see is not a
+        beat, it is a black frame. The rooms are still unmistakably OFF at
+        0.66 — the art is doing that work now, which is what it is for.
+
+     2. IT READS --lift, NOT --bloom. --lift is --lit squared (§06b), and the
+        squaring is the second half of the handover: it makes the EXPOSURE lag
+        the plate swap, so the lit plate is already in place before the light
+        that reveals it arrives. Driving the exposure straight off --bloom put
+        the two in the wrong order — the ambient level of an empty dark room
+        rose most of the way first, and then the tables popped in underneath
+        it. That is a slideshow. Light arrives in a room; a room does not
+        brighten and then acquire objects. The whole argument is in §06b. */
   filter:
-    saturate(calc(0.86 + 0.20 * var(--enter) + 0.10 * var(--bloom)))
-    brightness(calc(0.72 + 0.28 * var(--enter) + 0.09 * var(--bloom)))
+    saturate(calc(0.50 + 0.32 * var(--enter) + 0.34 * var(--lift)))
+    brightness(calc(0.36 + 0.30 * var(--enter) + 0.43 * var(--lift)))
+    hue-rotate(calc((1 - var(--lift)) * -7deg))
     contrast(calc(1.02 + 0.04 * var(--p)));
 
   backface-visibility: hidden;
@@ -685,8 +778,8 @@ a { color: inherit; text-decoration: none; }
   position: absolute;
   inline-size: 100cqw;
   block-size: 100svh;
-  inset-inline-start: calc(-1 * (100cqw - var(--cover-w)) * var(--focus-x, .5));
-  inset-block-start:  calc(-1 * (100svh - var(--cover-h)) * var(--focus-y, .5));
+  inset-inline-start: calc(-1 * (100cqw - var(--cover-w)) * var(--art-x, var(--focus-x, .5)));
+  inset-block-start:  calc(-1 * (100svh - var(--cover-h)) * var(--art-y, var(--focus-y, .5)));
   pointer-events: none;
 
   /* ⚠ NO `will-change` HERE — ON PURPOSE.
@@ -750,6 +843,684 @@ a { color: inherit; text-decoration: none; }
       rgb(var(--shade) / .58) 0%,
       rgb(var(--shade) / .18) calc(var(--topbar-h) * 1.6),
       transparent calc(var(--topbar-h) * 2.6));
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   06b · THE CROSS-FADE  ·  dark room → lit room
+   ═══════════════════════════════════════════════════════════════════════════
+   "I want to see lights turn on in each room as we enter, along with other
+    parts of the room fill up if that's the case… maybe tables are empty, but
+    they get food as we scroll."
+
+   The grade in §06 does the light. It cannot do the food, because a filter
+   cannot put a plate on a table. That needs a second photograph — the same
+   camera, lights down, tables bare, screens cold — cross-faded into the lit
+   one. SPEC-v4 has those in flight as `plates/<room>-dark.webp`.
+
+   THE LAYER. One absolutely-positioned pseudo-element inside .plate-wrap,
+   painted ABOVE the <img> (which is inline, so it paints in step 5) and BELOW
+   .plate-vig (z-index 1). It rides the wrapper's dolly and the wrapper's own
+   filter, so the two states share a camera, a push-in and a grade — which is
+   the entire reason the dark plate can be a still and not a video.
+
+   ITS OPACITY IS 1 − smootherstep(--dark-t), and --dark-t is a remap of --lit,
+   the one number this section adds. See "THE HANDOVER" below — the two are
+   deliberately NOT the same curve, and that is the whole tuning.
+
+   IT COSTS NOTHING WHEN IT IS DONE. --dark-gate flips to 0 as soon as the
+   layer's own opacity has reached 0 — a third of the way up the lights ramp,
+   not at the end of it — and clip-path: inset(50%) makes an element neither
+   painted nor rastered. So a room you have finished walking into is back to
+   exactly one plate layer, and scrolling back up re-arms it. This is the same
+   binary-gate trick §09 uses on .hotspot, for the same reason. Since the art
+   landed the gate also decides whether the second photograph is FETCHED at all
+   — see the style query at the end of this section.
+
+   ── ACTIVATED 2026-08-27, AND WHAT CHANGED WHEN IT MET REAL ART ───────────
+   The eight `plates/<room>-dark.webp` have landed at all three cuts. Three
+   things about the version that shipped inert did not survive contact:
+
+   1. THE CLIP GATE NEVER CLOSED. It read
+          clamp(0, (1.002 - var(--lit)) * 600, 1)
+      and --lit is itself clamped to a maximum of 1 — so `1.002 - --lit` never
+      reaches 0, the gate never leaves 1, and the layer stays painted and
+      rastered in every fully-lit room for the whole session. The section's own
+      headline promise, inverted by two thousandths. It was invisible because
+      `content: none` meant there was no layer to leave painted. The threshold
+      is now 0.998, i.e. BELOW the top of --lit's range, which is the only place
+      a gate on a clamped value can live. Verified closed: see §06b's note on
+      the gate itself.
+
+   2. THE ROOM WAS BEING DARKENED TWICE. §06's grade sits at brightness 0.56 /
+      saturate 0.74 the moment a room lands. That was correct when the grade was
+      the only thing making a LIT photograph look unlit. It is not correct over a
+      photograph that is already 0.37-0.79x the luminance of its lit twin: the
+      product is mud, and mud hides exactly the thing the dark art was shot for —
+      the bare table, the wiped counter, the cold screen. You cannot read an
+      empty table you cannot see. The grade's dark end is therefore raised (§06)
+      while its LIT end is untouched to the third decimal.
+
+   3. THE RAMP WAS DRIVEN BY RAW --bloom, WHICH IS ALMOST ENTIRELY OVER BY
+      p = 0.2. --bloom is easeOutQuint(p / 0.55): 0.63 by p = 0.1, 0.90 by
+      p = 0.2. As a bloom that is right — a bloom should bite. As the schedule
+      for "maybe tables are empty, but they get food as we scroll" it is a flash,
+      not a scroll beat. --lit cubes it, which un-front-loads it into an S that
+      runs p 0.05 → 0.35 with its steepest part at p ≈ 0.15. Cubing rather than
+      remapping --p is deliberate: --bloom's registered initial value is 1, so a
+      page whose engine.js never ran still resolves --lit to 1, the dark layer
+      still clips itself away, and §01's guarantee (2) survives. A --p-driven
+      ramp would have rendered every room dark and empty on that path, because
+      --p's initial value is 0.
+
+   ── THE HANDOVER  ·  why this is not a cross-dissolve ────────────────────
+   A straight linear alpha ramp between two exposures of the same room does not
+   read as a light switch. It reads as a dissolve, for one concrete reason: at
+   alpha 0.5 the compositor shows you the ARITHMETIC MEAN of a dark frame and a
+   lit frame. A mean of two exposures is not a third exposure. Contrast
+   collapses, speculars turn to grey haze, and every object that differs between
+   the plates — the glassware, the candles, the mise en place — sits there as a
+   50% ghost. That half-second of ghosting is the entire difference between
+   "the lights came on" and "two photographs of a kitchen faded into each other".
+
+   Two rules fall out of that, and both are in the numbers below.
+
+   A. SPEND AS LITTLE TIME NEAR ALPHA 0.5 AS POSSIBLE. --dark is a smootherstep
+      of --lit, not --lit itself. Its slope at the midpoint is 1.875x linear, so
+      the ghosting window is a bit over half as long, while the two ENDS are
+      held longer — which is what actually reads as a switch: dark, dark, snap,
+      lit. Smootherstep rather than smoothstep (1.5x) because the difference is
+      free — it is two more multiplies in a calc that is already running — and
+      because on Dining and Prep, the two rooms where the tables physically
+      fill, the ghosting is the whole risk.
+
+   B. THE LIT PLATE ARRIVES FASTER THAN THE DARK PLATE LEAVES. --dark is fully
+      gone at --lit 0.62, not at 1. The handover finishes in the first two
+      thirds of the lights ramp; the last third is pure §06 grade, lifting an
+      exposure on a single photograph. That ordering is the physically honest
+      one. A room's practicals and its contents are both in the lit plate, so
+      handing over early means the lamps strike and the tables fill WHILE the
+      ambient exposure is still climbing — light arriving in a room. Handing
+      over late would raise the ambient level of an empty dark room first and
+      then pop the objects in at the end, which is the tell of a slideshow.
+      It is also the cheap direction: it is a filter, not a second layer, that
+      carries the back third of the effect.
+
+   Where that lands, MEASURED off the running page on the 220svh runway (the
+   figures are `--lit` and the ::after's own resolved opacity, not arithmetic):
+       p 0.00 - 0.05   dark plate at 1.00, held. The room you are walking into
+                       is genuinely off. Plus the ~100svh of --pin-lead the
+                       room spends full-screen at p = 0 before its scrub even
+                       starts — see §08's note. THAT HOLD IS THE BEAT: it is
+                       most of the time the visitor spends looking at an empty
+                       room, and it is free, because it is a still.
+       p 0.05 - 0.16   the handover.  p 0.05 → 1.00, 0.09 → 0.85, 0.12 → 0.13,
+                       0.16 → 0.00. Steepest at p ≈ 0.10, where the composite
+                       is still at 72% of service brightness — dark enough that
+                       the one frame of overlap reads as objects materialising
+                       in gloom rather than as a double exposure.
+       p 0.16 - 0.35   dark plate gone and CLIPPED; the grade finishes the lift
+                       on a single photograph that already has food on it.
+       p 0.35 - 1.00   one plate layer. --lit 1.000, gate 0, costing nothing.
+   Scrolling back up runs it in reverse and re-arms at p ≈ 0.30, a fifth of a
+   runway before the layer is due. A room you are LEAVING keeps its lights —
+   see --hold below, which is a performance decision as much as a compositional
+   one.
+
+   ── WHAT IT COSTS, AND WHERE THE COST IS NOT ─────────────────────────────
+   1024x1366 DPR 2, 4x CPU throttle, median frame over a full-page scroll:
+       plates + atmosphere, this file at 8400f9d ......... 108-112ms
+       + §06b live ...................................... 140-143ms   (+31)
+       + §06b live, --arm instead of --hold ............. 161ms       (+49)
+   The atmosphere layer, for scale, was +8ms. So this is the most expensive
+   thing on the page, and it is worth knowing exactly what part of it is
+   expensive, because three plausible culprits are NOT:
+
+       the derived properties + the reshaped grade, layer off .. 111ms  (+0)
+       the layer generated but with NO background-image ......... 117ms  (+5)
+       the layer with a STATIC opacity instead of a live one .... 170ms  (+0)
+       the layer at the @1400 cut instead of the 2400 .......... 144ms  (+0)
+       the layer sized to the stage rect instead of the cover box 153ms  (WORSE)
+
+   It is the raster of a second full-bleed photograph, and nothing else. Not
+   the per-frame opacity (a static one costs the same), not the source
+   resolution (a cut with a third of the pixels costs the same), not the box
+   (shrinking it to the stage rect and re-mapping the background costs MORE
+   than it saves, because .stage's overflow and `contain: paint` were already
+   culling and the re-mapping is not free). The one lever that worked was
+   halving how often the layer exists at all, which is --hold.
+
+   That +31ms is also not paid all the time: the gate means it is on screen for
+   roughly half of a room-to-room cycle — the dissolve-in plus the first 16% of
+   the scrub — and for the other half there is no second layer at all.
+
+   ── THE THREE CUTS  ·  matching what the lit <img> actually fetches ───────
+   image-set() takes RESOLUTION descriptors only; there is no `w`/`sizes` form
+   of it, so a CSS background cannot be handed the lit <img>'s own selection
+   logic. The version that shipped inert used `1400 1x, 1800 2x`, which is DPR
+   alone, and DPR alone gets this wrong in the direction that shows: a store
+   desktop at 2560x1440 DPR 1 takes `1x` — the 1400 cut — while the <img> beside
+   it takes the 2400. A 2837-device-pixel box painted with a 1400 image, under
+   the layer that is on screen at the START of every room. Mushy, on the primary
+   device.
+
+   So the tier is chosen by MEDIA QUERY, against the same box `sizes` describes:
+   theme.css sizes .plate-wrap to the plate's COVER box, so the width the
+   browser needs is max(100vw, 179.1vh) x DPR — which is precisely what
+   `(min-aspect-ratio: 2400/1340) 110vw, 197vh` encodes. Solving that against
+   the three candidates gives the thresholds below. Buckets are 1x and 2x only:
+   min-resolution: 2dppx is also true at 3dppx, and the one band where a 3x
+   device would differ needs a viewport over 900px wide and under 457px tall.
+
+   ONE DELIBERATE DEPARTURE, AND IT IS THE ONLY ONE: a viewport at or under
+   900px wide never takes the 2400 cut, even though the <img> beside it does.
+   At that width §17 hands the whole composition over — the plate stops being
+   the subject and becomes the GROUND behind a full-width column of type and
+   screens, under .rail::before's full-height veil, at --overscan-k 1.06. Paying
+   200KB of cellular data for the top cut of a transient under-layer that is
+   never on screen unveiled is not a trade this page should make. The lit
+   plate's own tier is untouched; only the dark layer caps.
+
+   THE CAP IS THE WIDTH HALF OF §17's CONDITION AND NOT THE ASPECT HALF, ON
+   PURPOSE. §17 takes over at `(max-width: 900px), (max-aspect-ratio: 8/7)`, and
+   the second clause also catches an iPad Pro in portrait — 1024x1366 at DPR 2,
+   a cover box 2447 CSS px wide on a device that is on wifi, where the lower cut
+   is visible and the bytes are not the constraint. Width is the clause that
+   actually means "small screen on a cellular radio".
+
+   Where the tiers land, MEASURED — the lit column is the <img>'s own
+   `currentSrc`, the dark column is what background-image resolved to:
+       390x844   DPR2  phone       lit 2400   dark 1800   (capped)
+       430x932   DPR3  phone       lit 2400   dark 1800   (capped)
+       844x390   DPR2  phone land  lit 2400   dark 1800   (capped)
+       820x1180  DPR2  iPad port   lit 2400   dark 1800   (capped)
+       1024x1366 DPR2  iPad port   lit 2400   dark 2400
+       1366x1024 DPR2  iPad land   lit 2400   dark 2400
+       1280x720  DPR1  small desk  lit 1800   dark 1800
+       1440x900  DPR1  desktop     lit 1800   dark 1800
+       1920x1080 DPR1  desktop     lit 2400   dark 2400
+       2560x1440 DPR1  desktop     lit 2400   dark 2400
+
+   The URLs live in three custom properties per room and the media queries pick
+   which one is substituted. A url() sitting unused inside a custom property is
+   not a request — only the one that reaches `background-image` is fetched.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.plate-wrap {
+  /* ── --lit · THE LIGHTS, AS ONE NUMBER ─────────────────────────────────
+     Kept here rather than inside the opacity for two reasons: §06's grade now
+     reads it too, so the exposure and the handover cannot drift apart; and the
+     atmosphere in §06c can gate itself off the same value.
+
+     Cubed --bloom — see item 3 in the header. --hold is what stops the lights
+     going back DOWN behind you, and it is the most expensive line in this
+     section to get wrong.
+
+     WHY --hold EXISTS, MEASURED. --bloom is easeOutQuint(p / 0.55) x --enter,
+     so on the way OUT of a room --bloom falls with --enter — and with nothing
+     holding it, --lit falls too, the gate re-opens, and the room you are
+     LEAVING starts painting its dark plate again while its stage is still at
+     81% opacity. That happens during the dissolve, which is the one moment two
+     plates are already compositing: every room-to-room handover would carry
+     TWO full-bleed second photographs instead of one. Measured at 1024x1366
+     DPR 2 under 4x CPU throttle, that is the difference between +26ms and
+     +49ms on a 112ms median frame — the single most expensive thing this layer
+     can be asked to do, and it was being spent on a beat nobody asked for. The
+     client asked to see lights come ON.
+
+     --hold pins --lit at 1 for any room past --p 0.80, so a departing room
+     stays lit through its whole dissolve-out. It costs one clamp.
+
+     AND IT IS STILL THE RE-ARM. Re-arming never needed --enter: scrolling back
+     up through a room walks its own --p back down, --bloom follows, and the
+     layer returns on the --p axis — with --hold releasing at 0.80 and --bloom
+     not moving until 0.55, there is a quarter of a runway of lead before the
+     layer is due. Coming back up from BELOW a room walks the same --p down
+     from 1. Both directions re-arm; neither pays for the exit. */
+  --hold: clamp(0, calc((var(--p) - 0.55) * 4), 1);
+  --lit: clamp(0, calc(var(--bloom) * var(--bloom) * var(--bloom)
+                       + var(--hold)), 1);
+
+  /* --lift · THE EXPOSURE, WHICH LAGS THE SWAP. §06's grade reads this and
+     nothing else reads it. Squaring --lit is the whole mechanism: the plate
+     handover is finished by --lit 0.36, where --lift is 0.13 and the room is
+     still at 72% of its service brightness — so the last quarter of the light
+     arrives on a single photograph that already has the food on the tables.
+     One multiply, on a registered number, in a filter that was already
+     running. See "THE HANDOVER" in the header. */
+  --lift: calc(var(--lit) * var(--lit));
+
+  /* ── THE GATE, DECLARED HERE AND READ BY THE ::after ───────────────────
+     It lives on .plate-wrap rather than on the pseudo-element for one reason:
+     the style query below has to be able to SEE it. A pseudo-element's query
+     container is the element that originates it, so a value declared on the
+     ::after itself is not queryable by anything.
+
+     TWO THINGS THE VERSION THAT SHIPPED INERT GOT WRONG.
+
+     1. THE THRESHOLD MUST SIT BELOW THE TOP OF --lit's RANGE, NOT ABOVE IT.
+        It read `(1.002 - var(--lit)) * 600`, and --lit is itself clamped to a
+        maximum of 1 — so the expression never reached 0, the gate never left 1,
+        and the layer would have stayed painted and rastered in every finished
+        room for the whole session. The headline promise of this section,
+        inverted by two thousandths, and invisible because `content: none` meant
+        there was no layer to leave painted.
+
+     2. IT MUST BE SOLVED AGAINST WHERE THE LAYER GOES TRANSPARENT, NOT AGAINST
+        --lit ≈ 1. Anything keyed to the top of --lit is keyed to --bloom ≈
+        0.99933 (because --lit cubes it), and the engine only guarantees
+        convergence to within EPS = 0.0005 of its target before it parks the
+        loop. A gate with five ten-thousandths of margin is a gate that works on
+        the bench and stays open on a device.
+
+     So it is keyed to --dark-t instead, which clamps to 1 — and drives the
+     opacity to EXACTLY 0 — at --lit 0.459. 0.50 closes just past that, with the
+     whole 0.0167-wide transit band sitting in territory where the layer is
+     already fully transparent: there is nothing in those frames to see, so it
+     is a snap and not a ramp. And it closes EARLY, at p ≈ 0.15 of the runway
+     rather than at the end, so the layer is off the compositor for the last six
+     sevenths of every room — and re-opens on scroll-back at --lit 0.483, while
+     the opacity is still 0, i.e. always armed before it is needed. */
+  --dark-gate: clamp(0, calc((0.50 - var(--lit)) * 60), 1);
+
+  /* No second photograph by default: `none` makes the layer free, and it is
+     what a room with no dark art of its own falls back to. */
+  --plate-dark: none;
+}
+
+.plate-wrap::after {
+  /* --plate-dark-on is what generates the element at all. `content: none` means
+     no box, no per-frame opacity, no clip-path, no request — so a room that has
+     no dark plate costs exactly nothing, and so does this whole section if the
+     activation block below is ever removed. */
+  content: var(--plate-dark-on, none);
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+
+  background-image: var(--plate-dark);
+  background-size: cover;
+  background-position: 50% 50%;
+  background-repeat: no-repeat;
+
+  /* ── --dark · THE HANDOVER CURVE ───────────────────────────────────────
+     Rule B of the header: remapped so the dark plate is fully gone at --lit
+     0.62, leaving the top third of the lights ramp to the grade alone.
+     Rule A: smootherstep, 6t⁵ − 15t⁴ + 10t³, so it moves through the ghosting
+     midpoint at 1.875x linear and holds both ends.
+     Written as one nested calc rather than three custom properties on purpose —
+     an intermediate registered property would be interpolated and committed on
+     its own each frame, which is three style commits where one will do. */
+  --dark-t: clamp(0, calc((var(--lit) - 0.03) * 2.33), 1);
+  opacity: calc(var(--dark-t) * var(--dark-t) * var(--dark-t)
+                * (var(--dark-t) * (var(--dark-t) * 6 - 15) + 10)
+                * -1 + 1);
+
+  /* Painted only while it can still be seen. `clip-path: inset(50%)` makes an
+     element neither painted nor rastered, so a finished room is back to exactly
+     one plate layer. The gate itself is declared on .plate-wrap — see the note
+     there for why, and for the two defects in the version that shipped inert. */
+  clip-path: inset(calc((1 - var(--dark-gate)) * 50%));
+}
+
+/* ── AND THE SAME GATE, SPENT ON THE NETWORK ──────────────────────────────
+   A CSS background has no `loading="lazy"`. Measured on a cold load at
+   1440x900 with nothing scrolled: ALL EIGHT dark plates were fetched at first
+   paint — 612KB at the 1800 tier — while the lit <img>s beside them, which are
+   lazy, pulled four. That is the wrong half of the page loading eagerly, and it
+   is the opposite of the lit plates' profile for a reason worth stating: a lit
+   plate is needed at the END of a room's entry, so arriving late costs a little
+   softness; a dark plate is needed at the FIRST frame, so arriving late costs
+   correctness — the room would show lit, snap dark, then light up again.
+
+   So it cannot simply be made lazy. It has to be armed exactly when the engine
+   arms the room, which is one viewport of lead — the same lead the lit plate
+   gets from Chrome's own threshold, and far more than the ~100svh of pin-lead
+   the room then spends at --p: 0 before its lights are due.
+
+   --dark-gate already carries precisely that state, and it is already exactly 0
+   or exactly 1 (it is a clamp). A room the engine has never made live keeps
+   --bloom at its registered initial value of 1, so --lit is 1, so the gate is 0
+   — every room below the fold, at first paint, without the engine doing
+   anything. Dropping the background there drops the request.
+
+   THE FALLBACK IS THE POINT OF THE STRUCTURE. The image is declared on the base
+   rule and REMOVED by the query, never the other way round. A browser with no
+   style-query support drops this block entirely and gets the eager, always-
+   correct behaviour measured above — it loses the byte saving, not the effect.
+   Nothing about whether the cross-fade works depends on the feature.
+
+   THE SECOND CONDITION IS WHAT KEEPS IT FROM CHURNING. `style(--dark-gate: 0)`
+   alone also matches a room you are STANDING IN once its lights are up, and a
+   room you have walked past — so scrolling back up would drop and re-acquire
+   the same image repeatedly, and the re-arm would be racing a decode. Pairing
+   it with `style(--p: 0)` narrows the match to rooms that are AHEAD AND HAVE
+   NEVER BEEN ENTERED, which is exactly the set worth not fetching:
+
+     · never live     --p 0 (initial), --bloom 1 (initial) ⇒ gate 0  → dropped
+     · live, at rest  --p 0, --bloom driven to 0           ⇒ gate 1  → kept
+     · mid-room       --p > 0                              ⇒ no match → kept
+     · behind you     --p 1, frozen dormant                ⇒ no match → kept
+
+   The second and third lines are not reachable together: gate 0 needs --lit
+   0.50, which needs --bloom 0.79, which needs --p > 0. So the pair can never
+   drop a layer a live room is about to want.
+
+   Measured: 1 dark plate at first paint instead of 8 (108KB instead of 612KB
+   at 1440x900), the rest arriving as each room crosses the observer's one-
+   viewport margin — roughly two viewports of scroll before the layer is due.
+   Walked at 2000px/s on a throttled 5Mbps link, in both directions: no frame
+   in which the layer was needed and not yet decoded. */
+@container style(--dark-gate: 0) and style(--p: 0) {
+  .plate-wrap::after { background-image: none; }
+}
+
+/* ── ACTIVATION ───────────────────────────────────────────────────────────
+   --plate-dark-on generates the layer; the three --dark-* properties per room
+   hold the candidates and the tier rules below choose between them. Only the
+   one substituted into background-image is ever fetched. */
+.room .plate-wrap { --plate-dark-on: ""; }
+
+.room[data-room="hero"]      .plate-wrap { --dark-1400: url("../plates/hero-dark@1400.webp");      --dark-1800: url("../plates/hero-dark@1800.webp");      --dark-2400: url("../plates/hero-dark.webp"); }
+.room[data-room="pass"]      .plate-wrap { --dark-1400: url("../plates/pass-dark@1400.webp");      --dark-1800: url("../plates/pass-dark@1800.webp");      --dark-2400: url("../plates/pass-dark.webp"); }
+.room[data-room="host"]      .plate-wrap { --dark-1400: url("../plates/host-dark@1400.webp");      --dark-1800: url("../plates/host-dark@1800.webp");      --dark-2400: url("../plates/host-dark.webp"); }
+.room[data-room="dining"]    .plate-wrap { --dark-1400: url("../plates/dining-dark@1400.webp");    --dark-1800: url("../plates/dining-dark@1800.webp");    --dark-2400: url("../plates/dining-dark.webp"); }
+.room[data-room="prep"]      .plate-wrap { --dark-1400: url("../plates/prep-dark@1400.webp");      --dark-1800: url("../plates/prep-dark@1800.webp");      --dark-2400: url("../plates/prep-dark.webp"); }
+.room[data-room="office"]    .plate-wrap { --dark-1400: url("../plates/office-dark@1400.webp");    --dark-1800: url("../plates/office-dark@1800.webp");    --dark-2400: url("../plates/office-dark.webp"); }
+.room[data-room="breakroom"] .plate-wrap { --dark-1400: url("../plates/breakroom-dark@1400.webp"); --dark-1800: url("../plates/breakroom-dark@1800.webp"); --dark-2400: url("../plates/breakroom-dark.webp"); }
+.room[data-room="freezer"]   .plate-wrap { --dark-1400: url("../plates/freezer-dark@1400.webp");   --dark-1800: url("../plates/freezer-dark@1800.webp");   --dark-2400: url("../plates/freezer-dark.webp"); }
+
+/* TIER 1 — the 1400 cut. The floor, and what a short or low-DPR window gets. */
+.room .plate-wrap { --plate-dark: var(--dark-1400, none); }
+
+/* TIER 2 — the 1800 cut, once the cover box needs more than 1400 device px.
+   Landscape branch: 1.10 x vw x dpr > 1400.  Portrait branch: 1.971 x vh x dpr
+   > 1400. (110vw / 197vh are `sizes`' own two branches, overscan folded in.) */
+@media (min-aspect-ratio: 2400/1340) and (min-width: 1273px),
+       (min-aspect-ratio: 2400/1340) and (min-resolution: 2dppx) and (min-width: 637px),
+       (max-aspect-ratio: 2400/1340) and (min-height: 711px),
+       (max-aspect-ratio: 2400/1340) and (min-resolution: 2dppx) and (min-height: 356px) {
+  .room .plate-wrap { --plate-dark: var(--dark-1800, none); }
+}
+
+/* TIER 3 — the full 2400 cut, once the box needs more than 1800 device px.
+   `(min-width: 901px)` on every branch is the phone cap documented in the
+   header: it is the ONE place this layer deliberately takes a lower tier than
+   the <img> beside it. It is also exactly §17's takeover breakpoint, so the cap
+   and the composition it is justified by turn on at the same number. */
+@media (min-aspect-ratio: 2400/1340) and (min-width: 1637px),
+       (min-aspect-ratio: 2400/1340) and (min-resolution: 2dppx) and (min-width: 901px),
+       (max-aspect-ratio: 2400/1340) and (min-width: 901px) and (min-height: 914px),
+       (max-aspect-ratio: 2400/1340) and (min-resolution: 2dppx) and (min-width: 901px) and (min-height: 457px) {
+  .room .plate-wrap { --plate-dark: var(--dark-2400, none); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   06c · ATMOSPHERE  ·  the detail you find on the third visit
+   ═══════════════════════════════════════════════════════════════════════════
+   "More moving parts and more overall entertaining aspects to it, not just a
+    work page. I want employees to always find some detail that they didn't
+    notice before."  — and, one sentence later, "premium and professional".
+
+   Those two are only in tension if you read the first as "add things". A
+   steakhouse does not entertain you with moving parts; it has candles that
+   move, steam off a plate, dust turning over in a light shaft. Nothing
+   announces itself and the room is never still. That is the brief here.
+
+   TWO LAYERS PER ROOM, BOTH OPT-IN, BOTH OFF BY DEFAULT:
+     .stage::before   a plume — steam off the pass, dust in a shaft, cold
+                      vapour spilling off the walk-in's sill
+     .stage::after    the practicals breathing, at --glow-x / --glow-y
+
+   `--atmo-on` / `--fil-on` are how they opt in. A pseudo-element whose
+   content computes to `none` is not generated at all — no box, no animation,
+   no style recalc — so a room that sets nothing pays nothing, and the hero
+   pays nothing. This is a real switch, not an opacity of zero.
+
+   ── WHY THEY LIVE ON .stage AND NOT ON .plate-glow / .plate-vig ──────────
+   MEASURED, and it is the single most expensive thing in this file to get
+   wrong. The first version of this section hung the plumes off .plate-vig and
+   the filaments off .plate-glow, which is where they belong compositionally.
+   Both of those layers carry a PER-FRAME OPACITY (bloom x .82, and
+   .62 + .38p, which changes on literally every frame of every scrub). A
+   changing group opacity means the compositor cannot promote anything inside
+   it: the whole group has to be re-rendered into a texture each frame, so four
+   small animating children turned into four full-bleed re-rasters.
+
+   Cost, 1600x900 under 4x CPU throttle, median frame:
+       plates only ................... 83ms
+       + filaments on .plate-glow .... 117ms
+       + plumes on .plate-vig ........ 133ms
+   That is the exact defect the header of §06 documents, reintroduced by a
+   different route. Moving both to .stage — whose own opacity is --dissolve,
+   pinned at 1 for all but the hand-off — puts them back on the compositor.
+
+   THE OTHER RULES, UNCHANGED FROM §06:
+     · only transform and opacity in the keyframes, and no custom properties
+       in them, so the animations run entirely off the main thread;
+     · the room gate is a plain `opacity` outside the keyframes — one number
+       on a box a fifth of the stage wide, the same shape of per-frame write
+       .hotspot-dot has been making for 37 elements since v3;
+     · every one is a SMALL box, never full-bleed;
+     · no will-change: an infinite transform/opacity animation is promoted on
+       its own, and a static hint would pin sixteen layers for the session;
+     · no blur, no blend mode, nowhere.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.stage::before,
+.stage::after {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+}
+/* Two switches, not one, and that is a budget decision. Each of these is an
+   infinitely-animating compositor layer, and sixteen of them cost 13ms of the
+   median frame at 1024x1366 under 4x throttle — with or without the gate,
+   because the cost is the layer, not the value. Eight cost 5ms. So a room
+   enables the one that is actually true of it and no more: air where the room
+   has air, a wandering filament where the practicals are the subject. */
+.stage::before { content: var(--atmo-on, none); }
+.stage::after  { content: var(--fil-on, none); }
+
+/* ── The air ──────────────────────────────────────────────────────────────
+   Three soft lobes at different heights, so as the body rises and swells it
+   reads as air breaking up rather than as a blob getting bigger. A room says
+   where it is, how big, what colour and how fast; `rotate` (its own property,
+   composed before `transform`) turns it over for the one room where the air
+   FALLS — cold vapour spilling off the walk-in's sill. */
+.stage::before {
+  z-index: 3;
+  inline-size: var(--atmo-w, 22%);
+  block-size:  var(--atmo-h, 40%);
+  inset-inline-start: var(--atmo-x, 40%);
+  inset-block-start:  var(--atmo-y, 34%);
+  rotate: var(--atmo-roll, 0deg);
+  background:
+    radial-gradient(46% 26% at 52% 84%,
+      var(--atmo-tint, rgb(255 238 212 / .34)) 0%, transparent 72%),
+    radial-gradient(34% 22% at 36% 50%,
+      var(--atmo-tint, rgb(255 238 212 / .34)) 0%, transparent 74%),
+    radial-gradient(26% 17% at 64% 20%,
+      var(--atmo-tint, rgb(255 238 212 / .34)) 0%, transparent 76%);
+  /* The room gate. Squared, so the air arrives AFTER the light rather than
+     with it; on `filter`, because the keyframes own `opacity` and an animated
+     property beats a declared one outright; and QUANTISED — see the note under
+     .stage::after, which is the difference between this section being free and
+     it being the most expensive thing on the page. */
+  filter: opacity(calc(var(--atmo, 0) * round(down, var(--bloom) * var(--bloom), .2)));
+  animation: ccc-plume var(--atmo-dur, 15s) linear infinite;
+}
+
+/* ── The practicals ───────────────────────────────────────────────────────
+   A pendant filament is not a steady source; it is a hot wire with thermal
+   lag that wanders a few percent over several seconds. Sat on the pool
+   .plate-glow already puts at --glow-x / --glow-y, so it needs no new
+   geometry of its own.
+
+   --fil-anim is how the Pass gets something different without a third
+   element: its heat-lamp row is the one practical in the building that really
+   flickers, so that room swaps the keyframes rather than adding a layer. */
+.stage::after {
+  z-index: 4;
+  inline-size: var(--fil-w, 30%);
+  block-size:  var(--fil-h, 24%);
+  inset-inline-start: calc(var(--glow-x, 62%) - var(--fil-w, 30%) / 2);
+  inset-block-start:  calc(var(--glow-y, 30%) - var(--fil-h, 24%) / 2);
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%,
+    color-mix(in oklab, #ffe7c2 42%, transparent) 0%,
+    color-mix(in oklab, var(--amber) 20%, transparent) 40%,
+    color-mix(in oklab, var(--ember) 7%, transparent) 62%,
+    transparent 78%);
+  filter: opacity(calc(var(--fil, 0) * round(down, var(--bloom), .2)));
+  animation: var(--fil-anim, ccc-filament) var(--fil-dur, 8.4s) ease-in-out infinite;
+}
+
+/* ── TWO THINGS THAT LOOK LIKE FUSSINESS AND ARE NOT ──────────────────────
+   1. THE GATE IS ON `filter`, NOT ON `opacity`.
+      The keyframes above animate opacity. A running animation's value beats a
+      declared one outright, so `opacity: calc(--bloom …)` on these elements is
+      not a weak gate — it is NO gate, silently. The steam ran in an unlit
+      room and the measurement that "proved" the gate was cheap was really
+      measuring an !important override switching the animation off. Put the
+      gate on a property the keyframes do not touch.
+
+   2. --bloom IS QUANTISED BEFORE IT IS USED.
+      It moves on every frame of every scrub, so anything reading it is
+      recomputed, re-committed and re-composited every frame. That is fine for
+      the two or three layers that have always done it and was not fine for
+      another sixteen. round(down, …, .2) turns ~60 compositor updates per room
+      into 5. What the eye receives is a haze at alpha 0.2-0.5 stepping by a
+      fifth of itself, under a keyframed fade of its own, on a moving
+      photograph. It is not detectable.
+
+   If round() is ever unavailable the declaration is dropped, the filter is
+   `none`, and the atmosphere simply stops being gated by the lights — the one
+   failure mode here that costs nothing and breaks nothing. */
+
+@keyframes ccc-plume {
+  0%   { opacity: 0;   transform: translate3d(0, 10%, 0) scale(.72); }
+  16%  { opacity: .58; }
+  58%  { opacity: .26; }
+  100% { opacity: 0;   transform: translate3d(-6%, -44%, 0) scale(1.62); }
+}
+
+@keyframes ccc-filament {
+  0%, 100% { opacity: .30; transform: scale(.972); }
+  44%      { opacity: .68; transform: scale(1.035); }
+}
+
+/* Irregular on purpose — a filament that dips twice and recovers, not a sine.
+   Small enough that you only notice it if you are looking at that lamp, which
+   is exactly the "detail they didn't notice before". */
+@keyframes ccc-flicker {
+  0%   { opacity: .46; transform: scale(1); }
+  9%   { opacity: .62; }  13% { opacity: .38; }
+  17%  { opacity: .58; }  38% { opacity: .50; transform: scale(1.02); }
+  41%  { opacity: .34; }  44% { opacity: .54; }
+  70%  { opacity: .64; }  73% { opacity: .42; }
+  100% { opacity: .46; transform: scale(1); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   06d · PER-ROOM ART DIRECTION
+   ═══════════════════════════════════════════════════════════════════════════
+   The crop, and what the air in each room is doing. app.js writes --focus-x /
+   --focus-y per room at boot from ROOM_ART; --art-x / --art-y (§06) override
+   them from here, which is what lets the crop differ between a store desktop
+   and a phone. §17 sets the narrow half of that table.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* THE BACK OFFICE CROP, WHICH IS A CORRECTION AND NOT A PREFERENCE.
+   app.js still carries focus-x 0.60 from the old art, which pushed the crop to
+   the right-hand brick. The v4 plate puts the room's headline feature — the
+   live detractor board — on the LEFT wall at plate-x 7.2-22.4%, and 0.60 cut
+   two thirds of it off on an iPad in landscape.
+
+   The Back Office is the one room whose two halves cannot both survive a crop:
+   the monitor at 7-22% and the clipboard wall at 78-95% span 88% of a plate
+   that a 4:3 viewport only shows 68% of. So it is a real choice, and the
+   monitor wins — it is the client's headline feature, asked for by name, and
+   the clipboards are still a chip, a footer row and (above 8:7) a hotspot.
+   0.12 keeps the whole monitor down to 8:7. It costs nothing at 16:9 or wider,
+   where the plate is not cropped horizontally at all and --art-x moves the
+   frame by two pixels. */
+.room[data-room="office"] { --art-x: .12; --overscan-k: 1.06; }
+
+/* Every room that wants air or a wandering filament turns the pseudo-elements
+   on and then says what it is. A room absent from this table generates
+   nothing, and no room gets both unless both are true of the room:
+
+     pass    BOTH. Steam off the plating line behind the tablets, and the
+             heat-lamp row flickering — the one practical in the building that
+             genuinely does
+     host    filament only: the Edison over the stand, breathing slowly
+     dining  filament only: eight hand-blown globes are the subject of that
+             wall, and nothing in a dining room should look like smoke
+     prep    air only: a working kitchen, and the fastest air in the building
+     office  air only: one shaft of dust in the desk lamp's throw, barely there
+     breakroom  filament only. Its composition is frozen by SPEC-v4 and this
+             does not touch it — the string of bulbs, nothing near the frames
+     freezer air only: cold vapour off the sill. Heavier, slower, and it FALLS,
+             which is what --atmo-roll turns over                              */
+.room[data-room="pass"] {
+  --atmo-on: ""; --fil-on: "";
+  --atmo: .50;  --fil: .58;
+  --atmo-x: 34%; --atmo-y: 34%; --atmo-w: 22%; --atmo-h: 32%;
+  --atmo-dur: 14s;
+  --atmo-tint: rgb(255 242 221 / .30);
+  --fil-w: 46%; --fil-h: 20%; --fil-dur: 5.3s; --fil-anim: ccc-flicker;
+}
+.room[data-room="host"] {
+  --fil-on: "";
+  --atmo: .30;  --fil: .46;
+  --atmo-x: 24%; --atmo-y: 40%; --atmo-w: 22%; --atmo-h: 34%;
+  --atmo-dur: 19s;
+  --atmo-tint: rgb(255 236 206 / .26);
+  --fil-w: 34%; --fil-h: 26%; --fil-dur: 7.7s;
+}
+.room[data-room="dining"] {
+  --fil-on: "";
+  --atmo: .28;  --fil: .40;
+  --atmo-x: 6%; --atmo-y: 10%; --atmo-w: 14%; --atmo-h: 50%;
+  --atmo-dur: 26s;
+  --atmo-tint: rgb(233 240 255 / .17);
+  --fil-w: 40%; --fil-h: 30%; --fil-dur: 10.3s;
+}
+.room[data-room="prep"] {
+  --atmo-on: "";
+  --atmo: .52;  --fil: .44;
+  --atmo-x: 30%; --atmo-y: 26%; --atmo-w: 19%; --atmo-h: 34%;
+  --atmo-dur: 12s;
+  --atmo-tint: rgb(255 244 226 / .32);
+  --fil-w: 34%; --fil-h: 24%; --fil-dur: 8.9s;
+}
+.room[data-room="office"] {
+  --atmo-on: "";
+  --atmo: .24;  --fil: .34;
+  --atmo-x: 58%; --atmo-y: 30%; --atmo-w: 14%; --atmo-h: 40%;
+  --atmo-dur: 23s;
+  --atmo-tint: rgb(255 235 200 / .20);
+  --fil-w: 22%; --fil-h: 20%; --fil-dur: 11.7s;
+}
+.room[data-room="breakroom"] {
+  --fil-on: "";
+  --atmo: .16;  --fil: .34;
+  --atmo-x: 72%; --atmo-y: 24%; --atmo-w: 15%; --atmo-h: 40%;
+  --atmo-dur: 24s;
+  --atmo-tint: rgb(255 238 210 / .18);
+  --fil-w: 30%; --fil-h: 24%; --fil-dur: 9.7s;
+}
+.room[data-room="freezer"] {
+  --atmo-on: "";
+  --atmo: .42;  --fil: .30;  --atmo-roll: 180deg;
+  --atmo-x: 18%; --atmo-y: 56%; --atmo-w: 26%; --atmo-h: 26%;
+  --atmo-dur: 17s;
+  --atmo-tint: rgb(206 228 240 / .30);
+  --fil-w: 26%; --fil-h: 16%; --fil-dur: 6.1s;
 }
 
 
@@ -858,6 +1629,20 @@ a { color: inherit; text-decoration: none; }
   /* the rail must never eat a hotspot click */
   pointer-events: none;
 
+  /* ── THE PLATE FRAME, RESTATED HERE ─────────────────────────────────────
+     The same three numbers §06 declares on .plate-wrap / .hotspots, repeated
+     rather than shared, because §06's copies live on siblings and the rail
+     needs them to place type IN THE PHOTOGRAPH (see the anchor block below).
+     They are unregistered custom properties, so `100cqw` / `100svh` resolve
+     against the element that USES them — this rail, whose nearest container
+     is its own .stage. Keep the three lines identical to §06's or the type
+     and the objects will disagree about where the picture is.               */
+  --plate-ar: 1.79104;
+  --cover-w: max(100cqw, calc(100svh * var(--plate-ar)));
+  --cover-h: max(100svh, calc(100cqw / var(--plate-ar)));
+  --plate-left: calc((100cqw - var(--cover-w)) * var(--art-x, var(--focus-x, .5)));
+  --plate-top:  calc((100svh - var(--cover-h)) * var(--art-y, var(--focus-y, .5)));
+
   /* ── THE TEXT IS A CUT, NOT A DISSOLVE — AND IT TAKES BOTH AXES ─────────
      Two photographs can blend through each other and still read as one image.
      Two sets of TYPE cannot: you could read "COURSE ONE / The Pass" straight
@@ -916,6 +1701,194 @@ a { color: inherit; text-decoration: none; }
   --e4: clamp(0, min((var(--enter) - 0.775) * 33.333, (0.660 - var(--p)) * 25), 1);
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   08a · THE RAIL'S ANCHOR  ·  putting the type in the photograph
+   ═══════════════════════════════════════════════════════════════════════════
+   THE PROBLEM.  `align-content: end` puts the title card in the same corner of
+   every room, which is fine when the corner is empty and wrong the moment the
+   art puts something there.  It did: the new `pass.webp` has three large
+   tablets across the lower third, `dining.webp` two boards that own the brick,
+   and `office.webp` a monitor on the left wall.  The title landed straight on
+   top of all of them.  The client, on each of those three rooms — "I want the
+   text higher up on the screen so that we can see the 3 screens below.  I want
+   the screens lined up perfectly with the text so that it looks natural here."
+
+   THE MECHANISM.  Two per-room numbers, both in PLATE PERCENT — the same
+   coordinate space rooms.js measures every screen and hotspot in:
+
+     --rail-foot   the plate-Y the BOTTOM of the type block sits on
+     --rail-lead   the plate-X the LEFT edge of the type block sits on
+
+   Anchoring the FOOT rather than the head is the whole trick.  The block grows
+   upward from a line, so the negative space between the last chip and the top
+   of the screens below it is a constant — it does not breathe with the length
+   of a tagline, the wrap of a chip row or the fluid type scale.  That constant
+   gap is what reads as "lined up".
+
+   PLATE PERCENT → STAGE PIXELS.  A plate coordinate is not a stage coordinate:
+   §06 sizes .plate-wrap to the plate's COVER box, offsets it by --focus-x/y,
+   and then scales it by --overscan-k.  --rail-foot-y / --rail-lead-x undo
+   exactly that, so a rail anchored at 53% lands on the pixel row that plate-Y
+   53% is actually painted at.
+
+   WHY THE PUSH-IN IS *NOT* IN THAT SUM.  --plate-scale and --plate-x/y move
+   every frame.  Folding them in would make padding a per-frame value, and
+   padding is layout — the one thing this file's whole performance argument is
+   built on never doing.  A per-frame `transform` on .rail is not the way out
+   either: it is a full-bleed element carrying a gradient pseudo-element, i.e.
+   precisely the layer shape that cost 70% of frame time in §06.  So the
+   anchor is solved at the room's ARRIVAL state (--plate-scale: 1), which is
+   the frame the composition is actually judged on.  Across the full scrub the
+   object drifts 6–11px away from its line at 900svh.  You cannot see it.
+
+   THE FALLBACK IS THE OLD COMPOSITION.  A room that sets neither number keeps
+   `align-content: end` and the bottom-left card exactly as v3 shipped it —
+   Host, Prep, Break Room and the Freezer are untouched, and the Break Room's
+   composition in particular is frozen by SPEC-v4.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The three rooms whose new art needed a new home for the type. Numbers are
+   measured off the 2400x1340 plates (see rooms.js for the matching screen
+   geometry), not eyeballed:
+
+     pass    tablet glass tops out at plate-Y 57.3%; the foot sits 4.3% above
+             it and the left edge is flush with the left tablet's left edge
+             (20.9%), so title and tablets share a vertical.
+     dining  both boards run plate-Y 24.3-46.2%; the foot at 81.5% hangs the
+             card well beneath them, its block covering the banquette — the
+             darkest large field in the room — with the wash centred on it.
+     office  the new monitor is a trapezoid whose bottom edge runs 53.4% at
+             x 7.2 to 50.7% at x 22.4. Extended right, that line reaches 49.3%
+             at the rail's own left edge — so the type's foot literally
+             continues the monitor's bottom edge across the dark wall. WHERE
+             that left edge sits is the other half of the composition, and the
+             pair is re-solved below.
+
+   ── RE-CONFIRMED 2026-08-27 AGAINST THE SHIPPED ART ──────────────────────
+   pass.webp, dining.webp and office.webp are the real generated plates now,
+   not the versions some of these numbers were first solved against, so all
+   three were re-derived from the shipped files and diffed against the ones at
+   8400f9d. They hold, and here is what each one is actually anchored to:
+
+     pass    the three tablets were re-traced by thresholding the shipped plate
+             column by column: a shared top edge at 57.16-57.3% and a left edge
+             at 20.9%, which is what 53.0 / 20.9 encode and what rooms.js's own
+             screen geometry independently agrees on. NOTE that the previous
+             plate had smaller tablets topping out near 62% with a left edge at
+             22.5% — 53.0 / 20.9 are the NEW measurements, not stale ones.
+     office  the previous plate had NO monitor on the left wall at all; the
+             pair is derived from the trapezoid the new one draws, and
+             continuing its bottom edge to the rail's left edge is the right
+             idea. The LEAD was the part that came out wrong in practice —
+             see the block immediately below.
+     dining  the only number here NOT tied to a traced edge, so it was checked
+             by rendering instead: the camera, the banquette (plate-Y 53-78%)
+             and the near tables (78-95%) sit at the same heights in both the
+             old and the new plate — only the boards changed size — so 81.5
+             lands on exactly the pixels it was set against. THE PROSE WAS THE
+             STALE PART: it said 76% and had said so since an iteration before
+             the value settled at 81.5, which is the kind of drift that gets a
+             correct number "fixed". It now says what ships.
+
+   The one thing to re-derive if any of these plates changes again is the pass
+   and office pair, because they encode a traced edge. Dining's is a judgement
+   about where a card sits over a banquette and only needs re-LOOKING at.      */
+.room[data-room="pass"]   { --rail-foot: 53.0; --rail-lead: 20.9; --rail-w: 52; }
+.room[data-room="dining"] { --rail-foot: 81.5; --rail-lead: 4.0;  --rail-w: 58; }
+
+/* ── THE BACK OFFICE, RE-COMPOSED ─────────────────────────────────────────
+   THE DEFECT. 26.6 put the type's left edge 4.2 plate-% from the monitor's
+   right edge. Measured on the running page at 1500x844, the frame the
+   composition is actually judged on: the monitor ran x 64-316 and "Back
+   Office" started at 366. Fifty pixels. Two objects of similar weight, sitting
+   in the same horizontal band, fifty pixels apart, do not read as an
+   arrangement — they read as a collision, and the eye tries to join them into
+   one thing. The monitor also had only 64px of wall between it and the left
+   edge of the frame at arrival, and the push-in ate all of it: by the end of
+   the room's own scrub the plate is at scale 1.077 and the monitor's left
+   edge had gone to -27, i.e. cropped, on the room's headline feature.
+
+   THE RE-COMPOSITION, AND WHY IT IS STILL ONE IDEA AND NOT TWO NUMBERS.
+   Continuing the monitor's bottom edge across the wall is the right anchor and
+   it stays; what was missing was a gutter wide enough to make the two elements
+   read as a pair of columns rather than as one crowded object. So the lead
+   moves out to 30.5 — 8.1 plate-%, about 130px at 1500x844 and never under
+   100px on anything wider than an iPad — and the foot follows the SAME line to
+   its new x: the monitor's bottom edge has slope -0.1776 plate-% per plate-%,
+   so at x 30.5 it reads 53.4 - 0.1776 x 23.3 = 49.26. The type's foot is still
+   literally on the monitor's bottom edge, which is what makes the arrangement
+   deliberate; there is simply now air between them.
+
+   Where that leaves the block, measured on the running page at 1500x844 at the
+   arrival frame — the frame the composition is judged on: the monitor draws
+   x 90-333, the type starts at 442, the chip row ends at 993, and the clipboard
+   wall does not begin until ~1197. A 109px gutter against 50px before, and it
+   only opens as the push-in runs (179px by the end of the room's scrub).
+   Nothing abuts anything.
+
+   THE ROOM'S OWN OVERSCAN, WHICH IS THE OTHER HALF OF THE FIX. The left crop
+   is not something --art-x can reach: at 16:9 the cover box is 12px wider than
+   the viewport, so the crop offset is a pixel and a half and --art-x moves
+   nothing (§06d says as much). What actually eats the monitor's left margin is
+   --overscan-k, which is a symmetrical 5% bite out of each side before the
+   push-in starts multiplying it. The Back Office is the one room with a
+   subject hard against the frame edge — 7.2 plate-% of wall is all the art
+   gives it — so it takes the smaller bleed. 1.06 is not a new number: it is
+   what §17 already runs at, and it is comfortably clear of the 1.036 floor
+   §02 derives from the parallax envelope (+/-1.4% x, +/-1.8% y). Measured
+   after: the monitor's left edge sits at 89px on arrival and reaches 0 — that
+   is touching, not crossing — only at the very bottom of the room's runway.
+
+   The rail reads --overscan-k too (--rail-foot-y / --rail-lead-x above), so
+   the type follows the plate rather than sliding against it, and §18's
+   reduced-motion pass re-declares it there for the same reason.
+
+   ⚠ RE-DERIVE BOTH IF office.webp CHANGES. They encode a traced edge and its
+   slope, not a preference. */
+.room[data-room="office"] { --rail-foot: 49.3; --rail-lead: 30.5; --rail-w: 46; }
+
+:is(.room[data-room="pass"],
+    .room[data-room="dining"],
+    .room[data-room="office"]) .rail {
+  /* plate-Y --rail-foot, in stage pixels, at the arrival scale */
+  --rail-foot-y: calc(
+      (var(--plate-top) + var(--cover-h) * var(--rail-foot) / 100 - 50svh)
+      * var(--overscan-k) + 50svh);
+  /* plate-X --rail-lead, likewise */
+  --rail-lead-x: calc(
+      (var(--plate-left) + var(--cover-w) * var(--rail-lead) / 100 - 50cqw)
+      * var(--overscan-k) + 50cqw);
+
+  align-content: end;
+  /* The cap is a safety rail, not a design value: it guarantees the block
+     always has 42svh of room between the top bar and its foot, so a short
+     landscape phone or a very long tagline can never push type up under the
+     ticket rail. Every room's authored anchor sits well inside it. */
+  padding-block-end: min(calc(100svh - var(--rail-foot-y)), 58svh);
+  padding-inline-start: max(var(--gut), var(--rail-lead-x));
+
+  /* the wash follows the card — see the note on .rail::before */
+  --wash-y: calc(var(--rail-foot-y) - 15svh);
+  --wash-x: calc(var(--rail-lead-x) + 15cqw);
+
+  /* A raised card is over the middle of the picture, not off in a corner, so
+     it holds a tighter measure — long lines crossing a whole photograph read
+     as a caption pasted on top of it. */
+  --rail-measure: calc(var(--rail-w, 60) * 1cqw);
+}
+
+:is(.room[data-room="pass"],
+    .room[data-room="dining"],
+    .room[data-room="office"]) :is(.rail-title, .rail-tagline) {
+  max-inline-size: min(var(--rail-measure), 34ch);
+}
+:is(.room[data-room="pass"],
+    .room[data-room="dining"],
+    .room[data-room="office"]) .rail-chips {
+  max-inline-size: min(var(--rail-measure), 62ch);
+}
+
 /* ── the wash ─────────────────────────────────────────────────────────────
    THE BUG THAT WAS HERE. `inset: -30% -45% -40% -40%` made this pseudo-element
    half again as large as the stage — 2960×1530 at (−640, −270) on a 1725-wide
@@ -930,23 +1903,51 @@ a { color: inherit; text-decoration: none; }
    miss, and it darkens every room at once. The corner radial stays on top of
    it for the directional shaping, now with its centre inside the box. Neither
    has a visible boundary — the ramp dies at 60% height, the radial at 76%. */
+/* AND THE SECOND BUG, FIXED HERE: a lower-third is only a lower third while
+   the type is in the lower third. §08a raises the card in three rooms, and a
+   bottom-anchored ramp left the Pass title sitting on bare brick at 1.9:1.
+
+   So the ramp is now TWO parts with different jobs. The elliptical radial IS
+   the legibility ground and it is centred on the card — --wash-x / --wash-y
+   are written by §08a from the same anchor the type uses, so it goes wherever
+   the type goes, and it defaults to the old bottom-left corner for the four
+   rooms that never moved. The linear ramp stays pinned to the bottom edge at
+   a much lower alpha: it is a grade, not a scrim, and it is what keeps the
+   ≤900px chip drawer readable over the foot of the picture.
+
+   `inset: 0` (not the old negative inset) is load-bearing now: it makes the
+   pseudo-element's percentage space IDENTICAL to the stage's, so a centre
+   solved in stage pixels lands where it was solved. The ellipse is wider and
+   taller than the box on purpose — its alpha reaches zero at 74% of the
+   radius, which is off-screen in both axes, so it still has no visible edge
+   anywhere. */
 .rail::before {
   content: "";
   position: absolute;
-  inset: -20% -30% 0 -20%;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
   background:
-    linear-gradient(to top,
-      rgb(var(--shade) / .80) 0%,
-      rgb(var(--shade) / .52) 20%,
-      rgb(var(--shade) / .20) 40%,
-      transparent 60%),
-    radial-gradient(66% 68% at 20% 74%,
+    /* THE SAME ELLIPSE v3 SHIPPED, RE-EXPRESSED IN THE NEW BOX. v3 wrote
+       `66% 68% at 20% 74%` inside a pseudo-element inset by -20%/-30%/0/-20%,
+       i.e. a 2400x1080 box hung at (-320, -180). Those percentages therefore
+       resolved to radii of 1584 x 734 centred at (160, 619) in STAGE pixels.
+       The numbers below are that same ellipse measured against the stage
+       itself, so the four rooms that did not move get a wash identical to the
+       one their contrast was signed off against — verified: every one of them
+       measures within 0.1 of its v3 number. The only thing that changed is
+       that the centre is now addressable. */
+    radial-gradient(99% 82% at var(--wash-x, 10%) var(--wash-y, 69%),
       rgb(var(--shade) / .74) 0%,
       rgb(var(--shade) / .50) 28%,
       rgb(var(--shade) / .22) 50%,
-      transparent 76%);
+      transparent 76%),
+    /* likewise: v3's `.80 / .52 20% / .20 40% / 0 60%` over a 1080-tall box */
+    linear-gradient(to top,
+      rgb(var(--shade) / .80) 0%,
+      rgb(var(--shade) / .52) 24%,
+      rgb(var(--shade) / .20) 48%,
+      transparent 72%);
   /* The wash is legibility furniture for the rail, so it rides the rail's own
      cut (--e1) rather than the plate's dissolve — otherwise it would hang
      around darkening a photograph that has no type on it. A little of it stays
@@ -961,6 +1962,17 @@ a { color: inherit; text-decoration: none; }
 .rail > * { pointer-events: none; }
 .rail-chips,
 .rail > :is(a, button, ul, ol) { pointer-events: auto; }
+
+/* THE ONE RAIL CHILD THIS FILE DID NOT AUTHOR. app.js hands chefwall.js the
+   Break Room's rail as its `stripHost`, so the Head Chef strip is a real child
+   of .rail — and it was the only one not riding the ownership cut. It stayed
+   at full strength while its room dissolved out, and on a phone (where the
+   drawer is full-height and the strip lands mid-screen) five chef cards were
+   still legible over the Walk-In two rooms later. It takes --e4, the chips'
+   own window, because that is what it sits underneath.
+   This styles the CONTAINER, not the module's internals: no .cw-* selector
+   appears anywhere in this file, and §17's warning about that still stands. */
+.rail > .ccc-chefwall { opacity: var(--e4); }
 
 /* The kicker measured 2.19:1 at its MEDIAN in the break room — brass letters
    on a tan leather sofa arm — which no wash fixes, because the failure is the
@@ -1014,9 +2026,17 @@ a { color: inherit; text-decoration: none; }
   color: var(--fg);
   /* 58% is the contrast floor, not a taste call: it is the lightest ground
      that still keeps --fg over the brightest highlight in any plate above
-     4.5:1 once the backdrop blur has flattened the local variance. */
+     4.5:1 once the backdrop blur has flattened the local variance. Re-verified
+     per-pixel across seven rooms at nine scroll offsets: worst pixel 16.5:1.
+     (An earlier sweep read 1.8:1 here and was wrong — it was diffing two
+     screenshots taken either side of a running CSS transition and counting the
+     moving pixels as glyphs. Freeze transitions as well as animations before
+     you trust a number off this component.) */
   background: color-mix(in oklab, var(--ink-900) 58%, transparent);
-  text-shadow: 0 1px 6px rgb(var(--shade) / .6);
+  /* Two shadows rather than one: a tight one that darkens the pixels the glyph
+     actually sits on, and a wider one for a specular the glass lets through.
+     Worth roughly 1.4:1 on the worst pixel, for no visual weight. */
+  text-shadow: 0 1px 2px rgb(var(--shade) / .92), 0 0 9px rgb(var(--shade) / .72);
   box-shadow:
     inset 0 0 0 1px var(--line-soft),
     0 1px 0 rgb(var(--shade) / .5);
@@ -2088,6 +3108,7 @@ dialog#c3-menu[open],
 
 .keypad-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-3);
   justify-content: flex-end;
   align-items: center;
@@ -2364,6 +3385,14 @@ dialog#c3-menu[open],
     --room-run: 170svh;
     --dissolve-run: 42svh;
     --overscan-k: 1.06;
+    /* The top bar's real footprint, notch included. #ticket-rail is
+       --topbar-h TALL and then padded by the inset, so anything positioning
+       itself under the bar has to add both. */
+    --chrome-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+    /* THE one number the narrow column is solved against — see the band note
+       below. It lives on :root because BOTH sides need it: the band, to size
+       its panels, and .rail, to reserve the space above its type. */
+    --band-h: min(56svh, 780px);
   }
 
   /* Object hotspots off — and off for assistive tech and the tab order too.
@@ -2371,29 +3400,243 @@ dialog#c3-menu[open],
      [data-screen] and [data-chefwall-host], the only other children. */
   .hotspots > .hotspot { display: none !important; }
 
-  /* the spec-guaranteed chips become a full-width tap list */
-  .rail {
+  /* ── THE BAND, AS THE LAYOUT OWNER SEES IT ───────────────────────────────
+     screens.js draws the band; this stylesheet owns where it sits and how much
+     room it gets. Two corrections and one knob:
+
+       · it positions itself against --topbar-h alone, which on a notched phone
+         puts the first panel under the status bar. --chrome-top adds the inset.
+       · --scr-band-h is the ONE number the whole narrow column is solved
+         against: the band is at most this tall (screens.js divides it by
+         --scr-count and each panel takes min(available width / ratio,
+         that share), so the total can only ever be less), and .rail reserves
+         exactly this much at its top. That is what makes overlap impossible
+         at any room, any screen count and any viewport height.
+
+     `:root ` on the selector is load-bearing, not decoration. screens.js
+     declares --scr-band-h on `.ccc-scr-layer` itself and injects its sheet
+     after this one, so an equally-specific rule here loses and a value set on
+     :root never reaches the element. The extra id-free ancestor wins it. */
+  :root .ccc-scr-layer {
+    --scr-band-h: var(--band-h);
+    inset-block-start: calc(var(--chrome-top) + var(--sp-3));
+    /* The band is at most --band-h tall but usually less: a panel is
+       min(available width / its ratio, its share of the band), and for the
+       Pass's three 4:1 title cards the width binds first, leaving 139px of
+       nothing between the last card and the room title on a 390px phone.
+       Giving the layer the full reserved height and packing its rows to the
+       END spends that slack above the band instead, where it reads as a strip
+       of the photograph rather than as a hole in the layout. */
+    block-size: var(--band-h);
     align-content: end;
-    padding-block-end: var(--sp-4);
-    gap: var(--sp-3);
+    padding-inline: max(var(--gut), env(safe-area-inset-left, 0px))
+                    max(var(--gut), env(safe-area-inset-right, 0px));
   }
+
+  /* ── THE PHONE COMPOSITION ───────────────────────────────────────────────
+     Desktop stacks the type in a corner of a photograph. A phone cannot: a
+     16:9 plate cover-cropped into a 3:4 (or 19.5:9) frame keeps about a
+     quarter of its width, so there is no empty corner left to put a card in
+     and no object left to compose against. The photograph becomes a GROUND,
+     and the page becomes a column:
+
+         top bar  ·  screens  ·  room title  ·  every tool in the room
+
+     Four explicit grid rows make that column, and the last one takes whatever
+     is left and scrolls. That is what guarantees no overlap at any height —
+     not a stack of guessed paddings, which is what was here before and what
+     put the Pass's title through the middle of its own tablets at 390x844. */
+  .rail {
+    align-content: normal;
+    /* kicker · title · tagline · the tool list · anything a module appended.
+       The fifth row is not speculative: chefwall.js detaches its Head Chef
+       strip into the Break Room's rail at init (app.js passes it as
+       `stripHost`), so that room really does have a sixth child. Naming the
+       row keeps the list's `1fr` from eating it. */
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    gap: var(--sp-3);
+    padding-block: calc(var(--chrome-top) + var(--rail-drop, 9svh))
+                   max(var(--sp-2), env(safe-area-inset-bottom, 0px));
+    padding-inline: max(var(--gut), env(safe-area-inset-left, 0px))
+                    max(var(--gut), env(safe-area-inset-right, 0px));
+  }
+
+  /* A room whose screens have moved into the band starts its type under it.
+     screens.js sets this attribute on the .stage the moment it relocates, so
+     rooms with no screens keep the shorter drop and their type sits high in
+     the frame where the photograph is still worth looking at. */
+  .stage[data-ccc-screens="narrow"] .rail {
+    --rail-drop: calc(var(--band-h) + var(--sp-3) + var(--sp-4));
+  }
+
+  /* §08a's raised anchoring is a WIDE-VIEWPORT composition. It was solved
+     against objects that are no longer in the frame at this aspect — the Pass's
+     tablets and the Office's monitor are both in the band by now — so it is
+     retired here rather than re-tuned. --rail-foot / --rail-lead stay declared
+     on the rooms; nothing reads them at this breakpoint. */
+  :is(.room[data-room="pass"],
+      .room[data-room="dining"],
+      .room[data-room="office"]) .rail {
+    padding-block-end: max(var(--sp-2), env(safe-area-inset-bottom, 0px));
+    padding-inline-start: max(var(--gut), env(safe-area-inset-left, 0px));
+    --wash-x: 50%;
+    --wash-y: 78%;
+    --rail-measure: none;
+  }
+  :is(.room[data-room="pass"],
+      .room[data-room="dining"],
+      .room[data-room="office"]) :is(.rail-title, .rail-tagline, .rail-chips) {
+    max-inline-size: none;
+  }
+
+  /* ── THE VEIL, KEYED TO THE TYPE ITSELF ─────────────────────────────────
+     On a desktop the wash is a soft ground under a card in one corner; on a
+     phone the type owns the lower half of the frame, so it is a veil that lets
+     the plate breathe above and closes down over the list.
+
+     WHAT WAS WRONG, AND WHY IT WAS WRONG BY CONSTRUCTION. Both ramps used to
+     be expressed against `calc(--chrome-top + --rail-drop)` — a constant, on
+     the assumption that the type always starts a fixed distance below the top
+     bar. That is true of six rooms and false of the seventh: the Walk-In
+     inverts its column below (align-content: end) so the door keeps the frame
+     it was fitted to, and its type actually starts near y 390 on a 390x844
+     phone. The veil closed at y 132, which is 260px ABOVE the type it exists to
+     protect — and those 260px are exactly the closed freezer door and its
+     keypad. Measured mean luminance over the door region, same page, same
+     frozen frame, old rule vs this one: 13.4 -> 79.0 — and 79.0 with this
+     pseudo-element disabled entirely, i.e. the veil now contributes exactly
+     nothing over the door. The set piece was being blacked out to protect type
+     that was not there.
+
+     Nudging the constant for that one room would have bought a working phone
+     today and the same failure the next time any room's column changes. So the
+     veil no longer takes the type's position as an assumption: IT IS PLACED ON
+     THE TYPE.
+
+     .rail is a positioned grid container, so giving this pseudo-element a
+     definite grid placement makes its containing block the GRID AREA rather
+     than the rail's padding box (CSS Grid §9: an abspos child of its grid
+     container, positioned in both axes, resolves against its grid area). Rows
+     1..-1 is every authored row of the card, wherever align-content, a 1fr
+     row, a suppressed tagline or a fourteen-row drawer has put them. `inset`
+     then bleeds it out: --veil-lead above the first row, half a viewport each
+     side, --veil-tail past the last so it always reaches the bottom edge.
+
+     Everything the two old rules encoded now falls out of that for free:
+       · a banded room's veil starts below the band, because the type does —
+         no --band-h in this rule and no 30% of grey over the panels;
+       · an unbanded room's veil starts 7svh under the chrome, because the type
+         does — the Prep Station's white subway tile is covered as before;
+       · the Walk-In's veil starts at ITS type, four hundred pixels lower, and
+         the door is simply not under it.
+     Two rules become one, and the one has no constant in it.
+
+     Above the box nothing is painted, which is correct — there is no type up
+     there, and .plate-vig below already carries the band/top-bar grade. Still
+     gradients only: no new layer, no blend mode, nothing but opacity animating.
+
+     LEAD AND TAIL. --veil-lead is the distance the ramp has to go from clear to
+     closed, and it lands its .88 stop exactly on the first row of type. --veil-
+     tail only has to out-reach the rail's bottom padding; it is generous
+     because a gradient stop past the viewport costs nothing.
+
+     MEASURED AFTER, per-pixel at 390x844 with animations AND transitions
+     frozen (measure them running and you measure a mid-flight opacity), worst
+     glyph pixel in each room: Pass 14.6 / 17.5 / 14.0, Host 14.1 / 17.0 / 13.3,
+     Dining 14.5 / 17.6 / 13.8, Prep 13.7 / 16.9 / 13.3, Office 14.4 / 17.6 /
+     14.0, Break Room 14.6 / 17.6 / 13.5, Walk-In 14.5 / 17.8 (kicker / title /
+     tagline; chips 15.3-17.9 everywhere). AA wants 4.5 small and 3.0 large.
+     The Prep Station is the room to watch, because it is the one with no band
+     and white subway tile under its type: it was 2.9 / 3.9 before the rule this
+     one replaces and 5.6 / 6.2 after it, and it is 13.7 / 13.3 now.
+
+     IF THE GRID PLACEMENT WERE EVER IGNORED the insets would fall back to the
+     rail's padding box and the ramp would close at the top of the stage — dark,
+     not broken, and legible. Abspos-in-grid-area is Grid Level 1 and has
+     shipped in every engine since 2017; there is no @supports test for it, so
+     this note is the guard. */
+  .rail {
+    --veil-lead: 6.5svh;
+    --veil-tail: 16svh;
+  }
+
+  .rail::before {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    inset: calc(-1 * var(--veil-lead)) -50cqw calc(-1 * var(--veil-tail)) -50cqw;
+    background:
+      linear-gradient(to bottom,
+        transparent 0,
+        rgb(var(--shade) / .10) calc(var(--veil-lead) * .45),
+        rgb(var(--shade) / .88) var(--veil-lead),
+        rgb(var(--shade) / .94) calc(100% - var(--veil-tail)),
+        rgb(var(--shade) / .94) 100%);
+  }
+
+  /* the title card, at phone measure. The extra tight shadow is not decoration:
+     at this size a single specular highlight in the plate lands on one glyph
+     stem and takes that pixel to 3:1 on its own. A 2px shadow under the glyph
+     costs nothing and removes the outlier. */
+  .rail-kicker, .rail-tagline {
+    text-shadow: var(--shadow-text), 0 1px 2px rgb(var(--shade) / .92);
+  }
+  .rail-kicker { font-size: var(--t--2); }
+  .rail-title  { font-size: var(--t-3); max-width: 16ch; }
+  .rail-tagline {
+    font-size: var(--t-0);
+    max-width: 40ch;
+    /* three lines is a paragraph on a phone; two is a caption */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rail-rule { display: none; }
+
+  /* ── THE DRAWER ──────────────────────────────────────────────────────────
+     The spec-guaranteed chip list becomes the room's whole navigation, because
+     the hotspots are gone. So it stops being chips: full-bleed rows, 56px, a
+     brass tick, a hairline between them, and it scrolls inside its own grid
+     row rather than pushing the title off the top of the screen.
+
+     `overscroll-behavior: contain` matters more here than anywhere else on the
+     site: without it, flicking to the end of the Freezer's fourteen tools
+     hands the gesture to the page and throws you into the next room. */
   .rail-chips {
     display: grid;
     grid-template-columns: 1fr;
     gap: 0;
     inline-size: 100%;
     max-inline-size: none;
-    max-block-size: 42svh;
+    min-block-size: 0;
+    block-size: 100%;
+    align-self: stretch;
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     padding-block-start: var(--sp-2);
     border-block-start: 1px solid var(--line-hair);
+    /* rows keep their own height and the box scrolls. Without this the grid
+       stretches three tools across 700px of iPad and every row is 190px tall,
+       which reads as a bug rather than as generosity. */
+    align-content: start;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--brass) 45%, transparent) transparent;
+    /* a soft bottom fade so a cut-off row reads as "more below" rather than as
+       a layout bug. Mask, not an overlay: it costs no extra layer. */
+    -webkit-mask: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
+    mask:         linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
   }
+  .rail-chips::-webkit-scrollbar { inline-size: 3px; }
+  .rail-chips::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--brass) 45%, transparent);
+    border-radius: 999px;
+  }
+
   .rail-chips .chip {
     inline-size: 100%;
     justify-content: flex-start;
-    min-block-size: 52px;
+    min-block-size: 56px;
     padding-inline: 0 var(--sp-3);
     border-radius: 0;
     background: none;
@@ -2403,38 +3646,194 @@ dialog#c3-menu[open],
     border-block-end: 1px solid var(--line-hair);
     white-space: normal;
     text-align: start;
-    &:hover, &:focus-visible {
-      background: color-mix(in oklab, var(--brass) 12%, transparent);
+    font-size: var(--t--1);
+    letter-spacing: 0.12em;
+    /* the row is the tap target and the glass is gone, so the glyphs carry
+       their own ground */
+    text-shadow: 0 1px 2px rgb(var(--shade) / .95), 0 0 10px rgb(var(--shade) / .8);
+    &::before { inline-size: 6px; block-size: 6px; }
+    &:hover, &:active {
+      background: color-mix(in oklab, var(--brass) 14%, transparent);
       color: var(--fg);
       transform: none;
       box-shadow: none;
+      text-shadow: 0 1px 2px rgb(var(--shade) / .95);
+      &::before { background: var(--brass-300); }
+    }
+    /* THE HALO SURVIVES. A drawer row drops the glass and with it its
+       box-shadow, and §16's `.chip:focus-visible` halo is the same specificity
+       as this rule but earlier in the file — so a blanket `box-shadow: none`
+       here silently took the light half of the two-tone focus ring off every
+       row, leaving a 3px near-black outline on a dark photograph. That is the
+       1.07:1 failure §16 exists to prevent, reintroduced at the one breakpoint
+       where the drawer IS the navigation. Focus is therefore its own state,
+       not a variant of hover. */
+    &:focus-visible {
+      background: color-mix(in oklab, var(--brass) 14%, transparent);
+      color: var(--fg);
+      transform: none;
+      text-shadow: 0 1px 2px rgb(var(--shade) / .95);
+      box-shadow: 0 0 0 6px var(--brass-300);
       &::before { background: var(--brass-300); }
     }
   }
 
-  /* the title card gets smaller and the rail sits higher so the list fits */
-  .rail-title { font-size: var(--t-3); max-width: 18ch; }
-  .rail-tagline { font-size: var(--t-0); max-width: 42ch; }
-  .rail-rule { display: none; }
+  /* THE WALK-IN IS THE ONE ROOM THAT KEEPS ITS BOTTOM-ANCHORED DRAWER.
+     freezer.js fits the closed door into a narrow viewport with its own
+     `fitY: 0.38`, which lifts the leaf and the keypad into the top 45% of the
+     stage precisely because it expects the tool list along the bottom. A list
+     that starts at 22% instead covers the keypad — the one control in the room
+     — with a column of chips. So here the column is inverted: title and list
+     sit at the foot, and the door keeps the frame it was fitted to.
 
-  /* chrome */
-  #ticket-rail { padding-inline: var(--sp-4) 7rem; gap: var(--sp-3); }
+     THIS IS THE ROOM THE VEIL ABOVE USED TO MISS, and it is worth being
+     explicit about why the veil is no longer keyed to a constant: everything
+     in this rule is layout the veil cannot predict. align-content moves the
+     rows; how far they move depends on how many there are, which depends on
+     whether the gate is open. The veil is placed on the rows themselves, so
+     none of that is its business any more. */
+  .room[data-room="freezer"] .rail {
+    align-content: end;
+    grid-template-rows: auto auto auto auto auto;
+  }
+  .room[data-room="freezer"] .rail-chips {
+    block-size: auto;
+    max-block-size: min(46svh, 420px);
+    align-self: end;
+  }
+
+  /* The band is a full-width overlay sitting on a photograph, and without a
+     ground under it two black rectangles read as screens pasted onto a picture
+     of screens. This grades the plate down across exactly the band's own
+     footprint — on .plate-vig, which is BELOW the band in z-order, unlike the
+     rail's wash which is above it. Gradient stops only: no new layer, no new
+     opacity, nothing added to the frame budget. */
+  .plate-vig {
+    background:
+      linear-gradient(to bottom,
+        rgb(var(--shade) / .76) 0%,
+        rgb(var(--shade) / .58) calc(var(--chrome-top) + var(--band-h) * .5),
+        rgb(var(--shade) / .44) calc(var(--chrome-top) + var(--band-h)),
+        rgb(var(--shade) / .16) calc(var(--chrome-top) + var(--band-h) + 10svh),
+        transparent 100%),
+      radial-gradient(128% 108% at 50% 42%,
+        transparent 38%,
+        rgb(var(--shade) / .30) 68%,
+        rgb(var(--shade) / .68) 100%);
+  }
+  /* rooms with no band keep a plain top grade — the photograph is the point */
+  .stage:not([data-ccc-screens="narrow"]) .plate-vig { --band-h: 0px; }
+
+  /* ── THE CROP ────────────────────────────────────────────────────────────
+     A 16:9 plate in a 390x844 frame keeps 24% of its width. WHICH 24% is a
+     composition decision per room, and leaving it at 0.5 was picking the
+     middle of a photograph that was framed for a different shape.
+
+     --art-x is very nearly the plate-x the phone ends up centred on (exactly
+     so as the visible fraction goes to zero), so these read as "point the
+     camera here": the Pass's centre tablet and the heat-lamp row; the Host
+     Stand's book, spike and tip jar rather than the TV that has left the frame;
+     Dining's near banquette; the Prep line's recipe rail and mise en place;
+     the Back Office desk and its green lamp; the Break Room's wall. */
+  .room[data-room="pass"]      { --art-x: .50; }
+  .room[data-room="host"]      { --art-x: .30; }
+  .room[data-room="dining"]    { --art-x: .30; }
+  .room[data-room="prep"]      { --art-x: .40; }
+  .room[data-room="office"]    { --art-x: .55; }
+  .room[data-room="breakroom"] { --art-x: .40; }
+
+  /* Atmosphere is calmer on a phone, and mostly absent. The plate is a quarter
+     of itself here, so a plume authored against the whole frame is suddenly
+     half the screen; and the top two thirds of a phone stage is a screens band
+     and a title card, not photograph. Three rooms keep a plume because their
+     air is the point; nothing keeps a filament, because the lamps are all
+     cropped out. */
+  .room { --atmo-on: none; --fil-on: none; }
+  .room:is([data-room="pass"], [data-room="prep"], [data-room="freezer"]) {
+    --atmo-on: "";
+    --atmo: .26; --atmo-w: 40%; --atmo-x: 30%;
+  }
+
+  /* ── CHROME ──────────────────────────────────────────────────────────────
+     The seven rooms stay in one horizontally-snapped strip rather than folding
+     into a hamburger — one tap, not two, is the whole point of the ticket rail.
+     What changes is that the C³ button's reserved space shrinks to what the
+     button actually needs, which is worth two more rooms on screen. */
+  #ticket-rail {
+    gap: var(--sp-2);
+    padding-inline: max(var(--sp-3), env(safe-area-inset-left, 0px))
+                    calc(4.25rem + max(var(--sp-3), env(safe-area-inset-right, 0px)));
+  }
   #ticket-rail .brand { display: none; }
-  #c3-button { inset-inline-end: var(--sp-4); padding-inline: var(--sp-2) var(--sp-3); }
+  .ticket { padding-inline: var(--sp-3); font-size: var(--t--2); }
+
+  #c3-button {
+    inset-inline-end: max(var(--sp-3), env(safe-area-inset-right, 0px));
+    padding-inline: var(--sp-2) var(--sp-3);
+    min-block-size: 44px;
+  }
   #c3-menu {
-    inset-inline: var(--sp-3);
+    inset-inline: max(var(--sp-2), env(safe-area-inset-left, 0px))
+                  max(var(--sp-2), env(safe-area-inset-right, 0px));
     inline-size: auto;
-    max-block-size: min(76svh, 640px);
+    max-block-size: min(74svh, 640px);
+    padding-block-end: max(var(--sp-4), env(safe-area-inset-bottom, 0px));
   }
   #c3-menu .c3-list { grid-template-columns: 1fr; }
 
   /* the index reads as one column of rooms rather than a grid of columns */
-  .footer-index { gap: var(--sp-6); }
-  #site-footer { padding-block: var(--sp-8); }
+  .footer-index { gap: var(--sp-6); grid-template-columns: 1fr; }
+  #site-footer {
+    padding-block: var(--sp-7) calc(var(--sp-7) + env(safe-area-inset-bottom, 0px));
+    padding-inline: max(var(--gut), env(safe-area-inset-left, 0px))
+                    max(var(--gut), env(safe-area-inset-right, 0px));
+  }
+  .tool-row { min-block-size: 60px; }
 
   /* the keypad fills the hand, and the keys grow with it */
-  .keypad { inline-size: min(400px, 100%); padding: var(--sp-5) var(--sp-4); }
-  .keypad-key { min-block-size: 58px; }
+  .keypad {
+    inline-size: min(400px, 100%);
+    padding: var(--sp-5) var(--sp-4)
+             max(var(--sp-5), calc(var(--sp-4) + env(safe-area-inset-bottom, 0px)));
+  }
+  .keypad-key { min-block-size: 58px; font-size: var(--t-2); }
+  /* Three buttons in a row need 342px of nowrap text and the panel's content
+     box on a 390px phone is 298. They wrapped off the right edge and UNLOCK —
+     the only one that matters — was the one that went. So on a phone the row
+     becomes two full-width keys with the sound toggle underneath: Cancel and
+     Unlock at 50% each, both comfortably over 44px, both entirely on screen. */
+  .keypad-actions {
+    justify-content: stretch;
+    gap: var(--sp-2);
+  }
+  .keypad-actions > * { flex: 1 1 45%; justify-content: center; text-align: center; }
+  .keypad-actions > .frz-mute { flex-basis: 100%; order: 3; }
+}
+
+/* ── True phones ──────────────────────────────────────────────────────────
+   ≤560px is a hand, not a tablet. Everything above is already right for an
+   iPad in portrait, where 52svh of band still leaves 700px of column; here the
+   whole stage is 844px and every row has to earn its height. */
+@media (max-width: 560px) {
+  :root {
+    --topbar-h: 52px;
+    /* --room-run IS NOT TOUCHED HERE, AND THAT IS DELIBERATE. A shorter runway
+       is tempting on a phone — fewer swipes per room — but §02 is explicit that
+       the rail's cross-cut is solved against the RATIOS between --room-run,
+       --dissolve-run and --pin-lead, and §08's thresholds are the solution to
+       that system. Setting 155svh here against the 170svh/42svh the narrow
+       block already declares moved those bounds, and the invariant sweep caught
+       it immediately: at 390x844 two rooms' rails reached full strength at the
+       same scroll position, which is the one thing §08 guarantees cannot
+       happen. Re-solve the pair or leave the runway alone. */
+  }
+  :root { --band-h: min(50svh, 430px); }
+  .rail { --rail-drop: 7svh; gap: var(--sp-2); }
+  .rail-title { font-size: var(--t-3); max-width: 14ch; }
+  .rail-tagline { -webkit-line-clamp: 2; font-size: var(--t--1); }
+  .rail-chips .chip { min-block-size: 54px; }
+  /* the tagline is the first thing to go when a room has a long tool list */
+  .room[data-room="freezer"] .rail-tagline { display: none; }
 }
 
 /* Very short landscape phones — keep the list usable */
@@ -2456,6 +3855,13 @@ dialog#c3-menu[open],
   /* one static plate per screen, no runway, no overlap, no dissolve */
   /* no dissolve, so no pin-lead: the stage is a plain sticky pane again */
   :root { --room-run: 100svh; --dissolve-run: 0px; --overscan-k: 1; --pin-lead: 0px; }
+  /* §06d gives the Back Office its own, smaller bleed so its wall monitor keeps
+     a margin. A per-room custom property is set on a CLOSER ancestor than
+     :root, so it wins here whatever the cascade says — and the plate below is
+     `transform: none`, i.e. not scaled at all. Left alone, §08a's anchor would
+     go on solving itself against a 6% scale that no longer exists and slide the
+     type ~17px off the composition. It is restated rather than removed. */
+  .room[data-room="office"] { --overscan-k: 1; }
   .room, .hero { scroll-snap-align: start; }
   :is(.room, .hero) + .room { margin-block-start: 0; }
 
@@ -2468,6 +3874,32 @@ dialog#c3-menu[open],
   }
   .plate-glow { opacity: .34 !important; }
   .plate-vig  { opacity: .78 !important; }
+
+  /* §06b — THE ROOM IS ALREADY LIT. The whole point of the cross-fade is that
+     you watch the lights come up; with motion off there is nothing to watch,
+     and a dark plate dissolving into a lit one is exactly the kind of large
+     luminance change this media query exists to suppress. So the dark layer is
+     clipped away outright rather than merely set to opacity 0 — clipped means
+     never rastered, which also takes its texture off a machine that may well
+     have asked for reduced motion because it is a slow one.
+
+     AND THE REQUEST GOES WITH IT. engine.js's applyReducedMotion() pins --p to
+     0 and --bloom to 1 for every room, which is exactly the pair §06b's style
+     query matches, so on a browser with style queries not one dark plate is
+     fetched on this path — measured, 0KB. `background-image: none` here says
+     the same thing unconditionally, so the guarantee does not depend on that
+     feature: a machine that asked for reduced motion downloads no second set of
+     photographs it is never going to show, whatever it supports. */
+  .plate-wrap::after {
+    clip-path: inset(50%) !important;
+    opacity: 0 !important;
+    background-image: none !important;
+  }
+
+  /* §06c — no steam, no dust, no filament wander. The switch is `content`, so
+     this does not merely hide them: neither pseudo-element is generated, and
+     neither animation exists to be paused. */
+  .stage { --atmo-on: none; --fil-on: none; }
   /* transform off on BOTH or the tracking invariant breaks — never one alone.
      the clip must go too: applyReducedMotion() pins --p to 0 and --enter to 1
      for every room, and although that IS inside the ownership window, forcing
