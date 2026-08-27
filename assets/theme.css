@@ -121,6 +121,27 @@
    number the query can actually see. */
 @property --dark-gate   { syntax: "<number>"; inherits: true;  initial-value: 0; }
 
+/* --arr · THE ARRIVAL RAMP.  --lit used to be a pure function of --bloom, and
+   --bloom is easeOutQuint(--p / 0.55) x --enter — which is EXACTLY ZERO for the
+   whole of a room's approach and for the ~100svh of pin-lead it then spends
+   full-screen at --p: 0. That is why every room's first impression was a black
+   rectangle: the lights could not start until the scrub did, and the scrub does
+   not start until the room has been on screen for the better part of a
+   viewport. --arr is the missing axis — the last fifth of the room's OWN
+   arrival — so the handover lands while the room is still coming in. See §06b.
+
+   --cut · THE OWNERSHIP WINDOW, and the one number that says whether a room's
+   affordances belong to the visitor yet. Everything you can click reads it:
+   the rail's chips, the hotspot layer, screens.js's panel band, labels.js's
+   ink. It is declared on .stage (§05) so all four inherit the same value and
+   cannot drift apart. See §08 for how it is solved. */
+@property --arr         { syntax: "<number>"; inherits: true;  initial-value: 1; }
+@property --cut         { syntax: "<number>"; inherits: true;  initial-value: 1; }
+/* The binary form of --cut: 1 the instant --cut leaves zero, so a gate built on
+   it snaps and never lops the edge off something mid-fade. Same trick, same
+   reason, as §09's --live. */
+@property --live-cut    { syntax: "<number>"; inherits: true;  initial-value: 1; }
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    02 · TOKENS
@@ -256,6 +277,31 @@
      height, because that is engine.js's `stageH` and therefore the exact
      length of its enterIn / enterOut ramps. See §05.                       */
   --pin-lead:     100svh;
+
+  /* ── THE CUT · the two numbers §08's exit side is solved from ────────────
+     The rail's ownership window is IN on --enter and OUT on --p, and the two
+     axes are related by the room geometry: a room's --p and the NEXT room's
+     --enter both track the same scroll, so
+
+         u = (p * (--room-run - --pin-lead) - --room-run + --dissolve-run
+              + --pin-lead) / --pin-lead
+
+     where u is the next room's raw (pre-easing) arrival progress. That mapping
+     is different at every breakpoint that changes --room-run / --dissolve-run,
+     which is why a single pair of thresholds could only ever be solved for the
+     INTERSECTION of the four — a window barely wider than one sample. So the
+     exit is solved per breakpoint instead, and it is solved from these two
+     numbers alone:
+
+         --cut-z   the --p at which the outgoing rail has reached exactly 0
+         --cut-k   1 / the width of that ramp
+
+     Both are derived, not tuned: --cut-z is u = 0.152 and the ramp starts at
+     u = 0.140, which §08 explains. EVERY BLOCK THAT SETS --room-run MUST SET
+     THIS PAIR — §17 has three of them, and a missing pair is not a visual
+     wobble, it is the cross-cut guarantee gone. Base = 220svh / 58svh.       */
+  --cut-z:        0.6433;
+  --cut-k:        100;
 
   /* Plate bleed, as a SCALE not an inset — an inset resolves against width
      for the horizontal edges and height for the vertical ones, so it never
@@ -562,6 +608,9 @@ a { color: inherit; text-decoration: none; }
 .hero {
   position: relative;
   block-size: var(--room-run);
+  /* not a hit target — see the note in .stage below. The things inside that
+     ARE targets opt back in and are gated on --cut-clip. */
+  pointer-events: none;
 }
 
 :is(.room, .hero) + .room { margin-block-start: calc(-1 * var(--dissolve-run)); }
@@ -601,8 +650,71 @@ a { color: inherit; text-decoration: none; }
      the only containment hint missing from the file. */
   contain: paint;
 
+  /* ── --cut · WHO OWNS THE AFFORDANCES ──────────────────────────────────
+     Declared here, on the one element the engine writes --enter and --p to, so
+     the rail (§08), the hotspot layer (§09), screens.js's narrow band and
+     labels.js's ink all inherit ONE value and cannot disagree about which room
+     the visitor is in. The solution is in §08; the constants are in §02 and
+     §17. Registered in §01 with initial-value 1, so a page whose engine.js
+     never ran hands every room its chips, its objects and its screens.        */
+  --cut: clamp(0, min((var(--enter) - 0.578) * 34,
+                      (var(--cut-z) - var(--p)) * var(--cut-k)), 1);
+  --live-cut: clamp(0, calc(var(--cut) * 1000), 1);
+  /* The clip a non-owning room's interactive elements take. -24px when the room
+     owns the page (so nothing real is ever clipped — not a focus ring, not a
+     chip's drop shadow, not a hover glow); a flat inset(50%) when it does not,
+     which makes an element neither painted NOR HIT-TESTED. See the block under
+     `.stage { pointer-events: none }` for what this is for. */
+  --cut-clip: calc((1 - var(--live-cut)) * 50% - var(--live-cut) * 24px);
+
+  /* ── AND THE STAGE ITSELF NEVER TAKES A CLICK ──────────────────────────
+     THE DEFECT THIS FIXES, MEASURED. A stage is sticky, pinned a whole
+     --pin-lead EARLY and released a --pin-lead LATE (see the block above), so
+     the NEXT room's stage box covers this viewport from the bottom up for the
+     last ~45% of this room's runway — long before it is visible, and while its
+     --enter is still 0. `opacity: 0` does not stop hit-testing, and .stage
+     carries a background and a full-bleed <img>. So at 1600x900, scrollY 1900
+     onward — the Pass at --p 0.25, filling the screen, fully lit —
+     elementFromPoint at the centre of EVERY chip, EVERY object and EVERY
+     screen in that room returned `IMG.plate in #room-host`. Not one thing in
+     the room a visitor was looking at could be clicked, for more than half of
+     every room, on every breakpoint. That is the literal form of "I want to
+     make sure that everything that is clickable on the screen is clickable on
+     every single page as we are scrolling", and it was not a subtlety of the
+     reveal windows — it was a plate swallowing the page.
+
+     THE FIX IS ONE LINE PLUS A GATE. The stage stops being a hit target at
+     all, which takes the plate, the wrapper, the glow, the vignette, the
+     freezer's whole door scene and the stage's own background out of the
+     hit-test in one go — none of them was ever meant to be clickable. What IS
+     meant to be clickable already opts back in explicitly (.rail-chips,
+     .hotspot, the screen hosts, .frz-pad), and those are then gated on
+     --cut-clip so that a room which does NOT own the page cannot reach through
+     an invisible plate either. .hotspot has carried exactly this gate since
+     v3 (§09) — this is that idea finished.
+
+     THE RUNWAY SECTIONS GO WITH IT, for the same reason one step further out:
+     a .room is 170-240svh tall and the next one starts before this one ends,
+     so once the stage stopped taking clicks the bare <section> behind it took
+     them instead — `BLOCKED by SECTION.room in #room-host`, measured, at the
+     same points. Neither element was ever a target; the photograph is not a
+     link and the runway is not a control. See the rule below .stage. */
+  pointer-events: none;
+
   /* keeps the stage on its own layer AND carries the pin-lead offset */
   transform: translate3d(0, calc(-1 * var(--pin-lead)), 0);
+}
+
+/* THE LAST ROOM HAS NOTHING TO CUT AGAINST. The exit half of --cut exists for
+   exactly one reason: to clear this room's type off the screen before the NEXT
+   room's type arrives. The Walk-In has no next room, so the exit was spending
+   itself on a guarantee with no counterparty — its chips and its keypad went
+   dark at --p 0.61 and stayed dark for the last two fifths of a runway it was
+   the only thing on. Verified against the same sweep as everything else: with
+   the exit dropped, the second-brightest rail is still 0.0000 at every scroll
+   position, because there is no second rail down there to be brightest. */
+#kitchen > .room:last-child .stage {
+  --cut: clamp(0, (var(--enter) - 0.578) * 34, 1);
 }
 
 
@@ -732,9 +844,9 @@ a { color: inherit; text-decoration: none; }
         it. That is a slideshow. Light arrives in a room; a room does not
         brighten and then acquire objects. The whole argument is in §06b. */
   filter:
-    saturate(calc(0.50 + 0.32 * var(--enter) + 0.34 * var(--lift)))
-    brightness(calc(0.36 + 0.30 * var(--enter) + 0.43 * var(--lift)))
-    hue-rotate(calc((1 - var(--lift)) * -7deg))
+    saturate(calc(0.66 + 0.24 * var(--enter) + 0.26 * var(--lift)))
+    brightness(calc(0.68 + 0.30 * var(--enter) + 0.11 * var(--lift)))
+    hue-rotate(calc((1 - var(--lift)) * -5deg))
     contrast(calc(1.02 + 0.04 * var(--p)));
 
   backface-visibility: hidden;
@@ -807,7 +919,13 @@ a { color: inherit; text-decoration: none; }
 
 .plate-glow {
   z-index: var(--z-glow);
-  opacity: calc(var(--bloom) * 0.82);
+  /* --lit, not --bloom. Same reason as the grade: --bloom is zero for the
+     whole of a room's arrival, so the practicals used to strike a full
+     pin-lead after the room landed. --lit (§06b) carries the arrival half, so
+     roughly half the pool is already in the room as it lands and the rest
+     comes up with the scrub. It also inherits --hold, so a room you are
+     LEAVING keeps its lamps on — which is what --hold was for. */
+  opacity: calc(var(--lit) * 0.82);
   background:
     radial-gradient(62% 50% at var(--glow-x, 62%) var(--glow-y, 30%),
       color-mix(in oklab, #ffd9a8 34%, transparent) 0%,
@@ -1078,7 +1196,38 @@ a { color: inherit; text-decoration: none; }
      layer is due. Coming back up from BELOW a room walks the same --p down
      from 1. Both directions re-arm; neither pays for the exit. */
   --hold: clamp(0, calc((var(--p) - 0.55) * 4), 1);
-  --lit: clamp(0, calc(var(--bloom) * var(--bloom) * var(--bloom)
+
+  /* --arr · THE ARRIVAL HALF OF THE LIGHTS, AND THE FIX FOR "IT MAKES IT DARK
+     IN EACH ROOM, BUT NOT VISIBLE".
+     --bloom cannot start until --p does, and --p does not start until a room
+     has already been full-screen for a whole --pin-lead. Measured at 1600x900:
+     the Pass covers the viewport from scrollY 1008 and its first lit frame was
+     at 1647 — 639px of scroll, roughly two thirds of a viewport, in which the
+     room a visitor had just arrived in was a black rectangle. That is the
+     defect, and no amount of raising the floor fixes it, because at --lit 0
+     the DARK PHOTOGRAPH is what is on screen and the lit one is not.
+     --arr is the TAIL of the room's own approach — 0 at --enter 0.90 and 1 at
+     0.9909 — and where that sits is the whole tuning. .stage's dissolve remap
+     puts a room at full coverage from --enter 0.919, so the window opens with
+     the room already filling the screen and closes ~350px of scroll before its
+     scrub begins. The beat is therefore intact and in the right order: you
+     watch the empty room LAND, full-screen and unmistakably off, and then you
+     watch the lights come up in it — instead of waiting out a whole pin-lead
+     first. Measured at 1600x900: lights start at scrollY top−568 and the plate
+     handover is finished at top−352, where it used to start at top+63 and not
+     finish until top+201.  */
+  --arr:  clamp(0, calc((var(--enter) - 0.90) * 11), 1);
+
+  /* Two axes, and the weights are the whole schedule. 0.52 x --arr is by
+     itself past --dark-t's ceiling (0.459), so the plate handover is COMPLETE
+     by the time the room finishes arriving — "the payoff lands while the room
+     is still arriving". The remaining 0.48 stays on the cubed --bloom, which
+     is what carries the exposure, the saturation and the warm pool on up
+     through the first third of the scrub: light and warmth continuing to
+     arrive in a room you can already see. --hold is unchanged and still owns
+     the exit — see below. */
+  --lit: clamp(0, calc(0.52 * var(--arr)
+                       + 0.48 * var(--bloom) * var(--bloom) * var(--bloom)
                        + var(--hold)), 1);
 
   /* --lift · THE EXPOSURE, WHICH LAGS THE SWAP. §06's grade reads this and
@@ -1447,8 +1596,26 @@ a { color: inherit; text-decoration: none; }
    the clipboards are still a chip, a footer row and (above 8:7) a hotspot.
    0.12 keeps the whole monitor down to 8:7. It costs nothing at 16:9 or wider,
    where the plate is not cropped horizontally at all and --art-x moves the
-   frame by two pixels. */
-.room[data-room="office"] { --art-x: .12; --overscan-k: 1.06; }
+   frame by two pixels.
+
+   ⚠ 0.12 IS A CONSEQUENCE OF WHERE THE MONITOR IS, NOT A PREFERENCE, AND THE
+   MONITOR IS MOVING. The art in flight centres the desk and hangs a much
+   larger, square-on monitor across the middle half of the frame. A centred
+   subject is the one thing a hard-left crop cannot protect: 0.12 would push it
+   off to the right on every 4:3 viewport, which is the exact failure this
+   number was introduced to prevent, mirrored. When that plate lands, this goes
+   back to about .5 — and --overscan-k goes back to the site's 1.10 with it,
+   because the 1.06 below exists only because the current monitor has 7.2
+   plate-% of wall between it and the frame edge and the push-in was eating it.
+   Neither is worth carrying forward on their own. rooms.js's office entry
+   carries the matching note, and the two must be changed in the same pass. */
+/* RESOLVED 2026-08-27: the office was reshot with the desk centred and the
+   monitor hung directly behind it, so the subject is now in the MIDDLE of
+   the frame. --art-x: .12 existed only to drag a monitor at plate-x
+   7.2-22.4% into a portrait crop; against a centred subject it would push
+   that subject off to the right on every iPad in landscape. Back to centre,
+   and --overscan-k returns to the default with it. */
+.room[data-room="office"] { --art-x: .5; }
 
 /* Every room that wants air or a wandering filament turns the pseudo-elements
    on and then says what it is. A room absent from this table generates
@@ -1579,6 +1746,11 @@ a { color: inherit; text-decoration: none; }
   gap: var(--sp-3);
   color: var(--fg-dim);
   min-block-size: 44px;
+  /* The hero's stage is pointer-events: none like every other (§05), so the
+     one link in it has to opt back in — and take the same ownership gate as
+     the rail's chips, or it goes on swallowing taps at the top of the Pass. */
+  pointer-events: auto;
+  clip-path: inset(var(--cut-clip));
 
   &::before {
     content: "";
@@ -1673,32 +1845,72 @@ a { color: inherit; text-decoration: none; }
                          guarantees the outgoing type clears before the next
                          room's type arrives.
 
-     The thresholds are not taste. They are solved against two invariants that
-     must hold simultaneously at every scroll position, on every breakpoint:
-       A. at most one room's rail/hotspots are non-zero;
-       B. any room whose VISIBLE coverage exceeds 90% is at full strength.
-     A is bounded above by where the next room's type starts (p ≈ 0.714 at the
-     tightest breakpoint); B is bounded below by where this room's visible
-     coverage falls under 90%, i.e. where the next plate reaches 10% opacity
-     (p ≈ 0.590 at the tightest). That leaves a 0.124-of-runway window for the
-     whole cross-cut — about 156px of scroll, and it is 156px on every
-     breakpoint, because it is set by the shape of the dissolve rather than by
-     the room geometry. The values below sit centred in it with ~32px of margin
-     on each side. Verified by simulation over six viewport configurations:
-     second-brightest rail 0.0000, minimum strength while covered 1.0000.
+     ── RE-SOLVED 2026-08-27 · THE AFFORDANCES CANNOT WAIT FOR THE ATMOSPHERE ──
+     THE DEFECT, in the client's words: "everything that is clickable on the
+     screen [must be] clickable on every single page as we are scrolling. Right
+     now, it looks like the clickable links are only available when you scroll
+     down far enough for the lights to fully turn on."
 
-     Do not nudge these individually. Re-solve the pair, or the guarantee goes.
+     He is describing a real hole and it was bigger than it looked. The old
+     window opened at --enter 0.745 — 79% of the way through the dissolve — and
+     the OUTGOING room's closed at --p 0.684, which is 51% of the way through
+     the same dissolve. So for the stretch between them there was no rail, no
+     chips, no hotspots and no screen band ANYWHERE ON THE PAGE: a bare
+     photograph over 28% of every room-to-room handover, 91px of scroll at
+     1600x900. Add the room arriving dark (§06b) and the room reads as not yet
+     usable, which is exactly what he said.
 
-     Entry runs kicker → title → rule → chips; exit runs in reverse, so the
-     card strikes out rather than dissolving.
+     THE WINDOW IS THE SAME SHAPE — in on --enter, out on --p, for the reasons
+     above, which have not changed. What moved is where it sits, and the two
+     invariants it is solved against:
+       A. at most one room's rail/hotspots are non-zero — UNCHANGED, and it is
+          the only thing the exit side is for;
+       B. any room whose VISIBLE coverage exceeds 60% is at FULL strength —
+          was 90%. This is the client's requirement, restated as a number.
+
+     B fixes both ends of the band. A room is at 60% coverage when the plate
+     under it is at 40%, so the incoming rail must be up by coverage 0.60 AND
+     the outgoing one must still be up until coverage 0.40. The whole cut —
+     one ramp out, one ramp in, no overlap — therefore has to live inside
+     coverage 0.40 → 0.60 of the dissolve, and nowhere else. Solved through
+     .stage's own `--dissolve` remap (coverage = (--enter − 0.22) × 1.43) and
+     the engine's easeOutQuint (--enter = 1 − (1 − u)⁵), that band is --enter
+     0.4997 → 0.6396, i.e. raw arrival progress u 0.1293 → 0.1835: 49px of
+     scroll at a 900px viewport, for both ramps and the gap between them.
+
+     WHERE EACH PIECE SITS, in u:
+       0.1293   coverage 0.40 — the outgoing room may start leaving
+       0.1400   the outgoing ramp starts        (9.6px of margin)
+       0.1520   the outgoing ramp is at 0       (--cut-z, §02/§17)
+       0.1603   the incoming ramp starts        (7.5px of gap — the guarantee)
+       0.1749   the chips, last in, reach 0.9   (7.7px of margin)
+       0.1835   coverage 0.60 — every element is at 1
+     The incoming ramp is on --enter and is therefore one pair of numbers for
+     the whole site. The outgoing ramp is on --p, and p ↔ u depends on
+     --room-run / --dissolve-run, so it is TWO NUMBERS PER BREAKPOINT — see the
+     note on --cut-z in §02. That per-breakpoint solve is the change that
+     bought the margins above: the old single pair had to fit the intersection
+     of all four mappings, which is why it could only sit where it sat.
+
+     The exit no longer staggers. It is 13-19px of scroll wide; four elements
+     striking out across it would be four frames, which is not a beat, and a
+     stagger there costs margin that the guarantee needs. Entry still staggers
+     kicker → title → rule/tagline → chips, inside a window that ends with the
+     CHIPS — the thing the client is actually asking for — at full strength by
+     coverage 0.58. Be honest about what that stagger is now: the whole entry
+     is u 0.1603 → 0.1749, about 15px of scroll at a 900px viewport, so the four
+     thousandths between each step are a shading on one gesture rather than the
+     four separate beats the old 0.745/0.755/0.765/0.775 spread out over a
+     dissolve. That is the price of invariant B and it is the right way round —
+     nobody has ever complained that a title card arrived too promptly.
 
      Both axes also mean a page where engine.js never runs still shows its
      type: the registered initials are --enter: 1 and --p: 0, which is inside
      the window. */
-  --e1: clamp(0, min((var(--enter) - 0.745) * 33.333, (0.684 - var(--p)) * 25), 1);
-  --e2: clamp(0, min((var(--enter) - 0.755) * 33.333, (0.676 - var(--p)) * 25), 1);
-  --e3: clamp(0, min((var(--enter) - 0.765) * 33.333, (0.668 - var(--p)) * 25), 1);
-  --e4: clamp(0, min((var(--enter) - 0.775) * 33.333, (0.660 - var(--p)) * 25), 1);
+  --e1: var(--cut);
+  --e2: clamp(0, min((var(--enter) - 0.582) * 34, var(--cut)), 1);
+  --e3: clamp(0, min((var(--enter) - 0.586) * 34, var(--cut)), 1);
+  --e4: clamp(0, min((var(--enter) - 0.590) * 34, var(--cut)), 1);
 }
 
 
@@ -1797,60 +2009,36 @@ a { color: inherit; text-decoration: none; }
 .room[data-room="pass"]   { --rail-foot: 53.0; --rail-lead: 20.9; --rail-w: 52; }
 .room[data-room="dining"] { --rail-foot: 81.5; --rail-lead: 4.0;  --rail-w: 58; }
 
-/* ── THE BACK OFFICE, RE-COMPOSED ─────────────────────────────────────────
-   THE DEFECT. 26.6 put the type's left edge 4.2 plate-% from the monitor's
-   right edge. Measured on the running page at 1500x844, the frame the
-   composition is actually judged on: the monitor ran x 64-316 and "Back
-   Office" started at 366. Fifty pixels. Two objects of similar weight, sitting
-   in the same horizontal band, fifty pixels apart, do not read as an
-   arrangement — they read as a collision, and the eye tries to join them into
-   one thing. The monitor also had only 64px of wall between it and the left
-   edge of the frame at arrival, and the push-in ate all of it: by the end of
-   the room's own scrub the plate is at scale 1.077 and the monitor's left
-   edge had gone to -27, i.e. cropped, on the room's headline feature.
+/* ── THE BACK OFFICE, RETURNED TO THE BOTTOM-LEFT CARD ───────────────────
+   The client, on this room: "Could we move the text on the back office down to
+   the bottom left of the screen, then move the tv screen to the center of the
+   desk and make it large enough to read. Right now, we can't see the screen
+   properly because it's not aligned."
 
-   THE RE-COMPOSITION, AND WHY IT IS STILL ONE IDEA AND NOT TWO NUMBERS.
-   Continuing the monitor's bottom edge across the wall is the right anchor and
-   it stays; what was missing was a gutter wide enough to make the two elements
-   read as a pair of columns rather than as one crowded object. So the lead
-   moves out to 30.5 — 8.1 plate-%, about 130px at 1500x844 and never under
-   100px on anything wider than an iPad — and the foot follows the SAME line to
-   its new x: the monitor's bottom edge has slope -0.1776 plate-% per plate-%,
-   so at x 30.5 it reads 53.4 - 0.1776 x 23.3 = 49.26. The type's foot is still
-   literally on the monitor's bottom edge, which is what makes the arrangement
-   deliberate; there is simply now air between them.
+   So the Back Office leaves this table. It had --rail-foot 49.3 / --rail-lead
+   30.5, which continued the wall monitor's own bottom edge across the room and
+   set the type in the upper middle of the frame beside it. That was the right
+   answer to the composition it was solved against — a monitor hard against the
+   LEFT edge, clipboards hard against the right, and nothing but dark wall
+   between them. It is the wrong answer to the one being generated now, where
+   the desk moves to the centre and a much larger monitor hangs square-on above
+   it across the middle half of the frame: the type would land ON the screen,
+   and the lower-left of that plate is deliberately left clear for this card.
 
-   Where that leaves the block, measured on the running page at 1500x844 at the
-   arrival frame — the frame the composition is judged on: the monitor draws
-   x 90-333, the type starts at 442, the chip row ends at 993, and the clipboard
-   wall does not begin until ~1197. A 109px gutter against 50px before, and it
-   only opens as the push-in runs (179px by the end of the room's scrub).
-   Nothing abuts anything.
+   Falling out of the table IS the whole change — no new numbers, and that is
+   the point. A room that sets neither --rail-foot nor --rail-lead keeps
+   `align-content: end` and the bottom-left card v3 shipped, which is the
+   composition Host, Prep, the Break Room and the Walk-In already use and the
+   one the client named. The wash goes back to its default lower-left corner
+   with it (see .rail::before's --wash-x / --wash-y fallbacks), so the
+   legibility ground follows the type without being told about it separately.
 
-   THE ROOM'S OWN OVERSCAN, WHICH IS THE OTHER HALF OF THE FIX. The left crop
-   is not something --art-x can reach: at 16:9 the cover box is 12px wider than
-   the viewport, so the crop offset is a pixel and a half and --art-x moves
-   nothing (§06d says as much). What actually eats the monitor's left margin is
-   --overscan-k, which is a symmetrical 5% bite out of each side before the
-   push-in starts multiplying it. The Back Office is the one room with a
-   subject hard against the frame edge — 7.2 plate-% of wall is all the art
-   gives it — so it takes the smaller bleed. 1.06 is not a new number: it is
-   what §17 already runs at, and it is comfortably clear of the 1.036 floor
-   §02 derives from the parallax envelope (+/-1.4% x, +/-1.8% y). Measured
-   after: the monitor's left edge sits at 89px on arrival and reaches 0 — that
-   is touching, not crossing — only at the very bottom of the room's runway.
-
-   The rail reads --overscan-k too (--rail-foot-y / --rail-lead-x above), so
-   the type follows the plate rather than sliding against it, and §18's
-   reduced-motion pass re-declares it there for the same reason.
-
-   ⚠ RE-DERIVE BOTH IF office.webp CHANGES. They encode a traced edge and its
-   slope, not a preference. */
-.room[data-room="office"] { --rail-foot: 49.3; --rail-lead: 30.5; --rail-w: 46; }
+   ⚠ IF THE TYPE EVER GOES BACK UP THIS ROOM'S FRAME, both numbers have to be
+   re-derived off the plate that is actually shipping. Do not resurrect
+   49.3 / 30.5 — they encode a traced edge on art that is being replaced. */
 
 :is(.room[data-room="pass"],
-    .room[data-room="dining"],
-    .room[data-room="office"]) .rail {
+    .room[data-room="dining"]) .rail {
   /* plate-Y --rail-foot, in stage pixels, at the arrival scale */
   --rail-foot-y: calc(
       (var(--plate-top) + var(--cover-h) * var(--rail-foot) / 100 - 50svh)
@@ -1879,13 +2067,11 @@ a { color: inherit; text-decoration: none; }
 }
 
 :is(.room[data-room="pass"],
-    .room[data-room="dining"],
-    .room[data-room="office"]) :is(.rail-title, .rail-tagline) {
+    .room[data-room="dining"]) :is(.rail-title, .rail-tagline) {
   max-inline-size: min(var(--rail-measure), 34ch);
 }
 :is(.room[data-room="pass"],
-    .room[data-room="dining"],
-    .room[data-room="office"]) .rail-chips {
+    .room[data-room="dining"]) .rail-chips {
   max-inline-size: min(var(--rail-measure), 62ch);
 }
 
@@ -1962,6 +2148,30 @@ a { color: inherit; text-decoration: none; }
 .rail > * { pointer-events: none; }
 .rail-chips,
 .rail > :is(a, button, ul, ol) { pointer-events: auto; }
+
+/* ── THE OWNERSHIP GATE, ON EVERYTHING THAT OPTS BACK IN ──────────────────
+   See the long note on `.stage { pointer-events: none }` in §05. Every element
+   in a stage that re-enables pointer events has to answer for the room it is
+   in, or a room you have scrolled past keeps eating clicks through an
+   invisible plate. --cut-clip is a plain binary: inset(-24px) — i.e. nothing
+   clipped, focus rings and shadows included — while the room owns the page,
+   and inset(50%) otherwise, which is the one declaration that makes an element
+   neither painted nor hit-tested.
+
+   .hotspot is NOT in this list because it has had its own copy of this gate
+   since v3 (§09, on --live). Screens and the chef wall are gated by their HOST
+   element rather than by their internals, which keeps every .ccc-scr__* and
+   .cw-* selector out of this file — the module boundary §17 insists on. */
+.rail-chips,
+.rail > :is(a, button, ul, ol),
+.rail > .ccc-chefwall,
+.hotspots > [data-screen],
+.hotspots > [data-chefwall-host],
+.frz-pad {
+  clip-path: inset(var(--cut-clip));
+}
+/* .scroll-cue is the seventh, and it is declared in §07 next to the rest of
+   the hero rather than here. */
 
 /* THE ONE RAIL CHILD THIS FILE DID NOT AUTHOR. app.js hands chefwall.js the
    Break Room's rail as its `stripHost`, so the Head Chef strip is a real child
@@ -2127,13 +2337,15 @@ a { color: inherit; text-decoration: none; }
      rooms' worth of overlapping type is ugly, but two rooms' worth of
      overlapping CLICK TARGETS is a bug.
 
-     This layer takes the WIDEST of the rail's four windows (--e1's) rather
-     than a window of its own, because the three TV screen hosts live in here
-     and their IntersectionObserver cannot fire while the layer is clipped.
-     On --e1's window the layer opens 620–900px of scroll before the room's
-     arrival position, depending on breakpoint — the screens are mounted and
-     playing long before anyone reaches the room. */
-  --own: clamp(0, min((var(--enter) - 0.745) * 33.333, (0.684 - var(--p)) * 25), 1);
+     This layer takes --cut itself — the widest of the rail's four windows,
+     declared once on .stage (§05) — rather than a window of its own, because
+     the three TV screen hosts live in here and their IntersectionObserver
+     cannot fire while the layer is clipped. On --cut the layer opens ~740px of
+     scroll before the room's arrival position: the screens are mounted and
+     playing long before anyone reaches the room, and the objects in the
+     photograph are hit-testable from the moment the room is 55% of what you
+     are looking at. See §08 for the solve. */
+  --own: var(--cut);
   opacity: var(--own);
 
   /* opacity:0 STILL HIT-TESTS, so the ownership fade alone would let an
@@ -2190,8 +2402,13 @@ a { color: inherit; text-decoration: none; }
     background var(--dur-3) var(--ease-out),
     --bracket  var(--dur-4) var(--ease-cine);
 
-  /* resting: an all-but-invisible inset ring + a faint warm glint centre */
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bone) 9%, transparent);
+  /* Resting: a quiet inset ring + a warm glint centre. It was "all but
+     invisible" at 9%, which was the right call when the room around it was
+     lit; over the raised floor in §06 it is 14%, still a hairline on a
+     photograph and now findable at a glance on the frame a visitor actually
+     arrives on. The client's words: "it will be difficult for the employees to
+     notice the links." */
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bone) 14%, transparent);
   background:
     radial-gradient(64% 64% at 50% 50%,
       color-mix(in oklab, var(--amber) 9%, transparent) 0%,
@@ -2204,7 +2421,11 @@ a { color: inherit; text-decoration: none; }
     inset: 0;
     border: 1px solid currentColor;
     border-radius: var(--r-xs);
-    opacity: .58;
+    /* .58 → .72. Same argument as the ring above: the reticle is the whole
+       "here is a thing you can click" signal and it was reading as lens dirt
+       rather than as a mark. .72 on a 1px brass hairline is still four corner
+       ticks, not a pill. */
+    opacity: .72;
     transition: opacity var(--dur-3) var(--ease-out);
     /* keep only the four corners of that border */
     -webkit-mask:
@@ -2266,7 +2487,11 @@ a { color: inherit; text-decoration: none; }
   border-radius: 50%;
   background: var(--brass-300);
   box-shadow: 0 0 10px 1px color-mix(in oklab, var(--amber) 70%, transparent);
-  opacity: calc(0.5 + 0.5 * var(--pulse-amp));
+  /* Floor 0.5 → 0.72. This bead is the "always findable" half of the bargain
+     (see the section header) and it was spending a third of its strength on a
+     pulse that is over by --p 0.35 — i.e. it was dimmest exactly when a room
+     had settled and someone was reading it. */
+  opacity: calc(0.72 + 0.28 * var(--pulse-amp));
   transition: opacity var(--dur-3) var(--ease-out);
 }
 .hotspot:is(:hover, :focus-visible) :is(.hotspot-dot, .dot) { opacity: 1; }
@@ -3296,7 +3521,8 @@ dialog#c3-menu[open],
 
 /* ── Store desktops ────────────────────────────────────────────────────── */
 @media (min-width: 1440px) {
-  :root { --room-run: 240svh; --dissolve-run: 64svh; }
+  /* 240 / 64 ⇒ u = (140p − 76) / 100.  u 0.140 → p 0.6429, u 0.152 → p 0.6514. */
+  :root { --room-run: 240svh; --dissolve-run: 64svh; --cut-z: 0.6514; --cut-k: 116.7; }
 }
 
 /* At 2000px+ the rail must not drift to the far edge of the glass — it gets
@@ -3314,7 +3540,8 @@ dialog#c3-menu[open],
    1024–1366 wide, coarse pointer.  Shorter runways so a room is one or two
    comfortable swipes, not a marathon; slightly tighter rail. */
 @media (min-width: 901px) and (max-width: 1366px) and (orientation: landscape) {
-  :root { --room-run: 195svh; --dissolve-run: 50svh; }
+  /* 195 / 50 ⇒ u = (95p − 45) / 100.  u 0.140 → p 0.6211, u 0.152 → p 0.6337. */
+  :root { --room-run: 195svh; --dissolve-run: 50svh; --cut-z: 0.6337; --cut-k: 79.2; }
   .rail { gap: var(--sp-3); padding-block-end: clamp(var(--sp-5), 6svh, var(--sp-7)); }
   .rail-title { max-width: 17ch; }
 }
@@ -3324,7 +3551,7 @@ dialog#c3-menu[open],
    and the glint bead is always at full strength.  The label still appears on
    the first tap (:active / :focus-visible) before navigation. */
 @media (any-pointer: coarse) {
-  .hotspot::before { opacity: .78; }
+  .hotspot::before { opacity: .88; }
   .hotspot-dot, .hotspot > .dot { opacity: 1; }
   .chip { min-block-size: 46px; padding-inline: var(--sp-5); }
   .ticket { padding-inline: var(--sp-4); }
@@ -3384,6 +3611,9 @@ dialog#c3-menu[open],
   :root {
     --room-run: 170svh;
     --dissolve-run: 42svh;
+    /* 170 / 42 ⇒ u = (70p − 28) / 100.  u 0.140 → p 0.6000, u 0.152 → p 0.6171. */
+    --cut-z: 0.6171;
+    --cut-k: 58.3;
     --overscan-k: 1.06;
     /* The top bar's real footprint, notch included. #ticket-rail is
        --topbar-h TALL and then padded by the inset, so anything positioning
@@ -3471,12 +3701,14 @@ dialog#c3-menu[open],
 
   /* §08a's raised anchoring is a WIDE-VIEWPORT composition. It was solved
      against objects that are no longer in the frame at this aspect — the Pass's
-     tablets and the Office's monitor are both in the band by now — so it is
-     retired here rather than re-tuned. --rail-foot / --rail-lead stay declared
-     on the rooms; nothing reads them at this breakpoint. */
+     tablets are in the band by now — so it is retired here rather than
+     re-tuned. --rail-foot / --rail-lead stay declared on the rooms; nothing
+     reads them at this breakpoint. The Back Office is not in this list any
+     more because it is no longer raised anywhere: §08a returned it to the
+     bottom-left card at every width, so on a phone it now behaves exactly like
+     Host, Prep and the Break Room. */
   :is(.room[data-room="pass"],
-      .room[data-room="dining"],
-      .room[data-room="office"]) .rail {
+      .room[data-room="dining"]) .rail {
     padding-block-end: max(var(--sp-2), env(safe-area-inset-bottom, 0px));
     padding-inline-start: max(var(--gut), env(safe-area-inset-left, 0px));
     --wash-x: 50%;
@@ -3484,8 +3716,7 @@ dialog#c3-menu[open],
     --rail-measure: none;
   }
   :is(.room[data-room="pass"],
-      .room[data-room="dining"],
-      .room[data-room="office"]) :is(.rail-title, .rail-tagline, .rail-chips) {
+      .room[data-room="dining"]) :is(.rail-title, .rail-tagline, .rail-chips) {
     max-inline-size: none;
   }
 
@@ -3906,6 +4137,18 @@ dialog#c3-menu[open],
      it here keeps the reduced-motion path independent of those thresholds. */
   .hotspots   { transform: none !important; opacity: 1 !important; }
   .hotspot    { clip-path: none !important; }
+  /* …and the six other elements that carry §05's ownership clip. On this path
+     applyReducedMotion() pins --p to 0 and --enter to 1, so --cut is 1 and
+     --cut-clip already resolves to inset(-24px) — nothing is clipped. This
+     states it unconditionally anyway, exactly as the line above does for
+     .hotspot, so the reduced-motion page never depends on a threshold. */
+  .rail-chips,
+  .rail > :is(a, button, ul, ol),
+  .rail > .ccc-chefwall,
+  .hotspots > [data-screen],
+  .hotspots > [data-chefwall-host],
+  .frz-pad,
+  .scroll-cue { clip-path: none !important; }
 
   /* the rail arrives, it does not perform */
   .rail::before { opacity: 1 !important; }

@@ -568,22 +568,30 @@ const CSS = `
   /* ── INK COMES UP WITH THE LIGHTS ────────────────────────────────────────
      Two of the engine's own numbers, no rAF, no timer, no second animation.
 
-       --lbl-reveal  the gate. Zero until the room is arriving, full by the
-                     time it has arrived — the same window theme.css §09 opens
-                     the hotspot layer on, so ink and object appear together.
+       --lbl-reveal  the gate — now literally the same number theme.css §05
+                     declares on .stage for the chips, the hotspot layer and
+                     the screen band, so ink and object appear together by
+                     construction rather than by two formulas agreeing. Its own
+                     copy of that window used to open at --enter 0.58 and not
+                     finish until 0.78, which put the writing on the paper
+                     LATER than the paper itself; --cut settles the pair.
        --lbl-light   the density. --bloom is the engine's lights-come-up ramp
                      (easeOutQuint over the first 55% of the room's scrub), so
-                     the writing starts at 70% and darkens to full as the room
+                     the writing starts at 82% and darkens to full as the room
                      finishes lighting. That is the beat: the paper brightens,
-                     and what is written on it resolves out of it.
+                     and what is written on it resolves out of it. The floor
+                     was 70%, which was a legibility cost paid for a beat you
+                     cannot see: the ink is already paper-colour x 0.235, and
+                     the whole point of the label is that it can be READ before
+                     the lights are up.
 
      ⚠ NO NESTED calc() INSIDE THE clamp(). Written with the middle argument
      wrapped as calc((var(--enter) - .52) * 3.1), the whole expression silently
      evaluates to 1 at every value of --enter in Chromium — the gate is gone and
      the ink is simply always on, which looks fine and is wrong. Use the bare
      infix form, exactly as theme.css §09's own --own clamp does. */
-  --lbl-reveal: clamp(0, (var(--enter, 1) - 0.58) * 5, 1);
-  --lbl-light:  calc(0.7 + 0.3 * var(--bloom, 0));
+  --lbl-reveal: var(--cut, 1);
+  --lbl-light:  calc(0.82 + 0.18 * var(--bloom, 1));
   opacity: calc(var(--ccc-label-show, 1) * var(--lbl-alpha)
                 * var(--lbl-reveal) * var(--lbl-light));
   transition: opacity 220ms var(--ease-out, cubic-bezier(.22,.61,.36,1));

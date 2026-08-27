@@ -222,8 +222,19 @@ const STYLES = `
   /* THE POWER-ON. The engine publishes --enter on .stage (0 off-screen, 1 fully
      arrived, registered @property so it is 1 even if engine.js never loads).
      Everything below is a function of this one number: no timers, no second
-     loop, and a screen that is cold and dark in a room's "before" state. */
-  --scr-on: clamp(0, calc((var(--enter, 1) - 0.74) * 5.5), 1);
+     loop, and a screen that is cold and dark in a room's "before" state.
+
+     RE-TIMED 2026-08-27. It ran 0.74 → 0.922, i.e. it did not FINISH until the
+     room had completely arrived — so the largest, most obviously clickable
+     things in the building were black glass for the whole approach. That is
+     half of the client's "the clickable links are only available when you
+     scroll down far enough". theme.css §08 now hands a room's affordances over
+     at 55-60% coverage, and the power-on is moved to finish in the same frame:
+     0.42 → 0.6123, which is --enter 0.6123 = coverage 0.56. The beat is not
+     lost, it is EARLIER — the hairline opens and the panel comes up while the
+     plate is still dissolving in, so a room arrives with its screens already
+     alive rather than acquiring them a viewport later. */
+  --scr-on: clamp(0, calc((var(--enter, 1) - 0.42) * 5.2), 1);
   --scr-ar: 1.7778;
 }
 
@@ -323,6 +334,21 @@ const STYLES = `
   transition: box-shadow .25s var(--ccc-ov-ease, cubic-bezier(.22,.61,.36,1)),
               background-color .25s ease;
   pointer-events: auto;
+
+  /* THE OWNERSHIP GATE. theme.css §05 declares --cut-clip on .stage: it is
+     inset(-24px) — nothing clipped, focus ring included — while that room owns
+     the page, and inset(50%) otherwise, which is the one declaration that makes
+     an element neither painted nor hit-tested. Without it this button goes on
+     swallowing taps through a stage that is at opacity 0 but still covering the
+     viewport: measured at 390x844, the Pass's own chip drawer was returning
+     BUTTON.ccc-scr__hit in #room-host from elementFromPoint while the Pass
+     filled the screen. It is applied HERE, on the button, and not on the panel
+     or the layer, because reconcileScreens() observes the PANEL and clipping an
+     ancestor of an IntersectionObserver target can empty its intersection rect
+     — which would tear these iframes down and rebuild them at every hand-off.
+     A descendant is safe. The fallback keeps a page with no theme.css exactly
+     as it was. */
+  clip-path: inset(var(--cut-clip, -24px));
 }
 .ccc-scr__hit:hover {
   background: rgba(255,255,255,.045);
@@ -634,10 +660,12 @@ const STYLES = `
   --scr-max-h: calc(
     (var(--scr-band-h) - (var(--scr-count, 1) - 1) * var(--scr-gap)) / var(--scr-count, 1));
 
-  /* The same window .rail and .hotspots use, so a band never overlaps the
-     next room's. Copied deliberately rather than shared: theme.css declares
-     --e1 on .rail, and this layer is a sibling of it. */
-  opacity: clamp(0, min((var(--enter, 1) - 0.745) * 33.333, (0.684 - var(--p, 0)) * 25), 1);
+  /* The same window .rail and .hotspots use, and now genuinely the same value:
+     theme.css §05 declares --cut on .stage, which is this layer's parent, so
+     the band, the chips and the objects change hands on one number instead of
+     three copies of it. The fallback is 1 — a page with no theme.css still
+     shows its panels. */
+  opacity: var(--cut, 1);
 }
 .ccc-scr-layer:empty { display: none; }
 

@@ -42,6 +42,9 @@ import { mountRoomScreens } from './screens.js';
 import { initChefWall } from './chefwall.js';
 import { initLabels } from './labels.js';
 import { initFreezer } from './freezer.js';
+import {
+  loadEnvelope, unseal, restore, remember, cryptoAvailable
+} from './coldstore.js';
 import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.js';
 
 
@@ -79,6 +82,18 @@ const $ = (sel, root = document) => root.querySelector(sel);
 
 /** Ordinal words for the course kickers. Seven rooms; no need to be clever. */
 const COURSE = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'];
+
+/**
+ * How many tools the site has, sealed ones included.
+ *
+ * `data.tools` holds only what shipped in plaintext — 23 while the walk-in is
+ * locked, 37 once the fourteen have been decrypted into it. Both headline
+ * counts ("37 tools") are rendered once, at boot, and must not shrink just
+ * because the freezer has not been opened yet.
+ */
+function totalToolCount(data) {
+  return data.tools.length + (isFreezerUnlocked() ? 0 : sealedCount());
+}
 
 /** Is this URL somewhere other than our own origin? Drives target="_blank". */
 function isExternal(url) {
@@ -169,34 +184,85 @@ function indexTools(toolsDoc) {
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * 2 · THE FREEZER GATE
+ * 2 · THE FREEZER GATE — NOW A LOCK, NOT A NOTICE
  *
- * Carried over VERBATIM from the v2 bundle so a manager who unlocked yesterday
- * is not locked out by the rebuild. The contract, in full:
+ * v3 shipped a courtesy gate: the fourteen manager tools were in tools.json and
+ * in the inline bootstrap, and the "lock" was a POST to an endpoint that did not
+ * exist yet and therefore unlocked on 404. Anyone could read the fourteen URLs
+ * out of View Source. The client's brief is the opposite of that:
  *
- *   unlocked  ⇔  sessionStorage['c3f-unlocked'] === '1'  OR  a `c3f=` cookie
- *   unlock    ⇔  POST /api/freezer-unlock {"password": "..."}
- *                  2xx          -> unlocked
- *                  401 / 403    -> wrong code
- *                  404/405/501  -> UNLOCKED. The Cloudflare Worker does not
- *                                  exist yet; a site that hard-locks its own
- *                                  managers out until an endpoint ships is
- *                                  worse than a soft gate. This is deliberate.
- *                  anything else-> transient error, ask them to retry
- *                  network throw-> UNLOCKED, same reasoning as 404
+ *   "I don't want the other employees to have access to what's behind the
+ *    freezer door as these tools are specifically for the managers."
  *
- * This is a courtesy gate, not a security boundary — it always was. Anything
- * that must actually be secret belongs behind auth on the tool itself.
+ * This is a static site on GitHub Pages. There is no server to ask, so the
+ * answer cannot be "check with the server" — it has to be that THE DATA IS NOT
+ * THERE. The fourteen ship as one AES-256-GCM blob (see coldstore.js and
+ * build/seal-freezer.mjs); the password is the key. Typing it decrypts the list
+ * in memory. Typing something else fails GCM's authentication tag and produces
+ * nothing — no partial list, no hash to compare against, no oracle beyond
+ * "that did not decrypt".
+ *
+ * THE CONTRACT, in full:
+ *
+ *   sealed    the envelope from window.__CCC_INLINE__.freezer, or a fetch of
+ *             data/freezer.sealed.json. Public. Meaningless without the key.
+ *   unlocked  ⇔  COLD !== null  — i.e. we are HOLDING the decrypted tools.
+ *             Restored at boot from sessionStorage['c3f-cold'] when
+ *             sessionStorage['c3f-unlocked'] === '1', so a reload inside the
+ *             same session stays unlocked exactly as it did before.
+ *   unlock    ⇔  the code decrypts the envelope. No network. No endpoint.
+ *
+ * WHAT CHANGED FROM THE v3 CONTRACT, ON PURPOSE:
+ *   · /api/freezer-unlock is gone. There is nothing to POST to and nothing that
+ *     could answer 404-means-yes.
+ *   · The `c3f=` cookie is still READ, but it can no longer unlock on its own:
+ *     a cookie is not a key, and without the key there is nothing to show. It
+ *     now means "this session unlocked once", and the payload beside it is what
+ *     actually opens the room. A cookie with no payload re-prompts, which is
+ *     the honest outcome.
+ *
+ * WHAT THIS PROTECTS, AND WHAT IT DOES NOT — the same honest list as
+ * coldstore.js's header, because this is the file people read first:
+ *   · It stops a rep reading the links out of the page. There is no list.
+ *   · It does not stop someone who has the password from sharing it.
+ *   · It does not protect the destination tools — every one of those URLs is a
+ *     public GitHub Pages site or a public Smartsheet form.
+ *   · It does not hide plates/freezer.webp, the interior photograph, which is a
+ *     static file at a guessable path.
  * ────────────────────────────────────────────────────────────────────────── */
 
+/** The v3 keys, unchanged, so an unlock from earlier in this session survives.
+ *  coldstore.js owns the writes; these two are here for the read below. */
 const FREEZER_SESSION_KEY = 'c3f-unlocked';
 const FREEZER_COOKIE = 'c3f=';
-const FREEZER_ENDPOINT = '/api/freezer-unlock';
 
 /** Subscribers re-render themselves when the door opens. */
 const unlockListeners = [];
 
-function isFreezerUnlocked() {
+/** The sealed envelope, resolved once in boot(). Public, and useless alone. */
+let FREEZER_SEALED = null;
+
+/** THE DECRYPTED FOURTEEN, or null. This — not a flag, not a cookie — is what
+ *  "unlocked" means. Nothing else in this file may write it. */
+let COLD = null;
+
+/** The one place the index gets mutated when the door opens, so the C³ menu,
+ *  the footer, the rail and overlay.js's registry all agree. Set in boot(). */
+let ADOPT_COLD = null;
+
+function isFreezerUnlocked() { return COLD !== null; }
+
+/** How many tools are behind the door. Public metadata on the envelope — the
+ *  count is recoverable from the ciphertext's length anyway, and the locked
+ *  copy has to be able to say "14" rather than invent a number. */
+function sealedCount() {
+  return (FREEZER_SEALED && +FREEZER_SEALED.count) || 0;
+}
+
+/** "This session unlocked once" — the v3 signal, kept verbatim. It is a HINT
+ *  used to decide whether to look for a stored payload, never an authorisation
+ *  on its own. */
+function freezerSessionHint() {
   try { if (sessionStorage.getItem(FREEZER_SESSION_KEY) === '1') return true; }
   catch { /* private mode / storage disabled — fall through to the cookie */ }
   return document.cookie.split('; ').some((c) => c.startsWith(FREEZER_COOKIE));
@@ -204,30 +270,38 @@ function isFreezerUnlocked() {
 
 function onFreezerUnlock(cb) { unlockListeners.push(cb); }
 
-function markFreezerUnlocked() {
-  try { sessionStorage.setItem(FREEZER_SESSION_KEY, '1'); } catch { /* noop */ }
+/** Adopt a decrypted payload and tell every surface. Idempotent. */
+function markFreezerUnlocked(payload) {
+  if (COLD || !payload || !payload.tools || !payload.tools.length) return;
+  COLD = payload;
+  if (ADOPT_COLD) { try { ADOPT_COLD(payload.tools); } catch (err) { console.error(err); } }
   unlockListeners.forEach((cb) => { try { cb(true); } catch (err) { console.error(err); } });
 }
 
-/** @returns {Promise<'ok'|'wrong'|'error'>} */
+/**
+ * Try a code against the sealed envelope.
+ *
+ * No network, so there is no "transient error" in the v3 sense — but there IS a
+ * real environment fault worth distinguishing: a browser with no WebCrypto
+ * (a non-secure http:// origin) genuinely cannot check any code, and telling
+ * that manager "wrong code" would send them hunting for a password they already
+ * typed correctly.
+ *
+ * @returns {Promise<'ok'|'wrong'|'error'>}
+ */
 async function submitFreezerCode(code) {
   if (!code) return 'wrong';
+  if (isFreezerUnlocked()) return 'ok';
+  if (!FREEZER_SEALED) return 'error';
   try {
-    const res = await fetch(FREEZER_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: code })
-    });
-    if (res.ok) { markFreezerUnlocked(); return 'ok'; }
-    if (res.status === 401 || res.status === 403) return 'wrong';
-    if (res.status === 404 || res.status === 405 || res.status === 501) {
-      markFreezerUnlocked();          // endpoint not deployed yet — see above
-      return 'ok';
-    }
-    return 'error';
-  } catch {
-    markFreezerUnlocked();            // offline / file:// — see above
+    const payload = await unseal(FREEZER_SEALED, code);
+    if (!payload) return 'wrong';
+    remember(payload);
+    markFreezerUnlocked(payload);
     return 'ok';
+  } catch (err) {
+    console.error('[freezer] cannot check codes in this context:', err);
+    return 'error';
   }
 }
 
@@ -304,17 +378,27 @@ function openKeypad() {
       panel.classList.add('is-wrong');
     };
 
+    // Deriving the key is 600,000 rounds of PBKDF2 — a few hundred milliseconds
+    // on a laptop, a second or two on an old store iPad, and that cost is the
+    // ONLY thing standing between an attacker and a brute force, so it is not
+    // getting tuned down. It does mean the dialog has to say it is working:
+    // an unresponsive keypad reads as broken, and the button is already
+    // aria-disabled, so the readout says so too. `busy` guards a second Enter.
+    let busy = false;
     const attempt = async () => {
-      msg.textContent = '';
+      if (busy) return;
+      busy = true;
       panel.classList.remove('is-wrong');
       unlock.setAttribute('aria-disabled', 'true');
-      const result = await submitFreezerCode(input.value.trim());
-      unlock.removeAttribute('aria-disabled');
+      msg.textContent = 'Checking the code…';
+      let result;
+      try { result = await submitFreezerCode(input.value.trim()); }
+      finally { busy = false; unlock.removeAttribute('aria-disabled'); }
       if (result === 'ok') { finish(true); return; }
       flagWrong();
       msg.textContent = result === 'wrong'
         ? 'That code didn’t open the door. Try again.'
-        : 'Couldn’t reach the lock. Try again in a moment.';
+        : 'This browser can’t check the code here. Open the site over https.';
       input.select();
     };
 
@@ -357,7 +441,7 @@ function openKeypad() {
 /* The gate is installed ON overlay.js in boot(), through its canOpen /
  * onRefused options. There used to be a capture-phase click interceptor here.
  * It is gone, because it only ever guarded CLICKS: a deep link to
- * `#/tool/punch-audit` went through overlay's own syncFromLocation() and opened
+ * `#/tool/<a-manager-tool>` went through overlay's own syncFromLocation() and opened
  * a manager tool with the door still shut and sessionStorage still empty. The
  * gate now sits inside openTool() itself, so every path reaches it — click,
  * keyboard, hash sync on load, and the openTool re-exported on window.CCC.
@@ -443,14 +527,73 @@ function openKeypad() {
  * The count of plates Chrome decides to pull at first paint is a function of the
  * room runway (--room-run, theme.css §02), not of anything this file controls.
  */
+/**
+ * Every plate URL in the site, written out as literal strings.
+ *
+ * It used to be `plates/${room}.webp`. It is a table now because
+ * build/fingerprint.mjs puts a content hash in every asset filename and
+ * rewrites the references mechanically — and a template literal is not a
+ * reference it can see. One table, eight rooms, greppable: `grep plates/`
+ * finds every plate this file can ask for, which is the point.
+ *
+ * (`freezer` is the INTERIOR. While the walk-in is locked the freezer room
+ * shows `freezer-door` instead — see plateFor().)
+ */
+const PLATES = {
+  hero:         { src: 'plates/hero.webp',         srcset: 'plates/hero@1400.webp 1400w, plates/hero@1800.webp 1800w, plates/hero.webp 2400w' },
+  pass:         { src: 'plates/pass.webp',         srcset: 'plates/pass@1400.webp 1400w, plates/pass@1800.webp 1800w, plates/pass.webp 2400w' },
+  host:         { src: 'plates/host.webp',         srcset: 'plates/host@1400.webp 1400w, plates/host@1800.webp 1800w, plates/host.webp 2400w' },
+  dining:       { src: 'plates/dining.webp',       srcset: 'plates/dining@1400.webp 1400w, plates/dining@1800.webp 1800w, plates/dining.webp 2400w' },
+  prep:         { src: 'plates/prep.webp',         srcset: 'plates/prep@1400.webp 1400w, plates/prep@1800.webp 1800w, plates/prep.webp 2400w' },
+  office:       { src: 'plates/office.webp',       srcset: 'plates/office@1400.webp 1400w, plates/office@1800.webp 1800w, plates/office.webp 2400w' },
+  breakroom:    { src: 'plates/breakroom.webp',    srcset: 'plates/breakroom@1400.webp 1400w, plates/breakroom@1800.webp 1800w, plates/breakroom.webp 2400w' },
+  freezer:      { src: 'plates/freezer.webp',      srcset: 'plates/freezer@1400.webp 1400w, plates/freezer@1800.webp 1800w, plates/freezer.webp 2400w' },
+  'freezer-door': { src: 'plates/freezer-door.webp', srcset: 'plates/freezer-door@1400.webp 1400w, plates/freezer-door@1800.webp 1800w, plates/freezer-door.webp 2400w' }
+};
+
+/**
+ * Which plate a room shows RIGHT NOW.
+ *
+ * One room's answer is not constant. The client asked that "when you scroll
+ * down, you only see the freezer door and not what's behind it until you type
+ * in the password" — so while the walk-in is locked the freezer room's plate IS
+ * the closed door, and the interior is never requested. freezer.js paints its
+ * animated door assembly over the top of this when the art is available; when
+ * it is not (a 404, a thrown module, reduced motion before unlock) the room
+ * still shows a shut door rather than the cold storage behind it. That is the
+ * whole difference between hiding a thing and not sending it.
+ */
+function plateFor(room) {
+  if (room === 'freezer' && !isFreezerUnlocked()) return PLATES['freezer-door'];
+  return PLATES[room] || PLATES.hero;
+}
+
+/**
+ * Swap the freezer room's plate from the shut door to the interior.
+ *
+ * Called from playUnlockBeat(), which freezer.js fires as the through-the-
+ * doorway move lands — by then the door assembly is scaling past the camera and
+ * what it uncovers has to be the room, not the door again. The fetch starts
+ * roughly two seconds earlier, at the moment the code is accepted, because the
+ * door sequence is 2.76s long and the interior needs to be decoded before the
+ * scene dissolves off it.
+ */
+function revealFreezerInterior() {
+  const img = document.querySelector('#room-freezer .plate');
+  if (!img) return;
+  const p = PLATES.freezer;
+  if (img.getAttribute('src') === p.src) return;
+  img.setAttribute('srcset', p.srcset);
+  img.setAttribute('src', p.src);
+}
+
 function buildPlate(room, index) {
   const eager = index === 0;              // the hero, and only the hero
+  const art = plateFor(room);
   return el('img', {
     class: 'plate',
-    src: `plates/${room}.webp`,
-    srcset: `plates/${room}@1400.webp 1400w, `
-          + `plates/${room}@1800.webp 1800w, `
-          + `plates/${room}.webp 2400w`,
+    src: art.src,
+    srcset: art.srcset,
     sizes: '(min-aspect-ratio: 2400/1340) 110vw, 197vh',
     width: String(PLATE_W),
     height: String(PLATE_H),
@@ -606,7 +749,7 @@ function buildRail(roomId, index, data) {
     // the chips: what is gated here is the list's existence, not each row.
     'data-locked': gated ? '' : null,
     'data-room-chips': roomId
-  }, gated ? [buildLockChip(tools.length)] : tools.map((tool, i) => buildChip(tool, false, i)));
+  }, gated ? [buildLockChip(sealedCount())] : tools.map((tool, i) => buildChip(tool, false, i)));
 
   return el('div', { class: 'rail' }, [
     // The ticket rail numbers the seven rooms 01..07; `index` counts the hero as
@@ -703,6 +846,12 @@ function buildLockChip(count) {
  * rail, which is how the freezer was specified in the first place.
  */
 function playUnlockBeat() {
+  // The room under the door. freezer.js's THROUGH beat is dissolving its own
+  // assembly right now and what it uncovers has to be cold storage, not the
+  // shut door the locked page was showing. The bytes were requested when the
+  // code was accepted, ~2s ago, so this is a swap and not a fetch.
+  revealFreezerInterior();
+
   const rail = document.querySelector('[data-room-chips="freezer"]');
   if (rail && rail.hasAttribute('data-locked')) {
     const meta = FREEZER_RAIL_META;
@@ -734,8 +883,50 @@ function playUnlockBeat() {
   announce('Cold storage open. Manager tools are unlocked.');
 }
 
-/** What playUnlockBeat() needs to render the fourteen; set once, in boot(). */
+/** What playUnlockBeat() needs to render the fourteen; set in boot(), and again
+ *  by ADOPT_COLD() the moment a code decrypts them. */
 let FREEZER_RAIL_META = null;
+
+/**
+ * A hash naming a tool this build has never heard of, while the walk-in is shut.
+ *
+ * See the note at the call site in boot(). Three things matter here:
+ *
+ *   1. It runs on `hashchange` as well as at boot, so a manager pasting a
+ *      bookmark into an already-open tab gets the keypad too.
+ *   2. It strips the hash before opening the keypad, exactly as overlay.js's
+ *      refuseTool() does, so a refused deep link does not sit in the address
+ *      bar claiming a tool is open and does not re-fire on reload.
+ *   3. It is silent about whether the slug exists. An unrecognised slug and one
+ *      of the sealed fourteen produce the same keypad; only a correct code
+ *      tells them apart, and by then it does not matter.
+ */
+function watchSealedDeepLink(data, freezer) {
+  const slugOf = () => {
+    const m = /^#\/tool\/([^/?#]+)/.exec(location.hash || '');
+    try { return m ? decodeURIComponent(m[1]) : null; } catch { return m ? m[1] : null; }
+  };
+
+  const check = () => {
+    const slug = slugOf();
+    if (!slug) return;
+    if (isFreezerUnlocked()) return;      // overlay.js owns every slug now
+    if (data.bySlug.has(slug)) return;    // a public tool: overlay.js has it
+
+    try { history.replaceState(null, '', location.pathname + location.search); }
+    catch { /* noop */ }
+
+    openKeypad().then((ok) => {
+      if (!ok) return;
+      const tool = data.bySlug.get(slug);
+      if (!tool) return;                  // never was one of ours; say nothing
+      freezer.whenOpen().then(() => openTool(slug));
+    });
+  };
+
+  window.addEventListener('hashchange', check);
+  check();
+}
 
 /** One polite live region for the whole page, created on first use. */
 let liveRegion = null;
@@ -921,7 +1112,7 @@ function buildC3Menu(data) {
   }, [
     el('div', { id: 'c3-menu-head' }, [
       el('h2', { class: 't-sub', id: 'c3-menu-title', text: 'All repositories' }),
-      el('span', { class: 'kicker', 'data-c3-count': '', text: `${data.tools.length} tools` })
+      el('span', { class: 'kicker', 'data-c3-count': '', text: `${totalToolCount(data)} tools` })
     ]),
     el('hr', { class: 'rule' }),
     list
@@ -935,7 +1126,10 @@ function buildC3Menu(data) {
     for (const roomId of ROOM_ORDER) {
       const meta = data.roomById.get(roomId) || { label: roomId };
       const tools = data.byRoom.get(roomId) || [];
-      if (!tools.length) continue;
+      // The freezer's array is EMPTY while locked — the fourteen are ciphertext
+      // until a code decrypts them — so it cannot be skipped for being empty or
+      // the locked row disappears along with them.
+      if (!tools.length && !(roomId === 'freezer' && !unlocked)) continue;
 
       children.push(el('p', { class: 'kicker', text: meta.label }));
 
@@ -943,7 +1137,7 @@ function buildC3Menu(data) {
         // Gated: one row that opens the keypad instead of 14 rows of URLs.
         children.push(el('button', {
           type: 'button', class: 'c3-item', 'data-freezer-lock': '',
-          text: `Locked — ${tools.length} manager tools`
+          text: `Locked — ${sealedCount()} manager tools`
         }));
         continue;
       }
@@ -1028,7 +1222,7 @@ function buildFooter(data) {
     for (const roomId of ROOM_ORDER) {
       const meta = data.roomById.get(roomId) || { label: roomId, tagline: '' };
       const tools = data.byRoom.get(roomId) || [];
-      if (!tools.length) continue;
+      if (!tools.length && !(roomId === 'freezer' && !unlocked)) continue;
 
       const headingId = `footer-${roomId}`;
       const body = [];
@@ -1036,7 +1230,7 @@ function buildFooter(data) {
       if (roomId === 'freezer' && !unlocked) {
         body.push(el('p', {
           class: 'micro',
-          text: `${tools.length} manager tools are behind the keypad.`
+          text: `${sealedCount()} manager tools are behind the keypad.`
         }));
         body.push(el('button', {
           type: 'button', class: 'chip', 'data-freezer-lock': '',
@@ -1085,7 +1279,7 @@ function buildFooter(data) {
     el('hr', { class: 'rule' }),
     el('p', {
       class: 'micro',
-      text: `Cook County Cooks · ${data.tools.length} tools across ${data.rooms.length} rooms · Blue Fox C³`
+      text: `Cook County Cooks · ${totalToolCount(data)} tools across ${data.rooms.length} rooms · Blue Fox C³`
     })
   ]);
 
@@ -1126,6 +1320,50 @@ async function boot() {
   }
   const data = indexTools(raw.tools);
 
+  /* ---- 0. the sealed freezer ---------------------------------------------
+   * Before ANY markup, because every surface that renders below asks
+   * isFreezerUnlocked() and sealedCount() as it builds. The envelope is
+   * public and inert; `restore()` is what can actually open the room, and it
+   * only finds anything if THIS TAB unlocked earlier in the session.
+   *
+   * A missing envelope is not fatal. The freezer simply has nothing in it: the
+   * rail, the C³ menu and the footer all say "locked", the keypad answers
+   * "this browser can't check the code here", and every other room is
+   * untouched. A broken seal must never take the restaurant down with it. */
+  FREEZER_SEALED = await loadEnvelope();
+  if (!FREEZER_SEALED) console.warn('[app] no sealed freezer payload — cold storage stays shut.');
+  else if (!cryptoAvailable()) console.warn('[app] no WebCrypto in this context — the keypad cannot check codes.');
+
+  /* The one place the fourteen get folded into the index. Called by
+   * markFreezerUnlocked() — from a correct code now, or from the session
+   * restore two lines below. Everything downstream (the rail, the C³ menu,
+   * the footer, overlay.js's registry, the `gatedSlugs` predicate) reads these
+   * structures, so this is also the only place that has to be right. */
+  let overlayApi = null;
+  ADOPT_COLD = (tools) => {
+    const room = data.byRoom.get('freezer') || [];
+    for (const tool of tools) {
+      if (data.bySlug.has(tool.slug)) continue;
+      data.tools.push(tool);
+      data.bySlug.set(tool.slug, tool);
+      room.push(tool);
+      // overlay.js resolves a slug through this Map inside openTool(); until
+      // now it did not contain a single freezer tool, which is why a deep link
+      // to one had nothing to open.
+      if (overlayApi && overlayApi.registry) overlayApi.registry.set(tool.slug, tool);
+    }
+    data.byRoom.set('freezer', room);
+    FREEZER_RAIL_META = {
+      tools: room,
+      label: (data.roomById.get('freezer') || {}).label || 'Walk-In Freezer'
+    };
+  };
+
+  // Unlocked earlier in this tab: the payload is in sessionStorage, so a reload
+  // stays open exactly as it did in v3 — and without re-running 600,000 rounds
+  // of PBKDF2 on a store iPad.
+  if (freezerSessionHint()) markFreezerUnlocked(restore());
+
   // playUnlockBeat() is handed to freezer.js as a bare callback and runs long
   // after boot() has returned, so the one thing it cannot do is close over a
   // local. It gets the freezer's tools and label here instead.
@@ -1147,7 +1385,21 @@ async function boot() {
   initLabels();
   buildTicketRail(data);
   buildC3Menu(data);
-  buildFooter(data);
+  // The client asked for the Walk-In Freezer to be the hard stop when scrolling:
+  // "I want to remove the bottom recap portion on the site. I want the freezer to
+  // be the last thing someone could see... All of these tools are listed in the
+  // menu, so employees can find them there as well." The visible footer index is
+  // therefore not built. The <noscript> index in index.html stays (it is the
+  // genuinely-no-JS path and is invisible to everyone else), and the C3 menu
+  // remains a real list of real <a href> links, so the "just give me the link"
+  // route survives for keyboards and screen readers.
+  // buildFooter(data);
+  // Collapse the footer element itself so the Walk-In is a true hard stop with
+  // no dead band under it. Done from JS on purpose: the <noscript> index inside
+  // #site-footer is the genuinely-no-JS path, and a browser with JS off never
+  // runs this line, so that path is untouched.
+  const footerEl = $('#site-footer');
+  if (footerEl) footerEl.hidden = true;
 
   /* ---- 2. the freezer gate ------------------------------------------------ */
   // Every lock affordance — the keypad object in the photograph, the C³ menu's
@@ -1174,6 +1426,9 @@ async function boot() {
   const freezer = initFreezer({
     room: $('#room-freezer'),
     geometry: FREEZER_DOOR,
+    // Named here rather than defaulted inside freezer.js so PLATES stays the one
+    // table build/fingerprint.mjs has to rewrite.
+    interior: PLATES.freezer.src,
     isUnlocked: isFreezerUnlocked,
     onUnlock: onFreezerUnlock,
     onRevealed: playUnlockBeat
@@ -1202,12 +1457,19 @@ async function boot() {
   // On refusal overlay.js opens nothing at all — no chrome, no scroll lock, no
   // history entry — and strips the refused hash itself, so a locked deep link
   // does not re-fire on reload.
-  const gatedSlugs = new Set((data.byRoom.get('freezer') || []).map((t) => t.slug));
-  initOverlay({
+  // gatedSlugs is now DYNAMIC: while the walk-in is sealed there are no freezer
+  // slugs to name, because the fourteen are ciphertext. The predicate is kept
+  // and kept live anyway, as defence in depth — if anything ever puts a freezer
+  // tool into overlay.js's registry before the code is typed, canOpen still
+  // refuses it. Deep links to a slug that is not in the registry AT ALL are
+  // caught by watchSealedDeepLink() below; overlay.js cannot refuse a tool it
+  // has never heard of.
+  const gatedSlugs = () => new Set((data.byRoom.get('freezer') || []).map((t) => t.slug));
+  overlayApi = initOverlay({
     // Passing the array straight in — no fetch, so a deep link resolves on the
     // first frame instead of after a network round-trip.
     tools: data.tools,
-    canOpen: (slug) => !gatedSlugs.has(slug) || isFreezerUnlocked(),
+    canOpen: (slug) => !gatedSlugs().has(slug) || isFreezerUnlocked(),
     // The retry waits for the door. Without whenOpen() a locked deep link
     // unlocks, the tool opens over the top on the next tick, and the set piece
     // the client paid for plays out behind a full-screen overlay. whenOpen()
@@ -1216,6 +1478,29 @@ async function boot() {
       openKeypad().then((ok) => { if (ok) freezer.whenOpen().then(retry); });
     }
   });
+
+  // Anything already unlocked from earlier in this session has to be in the
+  // registry before overlay.js honours the first deep link.
+  if (isFreezerUnlocked()) ADOPT_COLD(COLD.tools);
+
+  /* THE DEEP LINK THAT OVERLAY.JS CANNOT SEE.
+   *
+   * In v3 every freezer slug was in tools.json, so a `#/tool/<slug>` link on a
+   * cold load reached openTool(), failed canOpen, and routed through
+   * onRefused into the keypad. That refusal is not weakened — it still fires
+   * for anything the registry knows about — but a sealed slug is not in the
+   * registry, and overlay.js's own answer for an unknown slug is one
+   * console.warn and nothing else.
+   *
+   * That is a STRONGER refusal (there is nothing to open, and the URL leaks
+   * nothing back) but a worse manager: someone with a bookmark to a manager
+   * tool would get a silent dead page. So we catch it here. The rule is
+   * deliberately narrow — a hash that names a tool this build has never heard
+   * of, while the walk-in is shut — and its only effect is to offer the
+   * keypad. It never confirms whether the slug is one of the fourteen: a wrong
+   * slug and a real one behave identically right up until the code decrypts.
+   */
+  watchSealedDeepLink(data, freezer);
 
   /* ---- 4. the cinema ------------------------------------------------------ */
   const engine = initEngine();

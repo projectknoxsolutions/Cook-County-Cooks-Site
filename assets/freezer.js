@@ -972,6 +972,7 @@ export function initFreezer(opts = {}) {
   /* ---- state ------------------------------------------------------------- */
   let state = 'idle';           // idle · shut · opening · open
   let frz = null, ground = null, spill = null, blast = null, padBtn = null, led = null;
+  let apImg = null;             // the interior, seen through the doorway
   let timers = [];
   let openResolvers = [];
   let modalObserver = null, panelObserver = null;
@@ -1063,7 +1064,18 @@ export function initFreezer(opts = {}) {
     const scene = el('div', { class: 'frz-scene' }, [
       buildDoorImg('frz-jamb'),
       el('div', { class: 'frz-ap' }, [
-        el('img', { class: 'frz-ap__img', src: interior, alt: '', decoding: 'async', loading: 'lazy' }),
+        /* NO `src` YET, AND THAT IS THE POINT.
+         *
+         * "I don't want the other employees to have access to what's behind the
+         * freezer door." A locked freezer that quietly fetches its own interior
+         * is a freezer that tells you what is inside it in the network tab. So
+         * the aperture ships empty and is pointed at the plate in open(), i.e.
+         * only ever after a code has decrypted the room. The .frz-ap box is
+         * already filled with --frz-900, so a late decode reads as depth rather
+         * than as a hole. (This hides the REQUEST, not the file: the interior
+         * plate is a static asset at a guessable path, and nothing in a static
+         * site can change that.) */
+        (apImg = el('img', { class: 'frz-ap__img', alt: '', decoding: 'async' })),
         el('div', { class: 'frz-ap__cold' })
       ]),
       el('div', { class: 'frz-seal', 'aria-hidden': 'true' }),
@@ -1082,6 +1094,9 @@ export function initFreezer(opts = {}) {
       padBtn,
       el('div', { class: 'frz-edge', 'aria-hidden': 'true' })
     ]);
+
+    // Rebuilt after an unlock (api.reset()): there is nothing left to hide.
+    if (isUnlocked() && apImg) apImg.src = interior;
 
     frz    = el('div', { class: 'frz', style: styleVars() }, [scene]);
     ground = el('div', { class: 'frz-ground', 'aria-hidden': 'true', style: styleVars() });
@@ -1140,7 +1155,7 @@ export function initFreezer(opts = {}) {
   function teardown() {
     promote(false);
     [frz, ground, spill, blast].forEach((n) => { if (n && n.parentNode) n.remove(); });
-    frz = ground = spill = blast = padBtn = led = null;
+    frz = ground = spill = blast = padBtn = led = apImg = null;
     if (room) delete room.dataset.freezerDoor;
   }
 
@@ -1177,6 +1192,9 @@ export function initFreezer(opts = {}) {
     if (prefersReduced() || !onScreen()) { snapOpen(); return whenOpen(); }
 
     setState('opening');
+    // The code was accepted, so the room is allowed to load now. That leaves the
+    // APERTURE beat (+460ms) and the THROUGH dissolve (+1900ms) to decode it in.
+    if (apImg && !apImg.getAttribute('src')) apImg.src = interior;
     frz.classList.add('is-accepted');
     // The keypad's LED goes green and stays on screen for the beat — but the
     // button is done. `disabled` blurs it and takes it out of the tab order in

@@ -82,21 +82,28 @@ export const HOTSPOTS = {
   office: [
     /* THE BACK OFFICE MONITOR — days since the last detractor, one district per
        slide, from the Daily Sales Report's own nps-detractor-streaks.json.
-       RE-MEASURED against the v4 `office.webp`, which draws a real monitor on
-       the dark left wall. The quad below is that monitor's glass, traced off
-       the plate: the top edge runs 12.6% → 27.6% and the bottom 53.4% → 50.7%
-       across x 7.2 → 22.4, a strong recession because the wall is close to the
-       camera on the left. Those two edges meet at (42.2, 47.2) in plate %,
-       which is the wall's vanishing point — the panel lies IN the wall.
-       ⚠ It sits at x 7.2–22.4, i.e. inside the left fifth of the frame, so it
-       does NOT survive a hard portrait crop. That is fine and deliberate:
-       screens.js relocates every panel into its full-width band below
-       (max-width: 900px), (max-aspect-ratio: 8/7). What it DOES require is
-       that app.js's ROOM_ART focus for this room stops pushing the crop right
-       — see the note there. */
-    { slug:'daily-sales', kind:'screen', mode:'feed', x:0, y:0, w:100, h:100,
+
+       ── RE-TRACED 2026-08-27 against the RECOMPOSED plate ─────────────────
+       The client: "move the tv screen to the center of the desk and make it
+       large enough to read. Right now, we can't see the screen properly
+       because it's not aligned." The art was reshot: the desk is now centred
+       and the monitor hangs on the wall directly behind and above it.
+
+       It is NOT axis-aligned, and that matters. Thresholding the glass
+       (luminance < 26 on a 2000x1116 resample) gives corners
+         TL (31.65, 24.91)  TR (54.85, 26.43)  BR (54.80, 49.55)  BL (31.00, 55.02)
+       — a left edge 30.1 plate-% tall against a right edge of 23.1. The camera
+       still sits right of centre, so the panel recedes. A plain box here would
+       float in front of the wall instead of lying in it, so the quad stays;
+       only the numbers changed. Inset ~0.5% off the traced glass so the mount
+       lands inside the bezel rather than on it.
+
+       The box below is the quad's bounding envelope — screens.js resolves the
+       quad against it, and the narrow-viewport band uses it for aspect. */
+    { slug:'daily-sales', kind:'screen', mode:'feed',
+      x:31.0, y:24.9, w:23.9, h:30.1,
       label:'Days Since Last Detractor',
-      quad:[[7.2,12.6],[22.4,27.6],[22.4,50.7],[7.2,53.4]] },
+      quad:[[32.1,25.6],[54.4,27.0],[54.4,49.0],[31.5,54.3]] },
     { slug:'printouts',        kind:'tool', x:70.0, y:55.0, w:18.5, h:24.0, label:'Print Outs', edge:'right' },
     { slug:'exception-report', kind:'tool', x:78.0, y:20.5, w: 8.5, h:22.5, label:'Exception Report', edge:'right' },
     { slug:'fall-off',         kind:'tool', x:87.0, y:18.5, w: 8.5, h:22.5, label:'Fall-Off Summary', edge:'right' },
