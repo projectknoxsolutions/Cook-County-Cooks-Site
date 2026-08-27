@@ -164,7 +164,7 @@ function getTool(slug) {
 /* -----------------------------------------------------------------------------
  * 2. Stylesheet
  *    Injected once. Everything is prefixed `ccc-` and every colour is a
- *    custom property with a fallback, so assets/theme.ba0bff0aa3.css (Agent D) can
+ *    custom property with a fallback, so assets/theme.f4c9abadeb.css (Agent D) can
  *    retheme the viewer without touching this file.
  * -------------------------------------------------------------------------- */
 
@@ -599,11 +599,48 @@ function makeStageFrame() {
  *
  * @returns {HTMLIFrameElement} the frame that is now in the DOM
  */
+/* ──────────────────────────────────────────────────────────────────────────
+ * FRESH-LOAD CACHE BUSTING
+ *
+ * The client: "I have made changes to my repositories on the backend but the
+ * changes aren't loading on the repositories we have baked into the website.
+ * I want to ensure that new changes to the repositories would also be visible
+ * ... essentially, it would be a fresh load every time we pull up the
+ * repository."
+ *
+ * Every embedded tool is a GitHub Pages site, and Pages serves its HTML with a
+ * cache lifetime of its own. A rep who opened a quote sheet an hour ago gets
+ * that hour-old copy back from the browser's HTTP cache, so a fix pushed to the
+ * repo in between is invisible inside the frame while the same URL opened in a
+ * new tab is correct — exactly the mismatch he photographed.
+ *
+ * Appending a unique parameter makes each open a distinct URL, which no cache
+ * can satisfy, so the frame always fetches the current build. We keep the
+ * parameter namespaced (`_ccc`) and preserve any query string the tool already
+ * carries. Only the document request is affected; the tool's own sub-resources
+ * still cache normally, so this costs one small round trip, not a cold load.
+ * ────────────────────────────────────────────────────────────────────────── */
+export function freshUrl(url, bucketMs) {
+  try {
+    const u = new URL(url, location.href);
+    // Same-origin pages on this site are content-hashed already; busting them
+    // would defeat that and re-download our own assets on every open.
+    if (u.origin === location.origin) return u.href;
+    const stamp = bucketMs
+      ? Math.floor(Date.now() / bucketMs)   // shared bucket: refresh, don't hammer
+      : Date.now();                          // every open is its own fetch
+    u.searchParams.set('_ccc', String(stamp));
+    return u.href;
+  } catch {
+    return url;                              // never let this break a navigation
+  }
+}
+
 function navigateStageFrame(ui, url) {
   const fresh = makeStageFrame();
   ui.frame.replaceWith(fresh);          // keeps its slot/order inside the stage
   ui.frame = fresh;
-  fresh.src = url;                      // initial navigation: replaces, no push
+  fresh.src = freshUrl(url);            // initial navigation: replaces, no push
   return fresh;
 }
 
@@ -1018,10 +1055,10 @@ function onDocumentKeydown(ev) {
  * Boot the tool viewer.
  *
  * @param {object}  [options]
- * @param {Array}   [options.tools]     tools array (as in data/tools.3450a2cbfa.json). If
+ * @param {Array}   [options.tools]     tools array (as in data/tools.46eb63be76.json). If
  *                                      omitted we look at window.CCC_TOOLS /
  *                                      window.CCC?.tools, then fetch toolsUrl.
- * @param {string}  [options.toolsUrl]  default 'data/tools.3450a2cbfa.json'
+ * @param {string}  [options.toolsUrl]  default 'data/tools.46eb63be76.json'
  * @param {boolean} [options.deepLink]  honour #/tool/<slug> on load (default true)
  *
  * @param {(slug:string, tool:object) => boolean} [options.canOpen]
@@ -1053,7 +1090,7 @@ function onDocumentKeydown(ev) {
 export function initOverlay(options = {}) {
   const {
     tools = null,
-    toolsUrl = 'data/tools.3450a2cbfa.json',
+    toolsUrl = 'data/tools.46eb63be76.json',
     deepLink = true,
     canOpen = null,
     onRefused = null

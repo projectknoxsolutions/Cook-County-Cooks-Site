@@ -44,7 +44,7 @@ export const HOTSPOTS = {
       x:43.0, y:57.3, w:14.9, h:16.6, label:'Upgrade Quote Sheet' },
     { slug:'quote-internet', kind:'screen', mode:'title',
       x:63.9, y:57.3, w:14.5, h:16.6, label:'Internet Quote Sheet' },
-    { slug:'discount-close',  kind:'tool', x:76.0, y:76.0, w:14.5, h: 8.0, label:'The Mobile Discount Close', edge:'right bottom' },
+    { slug:'tsheet-submissions', kind:'tool', x:76.0, y:76.0, w:14.5, h: 8.0, label:'T-Sheet Submissions', edge:'right bottom' },
   ],
   host: [
     /* The Host Stand TV hangs at an angle — this is the quad the homography in
@@ -52,7 +52,7 @@ export const HOTSPOTS = {
     { slug:'daily-sales', kind:'screen', mode:'image', x:47.0, y:5.6, w:37.0, h:53.0,
       label:'Daily Sales Report', name:'Daily Promo Card',
       quad:[[47.6,21.4],[82.0,11.2],[82.0,57.8],[47.3,55.8]] },
-    { slug:'tsheet-submissions',    kind:'tool', x:26.0, y:55.5, w: 7.5, h:13.0, label:'T-Sheet Submissions' },
+    { slug:'discount-close',        kind:'tool', x:26.0, y:55.5, w: 7.5, h:13.0, label:'The Mobile Discount Close' },
     { slug:'commission-payouts',    kind:'tool', x:44.0, y:61.0, w: 6.5, h:14.0, label:'Commission Payouts 2026' },
     { slug:'yesterdays-conversion', kind:'tool', x:14.0, y:68.0, w:24.0, h:14.0, label:"Yesterday's Conversion", edge:'bottom' },
   ],
@@ -83,36 +83,43 @@ export const HOTSPOTS = {
     /* THE BACK OFFICE MONITOR — days since the last detractor, one district per
        slide, from the Daily Sales Report's own nps-detractor-streaks.json.
 
-       ── RE-TRACED 2026-08-27 against the RECOMPOSED plate ─────────────────
-       The client: "move the tv screen to the center of the desk and make it
-       large enough to read. Right now, we can't see the screen properly
-       because it's not aligned." The art was reshot: the desk is now centred
-       and the monitor hangs on the wall directly behind and above it.
+       ── RE-SHOT 2026-08-27, THIRD COMPOSITION ────────────────────────────
+       The client: "I love the TV screen but it's crooked. Also, it's still
+       kind of small. I would love for it to be larger if possible since the
+       information is important."
 
-       It is NOT axis-aligned, and that matters. Thresholding the glass
-       (luminance < 26 on a 2000x1116 resample) gives corners
-         TL (31.65, 24.91)  TR (54.85, 26.43)  BR (54.80, 49.55)  BL (31.00, 55.02)
-       — a left edge 30.1 plate-% tall against a right edge of 23.1. The camera
-       still sits right of centre, so the panel recedes. A plain box here would
-       float in front of the wall instead of lying in it, so the quad stays;
-       only the numbers changed. Inset ~0.5% off the traced glass so the mount
-       lands inside the bezel rather than on it.
-
-       The box below is the quad's bounding envelope — screens.js resolves the
-       quad against it, and the narrow-viewport band uses it for aspect. */
+       Both were true and both were in the photograph, not the code. The room
+       is now shot in symmetrical one-point perspective with the camera square
+       to the back wall, so the display is a genuine rectangle:
+         glass  x 35.50 → 64.46,  y 22.39 → 51.79
+         left edge 29.10 tall, right edge 29.03  →  0.3% skew (was 23.3%)
+         area 8.51% of frame (was 7.2%) — 18% bigger, 29% wider
+       At 0.3% there is nothing to correct, so `quad` is GONE and this is a
+       plain box. That matters: screens.js only applies its homography when a
+       quad is present, so a flat panel now renders flat instead of being
+       warped onto a plane it doesn't need. Inset ~0.5% off the traced glass so
+       the mount sits inside the bezel. */
     { slug:'daily-sales', kind:'screen', mode:'feed',
-      x:31.0, y:24.9, w:23.9, h:30.1,
-      label:'Days Since Last Detractor',
-      quad:[[32.1,25.6],[54.4,27.0],[54.4,49.0],[31.5,54.3]] },
-    { slug:'printouts',        kind:'tool', x:70.0, y:55.0, w:18.5, h:24.0, label:'Print Outs', edge:'right' },
-    { slug:'exception-report', kind:'tool', x:78.0, y:20.5, w: 8.5, h:22.5, label:'Exception Report', edge:'right' },
-    { slug:'fall-off',         kind:'tool', x:87.0, y:18.5, w: 8.5, h:22.5, label:'Fall-Off Summary', edge:'right' },
+      x:36.0, y:22.9, w:28.0, h:28.4,
+      label:'Days Since Last Detractor' },
+
+    /* The right-hand brick wall was re-measured against the same new plate.
+       Its objects are larger and closer than in the previous composition,
+       which is what keeps their printed labels legible — see labels.js. */
+    { slug:'printouts',        kind:'tool', x:78.1, y:35.0, w:7.9, h:17.2, label:'Print Outs', edge:'right' },
+    { slug:'exception-report', kind:'tool', x:85.6, y:36.8, w:4.4, h:20.0, label:'Exception Report', edge:'right' },
+    { slug:'fall-off',         kind:'tool', x:91.5, y:34.4, w:6.0, h:24.2, label:'Fall-Off Summary', edge:'right' },
   ],
   breakroom: [
     { kind:'chefs' },
     { slug:'training-xfinity',      kind:'tool', x:19.3, y:40.5, w:3.9, h:31.0, label:'Xfinity Product Mastery' },
     { slug:'training-straight-line',kind:'tool', x:23.4, y:40.5, w:3.9, h:31.0, label:'Sales Process 101' },
     { slug:'training-tsheet',       kind:'tool', x:27.5, y:40.5, w:3.9, h:31.0, label:'The Plus-First Playbook' },
+    /* The locker bank has FOUR doors, not three — seams traced at plate-x
+       17.1 / 21.5 / 25.2 / 28.5 / 32.9. The fourth was empty until the client
+       asked for one more training piece, so it gets the same inset and width
+       as its neighbours rather than a box invented to fit. */
+    { slug:'training-pos',          kind:'tool', x:29.4, y:40.5, w:3.9, h:31.0, label:'Celestial Point of Sale' },
     { slug:'fox-run',               kind:'tool', x:88.0, y:33.0, w:12.0, h:60.0, label:'C³ FOX RUN', edge:'right' },
   ],
   freezer: [

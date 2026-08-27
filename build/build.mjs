@@ -5,12 +5,15 @@
  * -----------------------------------------------------------------------------
  *   FREEZER_PASSWORD='…' node build/build.mjs [--clean]
  *
- * Two steps, and the order is not optional:
+ * Three steps, and the order is not optional:
  *
- *   1. seal-freezer.mjs   encrypts the manager tools and writes
+ *   1. sync-inline-tools.mjs  rewrites index.html's inline copy of
+ *                         data/tools.json, which app.js prefers over the
+ *                         fetch and which has silently drifted twice.
+ *   2. seal-freezer.mjs   encrypts the manager tools and writes
  *                         data/freezer.sealed.json plus the inline copy in
  *                         index.html.
- *   2. fingerprint.mjs    hashes every plate, module, stylesheet, sound and data
+ *   3. fingerprint.mjs    hashes every plate, module, stylesheet, sound and data
  *                         file, and rewrites every reference to them — INCLUDING
  *                         the freshly written freezer.sealed.json, which is why
  *                         it runs second.
@@ -35,5 +38,6 @@ function step(script, args = []) {
   if (r.status !== 0) process.exit(r.status || 1);
 }
 
+step('sync-inline-tools.mjs');
 step('seal-freezer.mjs');
 step('fingerprint.mjs', pass);

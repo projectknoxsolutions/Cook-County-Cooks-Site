@@ -185,13 +185,13 @@ const SURFACES = [
      rotation, and the four-corner fit resolves it as one. Blank white stock, so
      these two get faint pre-printed form rules of their own under the title. */
   { slug: 'exception-report', room: 'office', surface: 'clipboard',
-    quad: [[78.35, 28.26], [83.33, 26.88], [83.59, 41.93], [78.15, 43.17]],
+    quad: [[85.92, 37.91], [89.96, 36.79], [88.54, 56.72], [85.58, 56.34]],
     zone: [0.11, 0.09, 0.89, 0.60],    align: 'start',
-    paper: [212, 212, 225], ramp: [-0.017, 0.074],
+    paper: [226, 181, 151], ramp: [-0.017, 0.074],
     lines: ['Exception', 'Report'], meta: 'Tap to open', rules: 0.62 },
 
   { slug: 'fall-off',        room: 'office', surface: 'clipboard',
-    quad: [[87.17, 24.36], [95.55, 21.15], [95.30, 41.19], [86.94, 42.02]],
+    quad: [[91.54, 36.19], [97.46, 34.4], [97.12, 58.58], [91.46, 50.97]],
     /* The writing area is pulled left of centre on purpose. This clipboard is
        the right-most object in the plate; at 1280x800 its outer third is
        already outside the frame, and the push-in takes another 30px of it at
@@ -200,7 +200,7 @@ const SURFACES = [
        rather than independently of it, which is the only version of this that
        does not look like a bug. */
     zone: [0.06, 0.09, 0.82, 0.60],    align: 'start',
-    paper: [199, 202, 218], ramp: [-0.066, -0.068],
+    paper: [222, 181, 155], ramp: [-0.066, -0.068],
     lines: ['Fall-Off', 'Summary'], meta: 'Tap to open', rules: 0.5 },
 
   /* The sheet standing in the printer's output tray. It is tipped back and lit
@@ -208,9 +208,9 @@ const SURFACES = [
      19% down its height, the steepest ramp of the eight, and the mask makes the
      right-hand end of the word visibly softer than the left. */
   { slug: 'printouts',       room: 'office', surface: 'printout',
-    quad: [[81.41, 56.00], [87.50, 57.09], [86.46, 65.85], [79.20, 64.20]],
+    quad: [[78.12, 38.06], [85.96, 35.0], [81.5, 52.09], [78.96, 51.79]],
     zone: [0.10, 0.15, 0.90, 0.62],    align: 'start',
-    paper: [215, 219, 234], ramp: [-0.285, -0.190],
+    paper: [252, 231, 200], ramp: [-0.285, -0.190],
     lines: ['Print Outs'], meta: 'Tap to open' },
 
   /* ── THE PASS · the printed card lying on the counter ──────────────────────
@@ -219,11 +219,16 @@ const SURFACES = [
      rule and a body of faint type, so the ink goes exactly where a heading
      goes — on the top quarter, centred on the card's own axis — and the plate's
      existing body copy stays as the body copy underneath it. */
-  { slug: 'discount-close',  room: 'pass',   surface: 'counter-card',
+  /* The printed card on the pass now points at T-Sheet Submissions: the client
+     moved that tool here and sent The Mobile Discount Close to the host stand.
+     The surface is unchanged — same piece of paper, same measured quad, same
+     sampled paper colour and luminance ramp — only the slug and the words on
+     it move. Two short lines set better on this card than one long one. */
+  { slug: 'tsheet-submissions',  room: 'pass',   surface: 'counter-card',
     quad: [[76.62, 76.40], [83.80, 76.44], [89.74, 81.95], [81.62, 82.55]],
     zone: [0.12, 0.05, 0.88, 0.40],    align: 'center',
     paper: [250, 219, 192], ramp: [-0.011, -0.254],
-    lines: ['The Mobile', 'Discount Close'] }
+    lines: ['T-Sheet', 'Submissions'] }
 ];
 
 

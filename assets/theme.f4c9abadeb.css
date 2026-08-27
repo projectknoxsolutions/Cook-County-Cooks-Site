@@ -257,9 +257,52 @@
   --dur-1: 110ms;  --dur-2: 190ms;  --dur-3: 320ms;
   --dur-4: 520ms;  --dur-5: 820ms;  --dur-6: 1400ms;
 
-  /* ── Z ladder ───────────────────────────────────────────────────────── */
-  --z-plate: 0;   --z-vig: 1;    --z-glow: 2;    --z-hotspot: 10;
-  --z-rail: 20;   --z-topbar: 100; --z-c3: 110;
+  /* ── Z ladder ─────────────────────────────────────────────────────────
+     ⚠ THE HOTSPOT LAYER IS ABOVE THE RAIL, AND THAT IS DELIBERATE.
+     It used to be 10, i.e. under --z-rail. That is not a nuance about two
+     text layers overlapping: .rail::before is the WASH (§08a), a full-bleed
+     gradient that covers the entire stage, and .rail carries z-index, so the
+     wash is welded into .rail's stacking context and paints over EVERY
+     hotspot and every mounted screen in the room.
+
+     What that cost, measured on the Pass at 1600x900: the three tablets came
+     out of the wash at 40% of their authored luminance and the tool names —
+     authored rgb(252,251,248) — reached the screen at a peak relative
+     luminance of 0.12, i.e. mid-grey. That is the whole of the client's "I
+     want the screens in the pass to be lit up so we can see the things to
+     click": the panels were not dark because they were painted dark, they
+     were dark because the legibility furniture for the type was painted on
+     top of them. NO panel colour can fix it — white through that scrim lands
+     at L 0.133, so 7:1 for the name against its own panel is arithmetically
+     unreachable while the wash is above the glass.
+
+     Paint order now matches HIT order, which is the principle that was always
+     missing. .rail is pointer-events:none and has been since v3 (see the note
+     by .rail > *): a click on a chip goes to the chip, a click anywhere else
+     in the rail falls through to the object underneath. The affordances were
+     already on top for the pointer; they are now on top for the eye as well.
+
+     WHAT THIS DOES NOT DO. It does not put hotspot furniture over the room
+     title. §08a and §08 place every rail against the empty part of its own
+     plate, and rect intersection between every rail text box and every
+     hotspot / screen box — measured across every room, at eight viewports
+     from 960x800 to 3440x1440, at every scroll position where the room owns
+     more than 60% of the frame — comes out at zero. Two rooms did intersect
+     before this: the Host Stand, by 18,068px2 of title over the reservation
+     book at 1600x900, which is the defect §08a's new anchor fixes, and the
+     Break Room, which is the one exception and takes this layer back below
+     the rail — see the note on its --z-hotspot in §09. (Past hand-off, deep
+     in a room's dissolve, the parallax can still walk a drifting hotspot box
+     under a fading chip; the room is on its way off the screen and neither is
+     hit-testable by then. The guarantee is scoped to ownership, which is the
+     same scope every other affordance rule in this file uses.)
+
+     If a future plate puts an object under a room's type, move the type (§08a
+     exists for exactly that) rather than dropping this layer back under the
+     wash. */
+  --z-plate: 0;   --z-vig: 1;    --z-glow: 2;
+  --z-rail: 20;   --z-hotspot: 25;
+  --z-topbar: 100; --z-c3: 110;
   --z-c3menu: 120; --z-overlay: 200; --z-modal: 210; --z-toast: 300;
 
   /* ── Cinema geometry ────────────────────────────────────────────────── */
@@ -1376,7 +1419,7 @@ a { color: inherit; text-decoration: none; }
 .room[data-room="host"]      .plate-wrap { --dark-1400: url("../plates/host-dark@1400.1380384710.webp");      --dark-1800: url("../plates/host-dark@1800.f4938a7158.webp");      --dark-2400: url("../plates/host-dark.546fd61708.webp"); }
 .room[data-room="dining"]    .plate-wrap { --dark-1400: url("../plates/dining-dark@1400.26ad1671ff.webp");    --dark-1800: url("../plates/dining-dark@1800.9e938d4da8.webp");    --dark-2400: url("../plates/dining-dark.10eb73b9fe.webp"); }
 .room[data-room="prep"]      .plate-wrap { --dark-1400: url("../plates/prep-dark@1400.30d6eb89e9.webp");      --dark-1800: url("../plates/prep-dark@1800.9fb38c4d15.webp");      --dark-2400: url("../plates/prep-dark.8904ff1186.webp"); }
-.room[data-room="office"]    .plate-wrap { --dark-1400: url("../plates/office-dark@1400.6562f078c5.webp");    --dark-1800: url("../plates/office-dark@1800.de5f8d04f7.webp");    --dark-2400: url("../plates/office-dark.8f604ac010.webp"); }
+.room[data-room="office"]    .plate-wrap { --dark-1400: url("../plates/office-dark@1400.abb0c14ca5.webp");    --dark-1800: url("../plates/office-dark@1800.9a31726811.webp");    --dark-2400: url("../plates/office-dark.2765baa283.webp"); }
 .room[data-room="breakroom"] .plate-wrap { --dark-1400: url("../plates/breakroom-dark@1400.4b9f7bd399.webp"); --dark-1800: url("../plates/breakroom-dark@1800.c4f10e6a76.webp"); --dark-2400: url("../plates/breakroom-dark.35f9d7301f.webp"); }
 .room[data-room="freezer"]   .plate-wrap { --dark-1400: url("../plates/freezer-dark@1400.14f5990544.webp");   --dark-1800: url("../plates/freezer-dark@1800.4fcf3c2ca6.webp");   --dark-2400: url("../plates/freezer-dark.e3b8eb8f75.webp"); }
 
@@ -2008,6 +2051,93 @@ a { color: inherit; text-decoration: none; }
    about where a card sits over a banquette and only needs re-LOOKING at.      */
 .room[data-room="pass"]   { --rail-foot: 53.0; --rail-lead: 20.9; --rail-w: 52; }
 .room[data-room="dining"] { --rail-foot: 81.5; --rail-lead: 4.0;  --rail-w: 58; }
+.room[data-room="host"]   { --rail-foot: 52.0; --rail-lead: 4.0;  --rail-w: 40; }
+.room[data-room="host"] .rail { --wash-lift: 30svh; }
+.room[data-room="host"] .rail-kicker {
+  text-shadow: var(--shadow-text),
+               0 0  3px rgb(var(--shade) / .97),
+               0 0  7px rgb(var(--shade) / .94),
+               0 0 15px rgb(var(--shade) / .88),
+               0 0 28px rgb(var(--shade) / .66);
+}
+.room[data-room="host"] .rail-tagline {
+  text-shadow: var(--shadow-text),
+               0 0  6px rgb(var(--shade) / .86),
+               0 0 16px rgb(var(--shade) / .72);
+}
+
+/* ── THE HOST STAND, MOVED TO THE TOP LEFT ───────────────────────────────
+   The client, on this room: "I would also like for the Host Stand text to be
+   at the top left of the page so that we can see the items to click. Right
+   now, the text overlays what we are clicking."
+
+   He is describing a measurable fault, not a preference. With the v3
+   bottom-left card, the room title alone intersected the `yesterdays-conversion`
+   hotspot — the open reservation book — by 18,068px2 at 1600x900 and
+   13,247px2 at 1024x768, and the tagline and chip rows ran across the ticket
+   spike and the brass tip jar underneath it. Three of this room's four
+   hotspots were under the type that exists to tell you to click them.
+
+   WHAT THE TOP LEFT HAS TO CLEAR, and why these two numbers and not others:
+
+     · THE WALL DISPLAY owns the upper RIGHT. Its glass is traced at plate-x
+       47.3-82.0% (rooms.js, the `daily-sales` quad), and because the plate is
+       cover-cropped, the narrower the viewport's aspect the further LEFT that
+       edge comes: at 1600x900 it lands at x 729, at 1180x820 at x 524, at
+       1024x768 at x 473. --rail-w is what keeps the card off it, and it is
+       40 rather than the 52/58 the other two raised rooms carry BECAUSE of
+       that: at 42 the fourth chip crossed the glass by 16px at 1180x820.
+       40cqw wraps that row instead, which is the right trade — a chip that
+       wraps is fine, a chip sliced by a television is not.
+     · THE PODIUM owns the bottom. The highest thing on it is the ticket
+       spike's hotspot at plate-y 55.5%, and the foot at 52.0% hangs the last
+       chip row clear of it. Measured worst case over the whole scrub, so the
+       push-in and the parallax drift are in the number: 32px at 1600x900,
+       29px at 1280x800 and at 960x800, 27px at 1366x768, 39px at 1920x1080,
+       51px at 2560x1440, and 8px at 1024x768, which is the tightest frame
+       this composition is asked to hold. --rail-lead 4.0 sets the card
+       against the left edge of the frame, where the vaulted ceiling and the
+       brick pillar are the only things in it.
+     · THE TOP BAR takes the first 61-72px (--topbar-h is fluid). Measured
+       clearance under it: 77px at 1600x900, 49px at 1280x800, 27px at
+       1366x768, 170px at 1920x1080, 354px at 2560x1440, and 24px — which is
+       --sp-5, the rail's own padding, i.e. the floor — wherever `safe end`
+       below has taken over.
+
+   AND THE GROUND UNDER IT HAD TO BE REBUILT, because moving type into the top
+   left of THIS photograph moves it onto the brightest quarter of it. Three
+   measurements, all worst-pixel under a glyph, all with animations AND
+   transitions frozen:
+
+     · 1600x900, f 0.55. The push-in walks the vaulted ceiling's cove light
+       under the last letters of "COURSE TWO": ground 0.133, kicker 4.09:1.
+     · 960x800 and 1100x900, f 0.35. At aspects near 1.2 the cover crop zooms
+       in far enough to bring the PENDANT BULB — an actual light source in the
+       plate, ground 0.18 — behind the kicker and the tagline: 2.63:1 and
+       2.80:1. No wash defeats a filament; 0.74 alpha over 0.18 is still 0.005,
+       but the ellipse only reaches 0.55 that far from its centre.
+
+   So the fix is in two parts, and both are scoped to this room because no
+   other room's type starts this high in its frame:
+
+     --wash-lift  §08a centres the ellipse 15svh above the card's foot, which
+                  is the middle of a card that hangs DOWN from mid-frame. This
+                  one hangs down from the top bar, and in the cramped frames
+                  `safe end` drops it further still, so 15svh leaves the kicker
+                  out on the 0.50 shoulder. 30svh puts the 0.64-0.70 core over
+                  the first two rows where the trouble is.
+     the halos    A tighter, deeper stack on the kicker and a halo on the
+                  tagline, which had only --shadow-text. These are honest
+                  ground: they are fixed colours, so they stay in the frame
+                  when the glyphs are erased for the measurement and cannot
+                  flatter it. Worst small-text contrast across 1600x900,
+                  1280x800, 1180x820, 1100x900, 1024x768 and 960x800 after
+                  both: 5.43:1.
+
+   ⚠ 52.0 IS A HOTSPOT LINE, NOT AN EYEBALLED ONE. It is the ticket spike's
+   own top edge minus a constant. If host.webp is ever re-shot, re-derive it
+   from rooms.js's `discount-close` box the same way, and re-check --rail-w
+   against the traced left edge of the `daily-sales` quad. */
 
 /* ── THE BACK OFFICE, RETURNED TO THE BOTTOM-LEFT CARD ───────────────────
    The client, on this room: "Could we move the text on the back office down to
@@ -2038,7 +2168,8 @@ a { color: inherit; text-decoration: none; }
    49.3 / 30.5 — they encode a traced edge on art that is being replaced. */
 
 :is(.room[data-room="pass"],
-    .room[data-room="dining"]) .rail {
+    .room[data-room="dining"],
+    .room[data-room="host"]) .rail {
   /* plate-Y --rail-foot, in stage pixels, at the arrival scale */
   --rail-foot-y: calc(
       (var(--plate-top) + var(--cover-h) * var(--rail-foot) / 100 - 50svh)
@@ -2048,7 +2179,19 @@ a { color: inherit; text-decoration: none; }
       (var(--plate-left) + var(--cover-w) * var(--rail-lead) / 100 - 50cqw)
       * var(--overscan-k) + 50cqw);
 
-  align-content: end;
+  /* `safe end`, and the keyword is load-bearing. Anchoring the FOOT means the
+     block grows UPWARD, so a viewport short enough that the card does not fit
+     between the top bar and its anchor line pushes type up under the bar —
+     with plain `end` the overflow is silent and unbounded. It showed up the
+     moment the Host Stand joined this table: at 960x800 (wide layout, aspect
+     1.20, i.e. just inside the §17 breakpoint) its kicker sat 34px BEHIND the
+     bar. `safe` says: if the content would overflow the alignment container,
+     align it to `start` instead. So the card keeps its foot line at every
+     size that can hold it, and at the sizes that cannot it falls to just
+     under the bar and grows downward — which costs a few pixels of clearance
+     over the podium and never hides type behind chrome. It changes nothing
+     for the Pass or the Dining Room, whose cards fit everywhere. */
+  align-content: safe end;
   /* The cap is a safety rail, not a design value: it guarantees the block
      always has 42svh of room between the top bar and its foot, so a short
      landscape phone or a very long tagline can never push type up under the
@@ -2056,8 +2199,10 @@ a { color: inherit; text-decoration: none; }
   padding-block-end: min(calc(100svh - var(--rail-foot-y)), 58svh);
   padding-inline-start: max(var(--gut), var(--rail-lead-x));
 
-  /* the wash follows the card — see the note on .rail::before */
-  --wash-y: calc(var(--rail-foot-y) - 15svh);
+  /* the wash follows the card — see the note on .rail::before. --wash-lift is
+     15svh for every room that does not say otherwise; the Host Stand says
+     otherwise, and the note by its anchor says why. */
+  --wash-y: calc(var(--rail-foot-y) - var(--wash-lift, 15svh));
   --wash-x: calc(var(--rail-lead-x) + 15cqw);
 
   /* A raised card is over the middle of the picture, not off in a corner, so
@@ -2067,11 +2212,13 @@ a { color: inherit; text-decoration: none; }
 }
 
 :is(.room[data-room="pass"],
-    .room[data-room="dining"]) :is(.rail-title, .rail-tagline) {
+    .room[data-room="dining"],
+    .room[data-room="host"]) :is(.rail-title, .rail-tagline) {
   max-inline-size: min(var(--rail-measure), 34ch);
 }
 :is(.room[data-room="pass"],
-    .room[data-room="dining"]) .rail-chips {
+    .room[data-room="dining"],
+    .room[data-room="host"]) .rail-chips {
   max-inline-size: min(var(--rail-measure), 62ch);
 }
 
@@ -2321,6 +2468,19 @@ a { color: inherit; text-decoration: none; }
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @property --bracket { syntax: "<length-percentage>"; inherits: true; initial-value: 13px; }
+
+/* ── THE ONE ROOM THAT KEEPS THE v3 ORDER ─────────────────────────────────
+   The z ladder puts this layer above .rail so that a mounted screen is not
+   painted through .rail::before's wash (read the note there). The Break Room
+   has no mounted screen — chefwall.js's strip is detached into the rail at
+   init and the frames on this layer are photographs, not glass — so it gains
+   nothing from the swap, and it loses something real: its title sits over the
+   locker bank, and the `training-*` hotspot brackets came up through
+   "Break Room" as gold hairlines across the glyphs. SPEC-v4: "Break Room is
+   finished. Do not touch its composition." So it keeps the order it was
+   composed under. This is a per-room custom property on a closer ancestor
+   than :root, so it wins without a specificity fight. */
+.room[data-room="breakroom"] { --z-hotspot: 10; }
 
 .hotspots {
   z-index: var(--z-hotspot);
@@ -3630,6 +3790,19 @@ dialog#c3-menu[open],
      [data-screen] and [data-chefwall-host], the only other children. */
   .hotspots > .hotspot { display: none !important; }
 
+  /* AND THE LAYER GOES BACK UNDER THE RAIL HERE. The z ladder puts .hotspots
+     above .rail so a mounted screen is not painted through the wash — but at
+     this breakpoint nothing is mounted in the art: screens.js has relocated
+     every panel into the band and the object hotspots are display:none. What
+     is left on this layer is the [data-screen] HOST divs, which keep their
+     layout box (that is what keeps their IntersectionObserver alive, see the
+     note above) and their pointer-events. Above the rail those empty boxes
+     start eating taps: measured at 390x844, the Pass's `quote-upgrade` host
+     returned from elementFromPoint at the centre of the "6th Gen Mobile Quote
+     Sheet" chip, i.e. the first row of the drawer was not clickable. There is
+     nothing here for the swap to protect, so it is simply not made. */
+  :root { --z-hotspot: 10; }
+
   /* ── THE BAND, AS THE LAYOUT OWNER SEES IT ───────────────────────────────
      screens.js draws the band; this stylesheet owns where it sits and how much
      room it gets. Two corrections and one knob:
@@ -3703,12 +3876,25 @@ dialog#c3-menu[open],
      against objects that are no longer in the frame at this aspect — the Pass's
      tablets are in the band by now — so it is retired here rather than
      re-tuned. --rail-foot / --rail-lead stay declared on the rooms; nothing
-     reads them at this breakpoint. The Back Office is not in this list any
-     more because it is no longer raised anywhere: §08a returned it to the
-     bottom-left card at every width, so on a phone it now behaves exactly like
-     Host, Prep and the Break Room. */
+     reads them at this breakpoint. The Back Office is not in this list because
+     it is no longer raised anywhere: §08a returned it to the bottom-left card
+     at every width, so on a phone it behaves exactly like Prep and the Break
+     Room.
+
+     THE HOST STAND IS IN THIS LIST NOW, and for the same reason as the Pass
+     rather than as an exception to it. Its type moved to the top left to get
+     off the podium (§08a) — but at this aspect the podium is not where it was:
+     --art-x .30 points the crop at the book, the spike and the tip jar, the
+     wall display has left the frame entirely, and the screens have gone to the
+     band. The card that was solved against a 16:9 frame with a television in
+     the top right is solving a problem this viewport does not have. So the
+     Host Stand returns to the phone column every other room uses. `align-content`
+     is restated here because §08a now sets `safe end` rather than plain `end`,
+     and the phone column is a plain bottom-anchored card. */
   :is(.room[data-room="pass"],
-      .room[data-room="dining"]) .rail {
+      .room[data-room="dining"],
+      .room[data-room="host"]) .rail {
+    align-content: end;
     padding-block-end: max(var(--sp-2), env(safe-area-inset-bottom, 0px));
     padding-inline-start: max(var(--gut), env(safe-area-inset-left, 0px));
     --wash-x: 50%;
@@ -3716,7 +3902,8 @@ dialog#c3-menu[open],
     --rail-measure: none;
   }
   :is(.room[data-room="pass"],
-      .room[data-room="dining"]) :is(.rail-title, .rail-tagline, .rail-chips) {
+      .room[data-room="dining"],
+      .room[data-room="host"]) :is(.rail-title, .rail-tagline, .rail-chips) {
     max-inline-size: none;
   }
 
@@ -4065,6 +4252,40 @@ dialog#c3-menu[open],
   .rail-chips .chip { min-block-size: 54px; }
   /* the tagline is the first thing to go when a room has a long tool list */
   .room[data-room="freezer"] .rail-tagline { display: none; }
+}
+
+/* ═══ THE HOST STAND IN A CRAMPED WIDE FRAME ══════════════════════════════
+   §08a hangs this room's card off plate-Y 52% so it clears the podium, and
+   `safe end` catches the viewports too short to hold it there by dropping it
+   to just under the top bar. Between about 940 and 1140 CSS px wide, at under
+   ~860px tall, BOTH of those run out at once and the card lands ON the ticket
+   spike — measured at 1024x768: block foot 480, spike hotspot top 444, and
+   `elementFromPoint` at the centre of the "Commission Payouts 2026" chip
+   returned the spike's hotspot, i.e. the fourth chip was not clickable.
+
+   WHY IT IS ONLY THIS BOX. Two things have to go wrong together. Horizontally,
+   the cover crop brings the wall display's left edge in to x 450 at 1024 wide,
+   which leaves the chips ~408px — less than the 458 the two widest of them
+   need side by side — so the drawer goes to FOUR single-chip rows instead of
+   two or three. Vertically, plate-Y 55.5% (the spike) minus the top bar is
+   only ~360px at 768 tall. A four-row drawer plus a display-scale title does
+   not fit in 360px at any anchor. Above ~1140px wide the chips pair up and the
+   drawer loses two rows; above ~860px tall the frame has the room. Inside the
+   box, neither is true.
+
+   So the card is COMPRESSED rather than moved: one step down the type scale on
+   the title and the tagline, and the rhythm pulled in. Nothing is dropped, the
+   chips keep their 44px minimum block size, and the saving (~69px) is more
+   than the ~40px the worst case in this box was over by. Everything outside
+   the box is untouched — this is the only rule in the file that reads the room
+   name and the viewport box together, and it exists because the ART puts a
+   television and a podium the exact distance apart that it does. */
+@media (min-width: 901px) and (min-aspect-ratio: 8 / 7)
+   and (max-width: 1140px) and (max-height: 860px) {
+  .room[data-room="host"] .rail        { gap: var(--sp-2); }
+  .room[data-room="host"] .rail-title  { font-size: var(--t-4); }
+  .room[data-room="host"] .rail-tagline{ font-size: var(--t-0); }
+  .room[data-room="host"] .rail-chips  { gap: var(--sp-1); }
 }
 
 /* Very short landscape phones — keep the list usable */

@@ -62,6 +62,8 @@
  * -------------------------------------------------------------------------- */
 
 /** The two public, CORS-open data files behind the Host Stand and Back Office. */
+import { freshUrl } from './overlay.js';   // shared fresh-load cache buster
+
 export const PROMO_CARD_URL =
   'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/promo-card.jpg';
 export const STREAKS_URL =
@@ -366,17 +368,67 @@ const STYLES = `
   clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* ══ MODE: title ═════════════════════════════════════════════════════════ */
+/* ══ MODE: title ═════════════════════════════════════════════════════════
+   A LIT DISPLAY, NOT A LABEL.
+
+   The client, on the three Pass tablets: "I want the screens in the pass to be
+   lit up so we can see the things to click on the screen." He was describing
+   exactly what was wrong. The card was near-black glass (#10161f -> #070a10)
+   with the tool's name ghosted onto it — which is precisely what a switched
+   OFF tablet looks like. The Pass plate is a warm, brightly lit kitchen, so
+   three black rectangles across its lower third read as three DEAD screens
+   rather than as the three most clickable objects in the building. The whole
+   reason the title cards exist ("so that my employees will know exactly what
+   to click") was being defeated by the way they were lit.
+
+   A SCREEN THAT IS ON IS A LIGHT SOURCE. Three things make that read, and the
+   old card had none of them:
+
+     1 · THE PANEL IS LIFTED. The glass is a cool slate that sits ABOVE the
+         warm room around it instead of below it. It is capped, not maximised:
+         the brightest pixel any glyph can land on is held near relative
+         luminance 0.075, so the name still clears 7:1 against its own panel.
+         That cap is why the backlight radial is .06 and not .13, why the sheen
+         is a third of what a mounted TV gets (see .ccc-scr--title overrides
+         below), and why this gradient tops out at #364258 rather than the
+         #46566f that looked better in isolation and measured 5.3:1.
+     2 · IT EMITS. A lit panel throws light onto what is around it. The halo is
+         much stronger here than on a mounted screen and it is biased DOWNWARD,
+         onto the counter the tablet stands on. Spill is the single strongest
+         "this is on" cue available to a still photograph.
+     3 · IT IS COOL AGAINST A WARM ROOM. Every other light in the Pass is
+         tungsten — heat lamps, filament bulbs, a cove wash. A daylight-white
+         panel cannot be read as a reflection of any of them.
+
+   WHAT KEEPS IT INSIDE THE PHOTOGRAPH. The bezel rim, the sheen and the
+   scanlines all stay: they are what welds a rectangle into a plate, and
+   without them a lifted panel is a glowing sticker. They are RE-WEIGHTED for a
+   lit screen rather than removed — the bezel's inner vignette no longer eats
+   the panel's own light, the sheen is cut because a bright screen shows much
+   less of the room in it, and a warm bounce runs along the foot of the glass
+   where the steel counter throws light back up at it.
+
+   The treatment is on the MODE, not on the Pass, so any 'title' panel gets it
+   — including the narrow-viewport band, where the same card is a full-width
+   strip and the same reasoning applies. */
 .ccc-scr-title {
   position: absolute; inset: 0;
   display: grid; align-content: center; justify-items: start;
-  gap: .32em;
+  gap: .34em;
   padding: 6% 7%;
   text-align: start;
   background:
-    radial-gradient(120% 100% at 12% 0%,
-      color-mix(in oklab, var(--ccc-accent, #c8973f) 16%, transparent), transparent 62%),
-    linear-gradient(157deg, #10161f 0%, #070a10 62%, #0b0f16 100%);
+    /* the backlight. Held low and pushed above the type: this is the one layer
+       that can put a bright pixel under a glyph, so it is the one layer the
+       7:1 cap is spent on. */
+    radial-gradient(104% 84% at 18% 6%,
+      rgba(226,240,255,.06), rgba(226,240,255,0) 72%),
+    /* the counter's warm bounce along the bottom edge of the glass */
+    linear-gradient(0deg,
+      color-mix(in oklab, var(--ccc-accent, #c8973f) 15%, transparent) 0%,
+      transparent 32%),
+    /* the panel */
+    linear-gradient(158deg, #3d4a64 0%, #313e58 46%, #232c3e 100%);
 }
 .ccc-scr-title__name {
   margin: 0;
@@ -385,14 +437,24 @@ const STYLES = `
   font-size: var(--scr-title-fs, 20px);
   line-height: 1.02;
   letter-spacing: -0.018em;
-  color: var(--ccc-scr-ink, #f6f2ea);
+  /* Near-white, not bone: this is emitted light, not printed ink. */
+  color: var(--ccc-scr-ink, #fcfbf8);
   text-wrap: balance;
-  text-shadow: 0 1px 0 rgba(0,0,0,.6);
+  /* The halo is mixed FROM currentColor on purpose. It is part of the type, so
+     it vanishes with the type — which keeps the "erase the glyphs and sample
+     what is underneath" contrast measurement honest instead of letting the
+     glow inflate its own background. The black drop stays a fixed colour: it
+     only ever lowers the ground, so it cannot flatter the number. */
+  text-shadow:
+    0 0 15px color-mix(in oklab, currentColor 34%, transparent),
+    0 1px 2px rgba(0,0,0,.55);
 }
 .ccc-scr-title__rule {
-  inline-size: 34%; block-size: 1px; border: 0; margin: 0;
+  inline-size: 46%; block-size: 2px; border: 0; margin: 0;
   background: linear-gradient(90deg,
-    var(--ccc-accent, #c8973f), color-mix(in oklab, var(--ccc-accent, #c8973f) 10%, transparent));
+    var(--ccc-accent-hi, #ebce93),
+    color-mix(in oklab, var(--ccc-accent, #c8973f) 14%, transparent));
+  box-shadow: 0 0 10px color-mix(in oklab, var(--ccc-accent, #c8973f) 42%, transparent);
   opacity: calc(0.35 + 0.65 * var(--scr-on));
 }
 .ccc-scr-title__cta {
@@ -403,7 +465,54 @@ const STYLES = `
   letter-spacing: .165em;
   text-transform: uppercase;
   color: var(--ccc-accent-hi, #ebce93);
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
 }
+
+/* ── the panel chrome, re-weighted for a screen that is ON ────────────────
+   Everything below overrides a shared rule further up this sheet. Each one is
+   here because the default was tuned for black glass and reads wrong on a lit
+   panel — not because the effect is unwanted. */
+
+/* THE SPILL. 'inset' is asymmetric: more room below the glass than above it,
+   because the counter is below and that is where the light actually lands.
+   The blur is static — nothing animates it, per the perf contract. */
+.ccc-scr--title .ccc-scr__glow {
+  inset: -24% -19% -38% -19%;
+  border-radius: 46%;
+  background:
+    radial-gradient(48% 42% at 50% 40%,
+      rgba(206,230,255,.50), rgba(206,230,255,0) 72%),
+    radial-gradient(76% 64% at 50% 64%,
+      rgba(146,186,255,.26), rgba(120,158,255,0) 76%);
+  filter: blur(15px);
+  opacity: calc(var(--scr-on) * (0.40 + 0.46 * var(--bloom, 0)));
+}
+
+/* A bright screen mirrors much less of the room than a dead one. At full
+   strength the shared sheen put ~.12 white across the top of the glass, which
+   on its own cost the name 2 points of contrast. */
+.ccc-scr--title .ccc-scr__sheen {
+  opacity: calc(0.30 - 0.10 * var(--scr-on));
+}
+
+/* Scanlines are texture, not shading. Halved so they read as structure on a
+   lit panel instead of greying it back down. */
+.ccc-scr--title .ccc-scr__scan {
+  opacity: calc(0.17 * var(--scr-on));
+}
+
+/* The bezel keeps its dark outer line — that is the edge that sits the panel
+   in the photograph — but the 16px inner vignette that used to swallow the
+   corners is cut back, and a cool hairline just inside it reads as the glass
+   edge catching the backlight. */
+.ccc-scr--title .ccc-scr__bezel {
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.68),
+    inset 0 0 0 2px rgba(206,230,255,.26),
+    inset 0 0 20px 2px rgba(0,0,0,.24),
+    inset 0 1px 0 rgba(226,240,255,.20);
+}
+
 /* the four-strip variant the narrow band uses: name left, cue right */
 .ccc-scr--narrow.ccc-scr--title .ccc-scr-title {
   grid-template-columns: 1fr auto;
@@ -1433,7 +1542,11 @@ function makeLive(rec) {
     }, { once: true });
     node.replaceChildren(frame);
     fit();
-    frame.src = url;
+    // 5-minute bucket, not a per-mount stamp: these boards mount and unmount
+    // as the room scrolls in and out, and a unique URL each time would refetch
+    // the whole deck on every pass. Five minutes is well inside "today's
+    // numbers" while still picking up a push within one coffee break.
+    frame.src = freshUrl(url, 5 * 60 * 1000);
 
     // A deck that never loads must not leave black glass forever.
     watchdog = window.setTimeout(() => {

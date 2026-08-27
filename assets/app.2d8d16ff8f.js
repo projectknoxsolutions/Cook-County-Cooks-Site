@@ -37,15 +37,15 @@
  * ========================================================================== */
 
 import { initEngine, scrollToRoom, onRoomChange } from './engine.bf3009e5e2.js';
-import { initOverlay, openTool } from './overlay.1cba07a4ed.js';
-import { mountRoomScreens } from './screens.30f1f907dc.js';
+import { initOverlay, openTool } from './overlay.d050392ab2.js';
+import { mountRoomScreens } from './screens.7a02bb1ce0.js';
 import { initChefWall } from './chefwall.ebf5356610.js';
-import { initLabels } from './labels.c8bf7e937e.js';
+import { initLabels } from './labels.9cac8c109b.js';
 import { initFreezer } from './freezer.bbe8ae3db2.js';
 import {
   loadEnvelope, unseal, restore, remember, cryptoAvailable
-} from './coldstore.a02f63cf62.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.afcf5a69a0.js';
+} from './coldstore.f7f1c723d6.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.260866626c.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ async function loadData() {
 
   // Fallback for a served deployment where the inline block was removed.
   const [tools, headchefs] = await Promise.all([
-    fetch('data/tools.3450a2cbfa.json').then((r) => r.json()),
+    fetch('data/tools.46eb63be76.json').then((r) => r.json()),
     fetch('headchefs/headchefs.json').then((r) => r.json())
   ]);
   return { tools, headchefs };
@@ -545,7 +545,7 @@ const PLATES = {
   host:         { src: 'plates/host.77ad3dcb2d.webp',         srcset: 'plates/host@1400.9f4f7fceb0.webp 1400w, plates/host@1800.c1093ca544.webp 1800w, plates/host.77ad3dcb2d.webp 2400w' },
   dining:       { src: 'plates/dining.e833a21953.webp',       srcset: 'plates/dining@1400.940873ea4c.webp 1400w, plates/dining@1800.f2e000e730.webp 1800w, plates/dining.e833a21953.webp 2400w' },
   prep:         { src: 'plates/prep.e1ff2fd61f.webp',         srcset: 'plates/prep@1400.71a1c3421a.webp 1400w, plates/prep@1800.914c0511c4.webp 1800w, plates/prep.e1ff2fd61f.webp 2400w' },
-  office:       { src: 'plates/office.80dafba3be.webp',       srcset: 'plates/office@1400.072c33c97f.webp 1400w, plates/office@1800.4037125841.webp 1800w, plates/office.80dafba3be.webp 2400w' },
+  office:       { src: 'plates/office.4e4c6d7172.webp',       srcset: 'plates/office@1400.ac0e7111c5.webp 1400w, plates/office@1800.7c45276712.webp 1800w, plates/office.4e4c6d7172.webp 2400w' },
   breakroom:    { src: 'plates/breakroom.5f1c5beafd.webp',    srcset: 'plates/breakroom@1400.77ca641bf5.webp 1400w, plates/breakroom@1800.b6da6ae8cd.webp 1800w, plates/breakroom.5f1c5beafd.webp 2400w' },
   freezer:      { src: 'plates/freezer.01697f04b3.webp',      srcset: 'plates/freezer@1400.bc3f759e61.webp 1400w, plates/freezer@1800.950d506378.webp 1800w, plates/freezer.01697f04b3.webp 2400w' },
   'freezer-door': { src: 'plates/freezer-door.833492497b.webp', srcset: 'plates/freezer-door@1400.2c18d7f0b7.webp 1400w, plates/freezer-door@1800.5d976c9501.webp 1800w, plates/freezer-door.833492497b.webp 2400w' }
