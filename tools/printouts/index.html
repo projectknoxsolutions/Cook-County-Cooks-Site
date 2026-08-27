@@ -1,58 +1,1099 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Print Outs | Cook County Cooks</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <meta name="description" content="Every printable form, guide and checklist from the Back Office printer — hosted on the site, previewed and printed in place.">
+
+  <!-- theme.css keeps its own @import so it stands alone, but an @import is
+       only discovered after the stylesheet itself has parsed. Preconnect +
+       a direct <link> here starts the font fetch in the same breath as the
+       stylesheet, exactly as index.html does. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,300..700;1,62..125,300..700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..700&display=swap">
+
+  <!-- THE SITE'S OWN STYLESHEET, not a second design language. Everything
+       below is written against its tokens (§02) and reuses its primitives —
+       .kicker, .t-sub, .lede, .micro, .rule, .btn, .chip, .tool-row, and the
+       two-tone focus ring in §16. This page is loaded into the tool overlay
+       (an iframe), so it has to carry its own <head>; it does not have to
+       invent its own palette. -->
+  <link rel="stylesheet" href="../../assets/theme.css">
+
+  <script>
+    /* INLINE DATA BOOTSTRAP — same reason as index.html, do not "clean this up".
+       fetch()/XHR against a file:// URL is always CORS-mode and browsers refuse
+       it for a null origin even when the JSON sits in the same folder. Jeff and
+       the district managers review builds by opening the site straight off a
+       USB stick, so the station has to render its list with zero network.
+
+       This is printouts/manifest.json inlined verbatim. The page ALWAYS tries
+       the real file first and only falls back to this copy when the fetch
+       fails — so on the live site the manifest is the single source of truth
+       and dropping a new sheet into printouts/ needs no change here. If you
+       edit the manifest, re-paste it here too. */
+    window.__CCC_PRINTOUTS__ = {
+            "_comment": "The Print Outs station reads this at runtime (tools/printouts/index.html). Add a file to printouts/ and add a row here — the page needs no code change. `bytes` is a hint for the row's size label; the station prefers the real Content-Length when the server gives it one.",
+            "version": 1,
+            "groups": [
+                  {
+                        "id": "counter",
+                        "label": "Customer-Facing Collateral",
+                        "blurb": "The paper that goes across the counter — hand it to the customer or hold it up while you sell."
+                  },
+                  {
+                        "id": "ops",
+                        "label": "Store Operations",
+                        "blurb": "The sheets that run the day: open it, work it, close it, log the cash."
+                  },
+                  {
+                        "id": "reference",
+                        "label": "Reference & HR",
+                        "blurb": "What you print once and keep — policy, payout, survey wording, and the links you always hunt for."
+                  }
+            ],
+            "files": [
+                  {
+                        "file": "Welcome Kit - Xfinity.pdf",
+                        "label": "Welcome Kit — Xfinity",
+                        "type": "pdf",
+                        "group": "counter",
+                        "bytes": 388096,
+                        "blurb": "Hand this to every new Xfinity customer at the close — what they bought, what happens next, and who to call."
+                  },
+                  {
+                        "file": "Channel Line Up.pdf",
+                        "label": "Channel Line Up",
+                        "type": "pdf",
+                        "group": "counter",
+                        "bytes": 106496,
+                        "blurb": "The full Xfinity TV lineup — print it when a customer wants to see their channel on paper before they say yes."
+                  },
+                  {
+                        "file": "Now TV - Now Latino - Channel Guide.pdf",
+                        "label": "Now TV — Now Latino Channel Guide",
+                        "type": "pdf",
+                        "group": "counter",
+                        "bytes": 260096,
+                        "blurb": "The Now Latino channel guide for the Now TV pitch — the Spanish-language lineup, ready to hand over."
+                  },
+                  {
+                        "file": "Blufox Mobile Opening Checklist.docx",
+                        "label": "Blufox Mobile Opening Checklist",
+                        "type": "doc",
+                        "group": "ops",
+                        "bytes": 18944,
+                        "blurb": "The morning open — lights, systems, drawer, and floor set, signed off before the first customer walks in."
+                  },
+                  {
+                        "file": "Blufox Mobile Closing Checklist - Elkhart.docx",
+                        "label": "Blufox Mobile Closing Checklist — Elkhart",
+                        "type": "doc",
+                        "group": "ops",
+                        "bytes": 89088,
+                        "blurb": "Elkhart's end-of-night list — every box the closing rep checks before the gate comes down."
+                  },
+                  {
+                        "file": "Daily Menu - Sales Tracker PDF.pdf",
+                        "label": "Daily Menu — Sales Tracker",
+                        "type": "pdf",
+                        "group": "ops",
+                        "bytes": 104448,
+                        "blurb": "Today's board: print it at open and track the store against goal as the sales land."
+                  },
+                  {
+                        "file": "Brinks Pick Up Log.png",
+                        "label": "Brinks Pick-Up Log",
+                        "type": "image",
+                        "group": "ops",
+                        "bytes": 1289748,
+                        "blurb": "Post it by the safe and sign every Brinks pickup as it happens — date, bag, amount, initials."
+                  },
+                  {
+                        "file": "Employee Handbook - Jan 2026.pdf",
+                        "label": "Employee Handbook",
+                        "type": "pdf",
+                        "group": "reference",
+                        "bytes": 498688,
+                        "blurb": "The January 2026 edition — policy, dress code, time off, and the answers to what reps ask HR first."
+                  },
+                  {
+                        "file": "GP And Commission Payout.pdf",
+                        "label": "GP and Commission Payout",
+                        "type": "pdf",
+                        "group": "reference",
+                        "bytes": 71578,
+                        "blurb": "What a sale actually pays — GP tiers and commission payout, printed for the coaching conversation."
+                  },
+                  {
+                        "file": "NPS Black And White.pdf",
+                        "label": "NPS — Black and White",
+                        "type": "pdf",
+                        "group": "reference",
+                        "bytes": 100659,
+                        "blurb": "The toner-friendly NPS sheet — the survey ask spelled out, for the counter or the back-office wall."
+                  },
+                  {
+                        "file": "NPS Text Template Spanish.pdf",
+                        "label": "NPS Text Template — Spanish",
+                        "type": "pdf",
+                        "group": "reference",
+                        "bytes": 142336,
+                        "blurb": "The Spanish wording for the survey follow-up text, so a Spanish-speaking customer knows what the score means."
+                  },
+                  {
+                        "file": "Important Links For Store Managers - QR CODES.pdf",
+                        "label": "Important Links for Store Managers — QR Codes",
+                        "type": "pdf",
+                        "group": "reference",
+                        "bytes": 131072,
+                        "blurb": "One page of QR codes for the manager links you're always hunting for — print it and tape it up in the back office."
+                  }
+            ]
+      };
+  </script>
+
   <style>
-    * { box-sizing: border-box; margin: 0; }
+    /* ══════════════════════════════════════════════════════════════════════
+       PRINT OUTS · the station
+       Local to this page. Tokens only — no new colours, no second type scale.
+       ══════════════════════════════════════════════════════════════════════ */
+
     body {
-      font-family: 'DM Sans', system-ui, sans-serif;
-      background: #0B1026; color: #E8ECF6;
-      min-height: 100vh; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; padding: 2rem; text-align: center;
+      /* the overlay stage is a warm paper; this page is a dark room like the
+         rest of the site, so it needs its own explicit ground */
+      background-color: var(--bg);
+      padding-block-end: calc(var(--sp-9) + env(safe-area-inset-bottom));
     }
-    .card {
-      max-width: 30rem; border: 1px solid #232c58; border-radius: 16px;
-      background: linear-gradient(170deg, #161d40, #0d1230);
-      padding: 2.2rem 2rem 2rem; box-shadow: 0 30px 80px rgba(0,0,0,.5);
+
+    .po-wrap {
+      max-inline-size: 74rem;
+      margin-inline: auto;
+      padding-inline: var(--gut);
     }
-    .badge {
-      font-family: 'Space Grotesk', sans-serif; font-size: .75rem; letter-spacing: .2em;
-      text-transform: uppercase; color: #1E8FE0; border: 1px solid #1E8FE066;
-      border-radius: 999px; padding: .35rem 1rem; margin-bottom: 1.25rem; display: inline-block;
+
+    /* ── masthead ───────────────────────────────────────────────────────── */
+    .po-head {
+      padding-block: var(--sp-7) var(--sp-5);
+      border-block-end: 1px solid var(--line-hair);
     }
-    h1 { font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.5rem, 4vw, 2rem); margin-bottom: .75rem; }
-    p { color: #9AA6C4; line-height: 1.6; margin-bottom: 1.5rem; }
-    .m365 { margin-bottom: 1rem; }
-    .btn {
-      display: inline-flex; align-items: center; gap: .5rem;
-      appearance: none; border: 1px solid #1E8FE0; background: #1E8FE0;
-      color: #06132a; font-family: 'Space Grotesk', sans-serif; font-weight: 600;
-      font-size: .9rem; border-radius: 8px; padding: .75rem 1.4rem; cursor: pointer;
-      text-decoration: none;
+    .po-head .kicker { display: block; }
+    .po-head h1 {
+      margin-block-start: var(--sp-3);
+      font-size: var(--t-4);
+      font-variation-settings: "opsz" 44, "wght" 500;
+      letter-spacing: var(--track-4);
     }
-    .btn:hover { filter: brightness(1.12); }
-    a.back {
-      display: block; margin-top: 1.5rem; color: #9aa6c4; text-decoration: none; font-size: .85rem;
+    .po-head .lede { margin-block-start: var(--sp-3); max-inline-size: 54ch; }
+
+    .po-headline-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: var(--sp-3) var(--sp-5);
+      margin-block-start: var(--sp-4);
     }
-    a.back:hover, a.back:focus-visible { color: #1E8FE0; }
+    .po-count { color: var(--fg-dim); font-size: var(--t--1); }
+    .po-count b { color: var(--accent-lit); font-weight: 600; }
+
+    .po-back {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2);
+      min-block-size: 44px;
+      padding-inline-end: var(--sp-2);
+      color: var(--fg-dim);
+      font-size: var(--t--2);
+      font-weight: 600;
+      font-stretch: 90%;
+      text-transform: uppercase;
+      letter-spacing: var(--track-caps);
+      transition: color var(--dur-2) var(--ease-out);
+    }
+    .po-back::before {
+      content: "";
+      inline-size: 8px; block-size: 8px;
+      border-inline-start: 1.5px solid currentColor;
+      border-block-end: 1.5px solid currentColor;
+      transform: rotate(45deg);
+    }
+    .po-back:hover, .po-back:focus-visible { color: var(--accent-lit); }
+
+    /* ── a course of the menu ───────────────────────────────────────────── */
+    .po-group { margin-block-start: var(--sp-7); }
+    .po-group > h2 {
+      font-family: var(--font-display);
+      font-optical-sizing: none;
+      font-size: var(--t-2);
+      font-weight: 520;
+      font-variation-settings: "opsz" 30, "wght" 520;
+      line-height: var(--lh-snug);
+      letter-spacing: var(--track-2);
+      color: var(--fg);
+    }
+    .po-group > p { margin-block-start: var(--sp-2); max-inline-size: 58ch; }
+    .po-group > .rule { margin-block-start: var(--sp-4); }
+
+    .po-list { display: grid; gap: var(--sp-4); margin-block-start: var(--sp-5); }
+
+    /* ── one sheet ──────────────────────────────────────────────────────── */
+    .po-sheet {
+      border: 1px solid var(--line-hair);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      box-shadow: var(--shadow-1);
+      transition: border-color var(--dur-2) var(--ease-out);
+    }
+    .po-sheet:hover { border-color: var(--line-soft); }
+    .po-sheet.is-open { border-color: var(--line); }
+    .po-sheet.is-missing { background: var(--surface); opacity: 1; }
+
+    .po-sheet-body {
+      display: grid;
+      grid-template-columns: 3.25rem 1fr;
+      gap: var(--sp-2) var(--sp-4);
+      padding: var(--sp-4);
+    }
+
+    /* the file-type tab — a printed corner, not an icon library */
+    .po-tab {
+      grid-row: 1 / span 2;
+      inline-size: 3.25rem;
+      block-size: 4rem;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: var(--r-xs);
+      background: color-mix(in oklab, var(--ink-950) 55%, transparent);
+      color: var(--accent-lit);
+      font-size: var(--t--2);
+      font-weight: 700;
+      font-stretch: 88%;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      /* the dog-ear */
+      clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 0 100%);
+    }
+    .po-sheet.is-doc .po-tab { color: var(--fg-dim); border-color: var(--line-soft); }
+    .po-sheet.is-missing .po-tab { color: var(--alert); border-color: color-mix(in oklab, var(--alert) 45%, transparent); }
+
+    .po-sheet h3 {
+      font-family: var(--font-display);
+      font-optical-sizing: none;
+      font-size: var(--t-1);
+      font-weight: 540;
+      font-variation-settings: "opsz" 26, "wght" 540;
+      line-height: var(--lh-snug);
+      letter-spacing: var(--track-1);
+      color: var(--fg);
+      text-wrap: balance;
+    }
+    .po-blurb {
+      margin-block-start: var(--sp-1);
+      font-size: var(--t--1);
+      line-height: 1.5;
+      color: var(--fg-dim);
+      text-wrap: pretty;
+      max-inline-size: 62ch;
+    }
+
+    .po-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--sp-2) var(--sp-3);
+      margin-block-start: var(--sp-3);
+      font-size: var(--t--2);
+      font-stretch: 90%;
+      letter-spacing: var(--track-small);
+      color: var(--fg-dim);
+    }
+    .po-meta > * { display: inline-flex; align-items: center; gap: var(--sp-2); }
+    .po-meta .po-dot { inline-size: 3px; block-size: 3px; border-radius: 50%; background: var(--brass-700); }
+    .po-filename {
+      font-variant-numeric: tabular-nums;
+      color: color-mix(in oklab, var(--bone-3) 78%, transparent);
+      word-break: break-word;
+    }
+
+    /* the state badge: checking / on the server / not there yet */
+    .po-state {
+      padding: 0.2rem var(--sp-2);
+      border-radius: var(--r-pill);
+      border: 1px solid var(--line-hair);
+      font-size: var(--t--2);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: var(--track-caps);
+      line-height: 1.5;
+      color: var(--fg-dim);
+    }
+    .po-state.is-ok      { color: var(--accent-lit); border-color: var(--line); }
+    .po-state.is-missing { color: var(--alert);      border-color: color-mix(in oklab, var(--alert) 45%, transparent); }
+
+    /* ── actions ────────────────────────────────────────────────────────── */
+    .po-actions {
+      grid-column: 2;
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+      margin-block-start: var(--sp-4);
+    }
+
+    /* the secondary control — the chip idiom without the glass, because there
+       is no photograph under this page to blur */
+    .po-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--sp-2);
+      min-block-size: 44px;
+      min-inline-size: 44px;
+      padding-inline: var(--sp-4);
+      border-radius: var(--r-xs);
+      color: var(--fg);
+      background: color-mix(in oklab, var(--ink-900) 70%, transparent);
+      box-shadow: inset 0 0 0 1px var(--line-soft);
+      font-family: var(--font-text);
+      font-size: var(--t--2);
+      font-weight: 600;
+      font-stretch: 90%;
+      text-transform: uppercase;
+      letter-spacing: var(--track-caps);
+      line-height: 1;
+      white-space: nowrap;
+      transition: background var(--dur-2) var(--ease-out),
+                  box-shadow var(--dur-2) var(--ease-out),
+                  color var(--dur-2) var(--ease-out);
+    }
+    .po-btn:hover:not([aria-disabled="true"]),
+    .po-btn:focus-visible {
+      color: var(--accent-lit);
+      background: color-mix(in oklab, var(--brass) 12%, transparent);
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+    /* the primary action on a row is Print — solid brass, used once per sheet */
+    .po-btn.is-primary {
+      color: var(--ink-950);
+      background: linear-gradient(180deg, var(--brass-300), var(--brass));
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / .35), var(--shadow-1);
+    }
+    .po-btn.is-primary:hover:not([aria-disabled="true"]),
+    .po-btn.is-primary:focus-visible { color: var(--ink-950); filter: brightness(1.08); }
+    .po-btn[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
+
+    /* THE HALO, PUT BACK. theme.css §16 gives every focused control a two-tone
+       ring — a dark 3px outline plus a light 6px box-shadow halo — because no
+       single tone survives every backdrop. It lists the components whose own
+       box-shadow it has to beat (.chip, .btn, .ticket, …); .po-btn is new, so
+       it has to opt in here or its own inset border wins the cascade and the
+       keyboard user gets the dark half of the ring on a dark card, i.e.
+       nothing. Measured before this rule: outline 3px ink-950 on --surface. */
+    .po-btn:focus-visible,
+    .po-btn.is-primary:focus-visible { box-shadow: 0 0 0 6px var(--brass-300); }
+    .po-btn .po-caret {
+      inline-size: 7px; block-size: 7px;
+      border-inline-end: 1.5px solid currentColor;
+      border-block-end: 1.5px solid currentColor;
+      transform: translateY(-2px) rotate(45deg);
+      transition: transform var(--dur-3) var(--ease-cine);
+    }
+    .po-btn[aria-expanded="true"] .po-caret { transform: translateY(1px) rotate(-135deg); }
+    .po-btn .po-ext {
+      inline-size: 8px; block-size: 8px;
+      border-block-start: 1.5px solid currentColor;
+      border-inline-end: 1.5px solid currentColor;
+      transform: translateY(1px) rotate(45deg);
+    }
+
+    /* ── the honest docx notice ─────────────────────────────────────────── */
+    .po-note {
+      grid-column: 2;
+      display: flex;
+      gap: var(--sp-3);
+      margin-block-start: var(--sp-4);
+      padding: var(--sp-3) var(--sp-4);
+      border-radius: var(--r-xs);
+      border: 1px dashed var(--line-soft);
+      background: color-mix(in oklab, var(--ink-950) 45%, transparent);
+      font-size: var(--t--1);
+      line-height: 1.5;
+      color: var(--fg-muted);
+      text-wrap: pretty;
+    }
+    .po-note::before {
+      content: "";
+      flex: none;
+      inline-size: 2px;
+      align-self: stretch;
+      border-radius: 1px;
+      background: var(--brass-700);
+    }
+    .po-note.is-alert { border-style: solid; border-color: color-mix(in oklab, var(--alert) 40%, transparent); }
+    .po-note.is-alert::before { background: var(--alert); }
+    .po-note b { color: var(--fg); font-weight: 600; }
+    .po-note code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .92em;
+      color: var(--accent-lit);
+      word-break: break-word;
+    }
+
+    /* ── the preview drawer ─────────────────────────────────────────────── */
+    .po-preview {
+      border-block-start: 1px solid var(--line-hair);
+      padding: var(--sp-4);
+      background: color-mix(in oklab, var(--ink-950) 40%, transparent);
+      border-end-start-radius: var(--r-md);
+      border-end-end-radius: var(--r-md);
+    }
+    .po-stage {
+      position: relative;
+      /* the overlay uses a warm paper behind every embedded light document —
+         same reason here: a cold white flash reads as a broken frame */
+      background: var(--ccc-ov-stage, #f2eee6);
+      border-radius: var(--r-xs);
+      overflow: hidden;
+      block-size: clamp(22rem, 62svh, 46rem);
+    }
+    .po-stage > object,
+    .po-stage > iframe { inline-size: 100%; block-size: 100%; border: 0; display: block; }
+    .po-stage > img { inline-size: 100%; block-size: 100%; object-fit: contain; background: #fff; }
+
+    /* the <object>'s own fallback children, for a browser with no PDF viewer */
+    .po-objfallback {
+      display: grid;
+      place-content: center;
+      gap: var(--sp-3);
+      block-size: 100%;
+      padding: var(--sp-5);
+      text-align: center;
+      color: var(--ink-800);
+    }
+    .po-objfallback a {
+      justify-self: center;
+      color: var(--ink-950);
+      text-decoration: underline;
+      text-underline-offset: .18em;
+      font-weight: 600;
+    }
+    .po-hint { margin-block-start: var(--sp-3); }
+
+    /* ── the empty / broken states ──────────────────────────────────────── */
+    .po-empty {
+      margin-block-start: var(--sp-6);
+      padding: var(--sp-6);
+      border: 1px dashed var(--line-soft);
+      border-radius: var(--r-md);
+      text-align: center;
+    }
+    .po-empty h2 { font-family: var(--font-display); font-size: var(--t-2); font-optical-sizing: none; }
+    .po-empty p { margin-block-start: var(--sp-3); margin-inline: auto; }
+
+    .po-banner {
+      display: flex;
+      gap: var(--sp-3);
+      margin-block-start: var(--sp-5);
+      padding: var(--sp-4);
+      border-radius: var(--r-md);
+      border: 1px solid color-mix(in oklab, var(--alert) 38%, transparent);
+      background: color-mix(in oklab, var(--alert) 8%, transparent);
+      font-size: var(--t--1);
+      line-height: 1.55;
+      color: var(--fg-muted);
+      text-wrap: pretty;
+    }
+    .po-banner::before {
+      content: ""; flex: none; inline-size: 2px; align-self: stretch;
+      border-radius: 1px; background: var(--alert);
+    }
+    .po-banner b { color: var(--fg); font-weight: 600; }
+
+    .po-colophon {
+      margin-block-start: var(--sp-8);
+      padding-block-start: var(--sp-5);
+      border-block-start: 1px solid var(--line-hair);
+    }
+
+    /* the offscreen frame the Print button loads a sheet into. NOT display:none
+       — Chrome will not print a frame that was never laid out. */
+    .po-shuttle {
+      position: fixed;
+      inset-block-end: 0;
+      inset-inline-end: 0;
+      inline-size: 1px;
+      block-size: 1px;
+      opacity: 0;
+      border: 0;
+      pointer-events: none;
+    }
+
+    /* ── responsive ─────────────────────────────────────────────────────── */
+    /* iPad portrait and up: two courses of sheets side by side is worse than
+       one wide readable column, so the list stays single-column and the sheet
+       itself gets roomier instead. */
+    @media (min-width: 60rem) {
+      .po-sheet-body { grid-template-columns: 4rem 1fr; padding: var(--sp-5); }
+      .po-tab { inline-size: 4rem; block-size: 5rem; }
+      .po-actions { margin-block-start: var(--sp-5); }
+    }
+
+    /* phones: the tab moves up beside the title and the actions go full width */
+    @media (max-width: 33rem) {
+      .po-sheet-body {
+        grid-template-columns: 2.5rem 1fr;
+        gap: var(--sp-2) var(--sp-3);
+        padding: var(--sp-4) var(--sp-3);
+      }
+      .po-tab { grid-row: 1; inline-size: 2.5rem; block-size: 3rem; font-size: .625rem; }
+      .po-meta, .po-actions, .po-note { grid-column: 1 / -1; }
+      .po-actions > .po-btn { flex: 1 1 8rem; }
+      /* the meta line wraps here, and a separator dot left dangling at the end
+         of a wrapped line reads as a typo */
+      .po-meta .po-dot { display: none; }
+      .po-stage { block-size: clamp(18rem, 56svh, 30rem); }
+      .po-preview { padding: var(--sp-3); }
+    }
+
+    /* iPad landscape / short viewports: don't let a preview eat the whole screen */
+    @media (max-height: 34rem) {
+      .po-stage { block-size: 20rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .po-btn .po-caret { transition: none; }
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <svg class="m365" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="2" y="2" width="9" height="9" fill="#4c9c2e"/><rect x="13" y="2" width="9" height="9" fill="#1a80c4"/>
-      <rect x="2" y="13" width="9" height="9" fill="#f0b91d"/><rect x="13" y="13" width="9" height="9" fill="#c4392a"/>
-    </svg>
-    <div class="badge">Back Office</div>
-    <h1>Print Outs</h1>
-    <p>Opens in Microsoft 365 — store login required. This is the shared SharePoint/OneDrive folder with printable forms, signage, and store paperwork, so it can't be embedded here.</p>
-    <a class="btn" href="https://netorgft3272928-my.sharepoint.com/:f:/g/personal/jbilbrey_blufoxmobile_com/Ejz2lXceN4RCiKtlowYhAoABmBPIf_Gc3QTIGKnkXnELDw?e=RjYwzs" target="_blank" rel="noopener">Open Print Outs &#8599;</a>
-    <a class="back" href="../../">&larr; Back to the Kitchen</a>
+  <a class="skip-link" href="#po-main">Skip to the print outs</a>
+
+  <div class="po-wrap">
+    <header class="po-head">
+      <span class="kicker">Back Office · The Printer</span>
+      <h1 class="t-sub">Print Outs</h1>
+      <p class="lede">Every printable form, guide and checklist from the store folder — now hosted right here. Preview a sheet before you burn paper on it, then send it to the printer.</p>
+      <div class="po-headline-row">
+        <a class="po-back" href="../../" target="_top">Back to the Kitchen</a>
+        <span class="po-count" id="po-count"></span>
+      </div>
+    </header>
+
+    <main id="po-main">
+      <div id="po-groups"></div>
+
+      <noscript>
+        <div class="po-banner">
+          <div>
+            <b>This station needs JavaScript.</b> The files themselves do not — they live in
+            <code>printouts/</code> next to this page and can be opened directly from that folder.
+          </div>
+        </div>
+      </noscript>
+
+      <p class="po-colophon micro">
+        Sheets are served from this site's own <code>printouts/</code> folder and listed from
+        <code>printouts/manifest.json</code>. Drop a new file in the folder, add a line to the
+        manifest, and it shows up here — no code change.
+      </p>
+    </main>
   </div>
+
+  <!-- Screen-reader announcements: which sheet opened, what printed, what is missing. -->
+  <p class="visually-hidden" role="status" aria-live="polite" id="po-live"></p>
+
+  <script>
+  (function () {
+    'use strict';
+
+    /* ═════════════════════════════════════════════════════════════════════
+       PRINT OUTS · station runtime
+       ─────────────────────────────────────────────────────────────────────
+       Data-driven end to end. Nothing about any individual sheet is written
+       into this file: the list, the grouping, the labels, the blurbs and the
+       types all come from printouts/manifest.json.
+       ═════════════════════════════════════════════════════════════════════ */
+
+    /** Where the sheets live, relative to this page (tools/printouts/). */
+    var FILE_BASE = '../../printouts/';
+    var MANIFEST_URL = FILE_BASE + 'manifest.json';
+
+    /* A file:// review copy can't fetch anything — see the bootstrap comment
+       in <head>. Skip the network entirely there rather than showing twelve
+       "couldn't be checked" rows. */
+    var OFFLINE = location.protocol === 'file:';
+
+    var els = {
+      groups: document.getElementById('po-groups'),
+      count: document.getElementById('po-count'),
+      live: document.getElementById('po-live')
+    };
+
+    /* ── helpers ─────────────────────────────────────────────────────────── */
+
+    function el(tag, props, kids) {
+      var node = document.createElement(tag);
+      props = props || {};
+      Object.keys(props).forEach(function (k) {
+        var v = props[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === 'class') node.className = v;
+        else if (k === 'text') node.textContent = v;
+        else node.setAttribute(k, v === true ? '' : String(v));
+      });
+      [].concat(kids || []).forEach(function (kid) { if (kid) node.append(kid); });
+      return node;
+    }
+
+    function say(msg) { if (els.live) els.live.textContent = msg; }
+
+    /** Absolute URL for a sheet. Names have spaces; encode the segment only. */
+    function fileUrl(item) {
+      return new URL(FILE_BASE + encodeURIComponent(item.file), document.baseURI).href;
+    }
+
+    /** 1289748 -> "1.2 MB". Binary units, because that is what the folder said. */
+    function humanSize(bytes) {
+      var n = Number(bytes);
+      if (!isFinite(n) || n <= 0) return '';
+      var units = ['bytes', 'KB', 'MB', 'GB'];
+      var i = 0;
+      while (n >= 1024 && i < units.length - 1) { n = n / 1024; i += 1; }
+      var out = (i === 0) ? String(Math.round(n))
+              : (n < 100) ? n.toFixed(1).replace(/\.0$/, '')
+              : String(Math.round(n));
+      return out + ' ' + units[i];
+    }
+
+    var TYPE_TAB = { pdf: 'PDF', image: 'PNG', doc: 'DOCX' };
+
+    function tabLabel(item) {
+      var ext = (item.file || '').split('.').pop().toUpperCase();
+      return TYPE_TAB[item.type] || (ext.length <= 4 ? ext : 'FILE');
+    }
+
+    /* ── the manifest ────────────────────────────────────────────────────── */
+
+    /**
+     * Fetch the real manifest; fall back to the inlined copy. The live file
+     * wins whenever it can be read, so adding a sheet never means editing
+     * this page.
+     */
+    function loadManifest() {
+      var inline = window.__CCC_PRINTOUTS__ || null;
+      if (OFFLINE) return Promise.resolve({ data: inline, source: 'inline' });
+      return fetch(MANIFEST_URL, { cache: 'no-store' })
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) { return { data: data, source: 'fetch' }; })
+        .catch(function () { return { data: inline, source: 'inline' }; });
+    }
+
+    /** Tolerate either {groups,files} or a bare array of files. */
+    function normalise(data) {
+      if (!data) return { groups: [], files: [] };
+      var files = Array.isArray(data) ? data : (data.files || []);
+      var groups = (!Array.isArray(data) && data.groups) ? data.groups.slice() : [];
+      // Any group referenced by a file but not declared still gets a heading.
+      var seen = {};
+      groups.forEach(function (g) { seen[g.id] = true; });
+      files.forEach(function (f) {
+        var id = f.group || 'other';
+        if (!seen[id]) { seen[id] = true; groups.push({ id: id, label: id }); }
+      });
+      return { groups: groups, files: files };
+    }
+
+    /* ── does the file actually exist? ───────────────────────────────────── */
+
+    /**
+     * HEAD the sheet. Three outcomes that matter:
+     *   ok       — it is there; Content-Length gives us the true size
+     *   missing  — 404/403; the row says so instead of showing a dead preview
+     *   unknown  — no network answer we can trust; render optimistically
+     * The files are genuinely not uploaded yet, so `missing` is the state this
+     * page will be in on the day it ships.
+     */
+    function probe(item) {
+      if (OFFLINE) return Promise.resolve({ state: 'unknown' });
+      return fetch(fileUrl(item), { method: 'HEAD', cache: 'no-store' })
+        .then(function (res) {
+          if (res.status === 404 || res.status === 403 || res.status === 410) {
+            return { state: 'missing', status: res.status };
+          }
+          if (!res.ok) return { state: 'missing', status: res.status };
+          var len = Number(res.headers.get('content-length'));
+          return { state: 'ok', bytes: (isFinite(len) && len > 0) ? len : null };
+        })
+        .catch(function () { return { state: 'unknown' }; });
+    }
+
+    /* ── printing ────────────────────────────────────────────────────────── */
+
+    /**
+     * PRINTING FROM INSIDE AN IFRAME.
+     *
+     * This page is normally mounted in the site's tool overlay, i.e. it is
+     * already a nested browsing context. Calling window.print() here would
+     * hand the printer THIS station — the list, not the sheet. So each sheet
+     * gets its own offscreen frame: load the file into it, then ask that
+     * frame's window to print, which prints only that document.
+     *
+     * Three ways it can fail, all of them real:
+     *   · Safari's PDF plugin document exposes no usable print() on the frame
+     *   · a browser refuses print() from a nested context outright (throws)
+     *   · the frame never fires load at all
+     * Every one of them lands on the same fallback: open the file in a new
+     * tab and try to print from there, which is a top-level context and always
+     * allowed. If the pop-up is blocked too, the row says so in words.
+     */
+    function printSheet(item, row) {
+      var url = fileUrl(item);
+      var done = false;
+      var watchdog = 0;
+
+      function fallback(reason) {
+        if (done) return;
+        done = true;
+        window.clearTimeout(watchdog);
+        // Deliberately NOT noopener: we need the handle to call print() on it.
+        var win = null;
+        try { win = window.open(url, '_blank'); } catch (err) { win = null; }
+        if (!win) {
+          rowMessage(row,
+            'Your browser blocked the print window. Use Open to get the sheet in a new tab, then print from there.',
+            true);
+          say(item.label + ': print was blocked. Open it in a new tab instead.');
+          return;
+        }
+        try {
+          win.addEventListener('load', function () { try { win.print(); } catch (err) {} });
+        } catch (err) { /* a PDF viewer tab may not let us bind; the tab is open, that is enough */ }
+        say(item.label + ' opened in a new tab for printing (' + reason + ').');
+      }
+
+      var shuttle = el('iframe', {
+        class: 'po-shuttle',
+        'aria-hidden': 'true',
+        tabindex: '-1',
+        title: 'Printing ' + item.label,
+        src: item.type === 'image' ? 'about:blank' : url
+      });
+
+      var loadedOnce = false;
+      shuttle.onload = function () {
+        // document.write() below fires a second load event; only prepare once.
+        if (done || loadedOnce) return;
+        loadedOnce = true;
+        // An image needs a page around it or it prints at native pixel size
+        // and clips. A srcdoc-less document.write into a same-origin blank
+        // frame keeps the relative URL resolution simple.
+        if (item.type === 'image') {
+          try {
+            var doc = shuttle.contentDocument;
+            if (!doc) throw new Error('no document');
+            doc.open();
+            doc.write(
+              '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' +
+              escapeHtml(item.label) +
+              '</title><style>@page{margin:12mm}html,body{margin:0;padding:0}' +
+              'img{display:block;width:100%;height:auto}</style></head><body><img alt="" src="' +
+              escapeHtml(url) + '"></body></html>'
+            );
+            doc.close();
+            var img = doc.images && doc.images[0];
+            if (img && !img.complete) {
+              img.onload = function () { fire(); };
+              img.onerror = function () { fallback('the image would not load'); };
+              return;
+            }
+          } catch (err) {
+            fallback('the image could not be prepared');
+            return;
+          }
+        }
+        // A PDF viewer needs a beat after load before it will accept print().
+        window.setTimeout(fire, 300);
+      };
+
+      shuttle.onerror = function () { fallback('the file could not be loaded'); };
+
+      function fire() {
+        if (done) return;
+        var win = shuttle.contentWindow;
+        if (!win || typeof win.print !== 'function') { fallback('this browser will not print an embedded file'); return; }
+        try {
+          done = true;
+          window.clearTimeout(watchdog);
+          win.focus();
+          win.print();
+          say('Print dialog opened for ' + item.label + '.');
+          // Leave the frame alive long enough for the dialog; it is 1px and inert.
+          window.setTimeout(function () { shuttle.remove(); }, 60000);
+        } catch (err) {
+          done = false;
+          fallback('printing from inside the site was blocked');
+        }
+      }
+
+      // Nothing at all happened — no load, no error. Take the new tab.
+      watchdog = window.setTimeout(function () { fallback('the preview took too long'); }, 5000);
+
+      document.body.append(shuttle);
+      say('Preparing ' + item.label + ' for the printer…');
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    /* ── a row's inline message line ─────────────────────────────────────── */
+
+    function rowMessage(row, text, isAlert) {
+      var note = row.querySelector('.po-note.po-runtime');
+      if (!note) {
+        note = el('p', { class: 'po-note po-runtime' });
+        var actions = row.querySelector('.po-actions');
+        actions.after(note);
+      }
+      note.classList.toggle('is-alert', !!isAlert);
+      note.textContent = text;
+    }
+
+    /* ── rendering ───────────────────────────────────────────────────────── */
+
+    function buildPreview(item) {
+      var url = fileUrl(item);
+      var stage = el('div', { class: 'po-stage' });
+
+      if (item.type === 'image') {
+        stage.append(el('img', { src: url, alt: item.label + ' — full sheet' }));
+      } else {
+        // <object> so the browser's own PDF viewer handles it AND we get real
+        // fallback content for anything that has no viewer at all.
+        var obj = el('object', {
+          data: url,
+          type: 'application/pdf',
+          'aria-label': item.label + ' — PDF preview'
+        });
+        obj.append(el('div', { class: 'po-objfallback' }, [
+          el('p', { text: 'This browser will not display a PDF inline.' }),
+          el('a', { href: url, target: '_blank', rel: 'noopener', text: 'Open ' + item.file })
+        ]));
+        stage.append(obj);
+      }
+      return stage;
+    }
+
+    function renderSheet(item) {
+      var url = fileUrl(item);
+      var isDoc = item.type === 'doc';
+
+      var row = el('article', { class: 'po-sheet' + (isDoc ? ' is-doc' : '') });
+      var body = el('div', { class: 'po-sheet-body' });
+
+      body.append(el('div', { class: 'po-tab', 'aria-hidden': 'true', text: tabLabel(item) }));
+
+      var head = el('div', {}, [
+        el('h3', { text: item.label }),
+        item.blurb ? el('p', { class: 'po-blurb', text: item.blurb }) : null
+      ]);
+      body.append(head);
+
+      var state = el('span', { class: 'po-state', text: OFFLINE ? 'Local copy' : 'Checking…' });
+      var size = el('span', { class: 'po-size', text: humanSize(item.bytes) });
+      var meta = el('div', { class: 'po-meta' }, [
+        state,
+        size,
+        el('span', { class: 'po-dot', 'aria-hidden': 'true' }),
+        el('span', { class: 'po-filename', text: item.file })
+      ]);
+      body.append(meta);
+
+      var actions = el('div', { class: 'po-actions' });
+      var previewBtn = null;
+      var printBtn = null;
+
+      if (isDoc) {
+        /* HONEST AFFORDANCE. A .docx is a zip of XML — no browser renders it,
+           and an <object> pointed at one either downloads it behind the user's
+           back or shows a blank rectangle. So there is no preview button at
+           all here: it downloads, and the row says why. */
+        var dl = el('a', {
+          class: 'po-btn is-primary',
+          href: url,
+          download: item.file,
+          text: 'Download .docx'
+        });
+        actions.append(dl);
+        actions.append(el('a', {
+          class: 'po-btn',
+          href: url,
+          target: '_blank',
+          rel: 'noopener'
+        }, [document.createTextNode('Open'), el('span', { class: 'po-ext', 'aria-hidden': 'true' })]));
+      } else {
+        previewBtn = el('button', { type: 'button', class: 'po-btn', 'aria-expanded': 'false' },
+          [document.createTextNode('Preview'), el('span', { class: 'po-caret', 'aria-hidden': 'true' })]);
+        printBtn = el('button', { type: 'button', class: 'po-btn is-primary', text: 'Print' });
+        actions.append(previewBtn, printBtn);
+        actions.append(el('a', {
+          class: 'po-btn',
+          href: url,
+          target: '_blank',
+          rel: 'noopener'
+        }, [document.createTextNode('Open'), el('span', { class: 'po-ext', 'aria-hidden': 'true' })]));
+      }
+      body.append(actions);
+
+      if (isDoc) {
+        body.append(el('p', { class: 'po-note' }, [
+          el('span', {}, [
+            el('b', { text: 'Word file — no preview. ' }),
+            document.createTextNode('A .docx can’t be shown in a browser, so this one downloads instead. Open it in Word (or Word Online) and print from there.')
+          ])
+        ]));
+      }
+
+      row.append(body);
+
+      /* ── preview drawer ── */
+      var drawer = null;
+      if (previewBtn) {
+        var drawerId = 'po-drawer-' + Math.random().toString(36).slice(2, 9);
+        drawer = el('div', { class: 'po-preview', id: drawerId, hidden: true });
+        previewBtn.setAttribute('aria-controls', drawerId);
+        row.append(drawer);
+
+        previewBtn.addEventListener('click', function () {
+          if (previewBtn.getAttribute('aria-disabled') === 'true') return;
+          var open = previewBtn.getAttribute('aria-expanded') === 'true';
+          if (open) {
+            drawer.hidden = true;
+            drawer.textContent = '';           // unload the viewer, free the memory
+            previewBtn.setAttribute('aria-expanded', 'false');
+            row.classList.remove('is-open');
+            say(item.label + ' preview closed.');
+          } else {
+            drawer.textContent = '';
+            drawer.append(buildPreview(item));
+            drawer.append(el('p', {
+              class: 'po-hint micro',
+              text: item.type === 'image'
+                ? 'Preview only — use Print to send the sheet to the printer at full size.'
+                : 'Scroll the preview to check the pages before you print.'
+            }));
+            drawer.hidden = false;
+            previewBtn.setAttribute('aria-expanded', 'true');
+            row.classList.add('is-open');
+            say(item.label + ' preview opened.');
+          }
+        });
+      }
+
+      if (printBtn) {
+        printBtn.addEventListener('click', function () {
+          if (printBtn.getAttribute('aria-disabled') === 'true') return;
+          printSheet(item, row);
+        });
+      }
+
+      /* ── existence ── */
+      probe(item).then(function (result) {
+        if (result.state === 'ok') {
+          state.className = 'po-state is-ok';
+          state.textContent = 'On the site';
+          if (result.bytes) size.textContent = humanSize(result.bytes);
+          return;
+        }
+        if (result.state === 'unknown') {
+          state.className = 'po-state';
+          state.textContent = OFFLINE ? 'Local copy' : 'Unverified';
+          return;
+        }
+        // missing
+        row.classList.add('is-missing');
+        state.className = 'po-state is-missing';
+        state.textContent = 'Not uploaded';
+        Array.prototype.forEach.call(row.querySelectorAll('.po-btn'), function (btn) {
+          btn.setAttribute('aria-disabled', 'true');
+          if (btn.tagName === 'BUTTON') btn.disabled = true;
+          else { btn.removeAttribute('href'); btn.setAttribute('role', 'link'); }
+        });
+        if (drawer) { drawer.hidden = true; drawer.textContent = ''; }
+        var note = el('p', { class: 'po-note is-alert' }, [
+          el('span', {}, [
+            el('b', { text: 'Not on the server yet. ' }),
+            document.createTextNode('Nothing at '),
+            el('code', { text: 'printouts/' + item.file }),
+            document.createTextNode(result.status ? ' (HTTP ' + result.status + ').' : '.'),
+            document.createTextNode(' Drop the file into that folder and this row goes live — no code change.')
+          ])
+        ]);
+        actions.after(note);
+      });
+
+      return row;
+    }
+
+    function render(model) {
+      var byGroup = {};
+      model.files.forEach(function (f) {
+        var id = f.group || 'other';
+        (byGroup[id] = byGroup[id] || []).push(f);
+      });
+
+      var frag = document.createDocumentFragment();
+      var shown = 0;
+
+      model.groups.forEach(function (g) {
+        var items = byGroup[g.id];
+        if (!items || !items.length) return;
+        var section = el('section', { class: 'po-group' }, [
+          el('h2', { text: g.label || g.id }),
+          g.blurb ? el('p', { class: 'micro', text: g.blurb }) : null,
+          el('hr', { class: 'rule' })
+        ]);
+        var list = el('div', { class: 'po-list' });
+        items.forEach(function (item) { list.append(renderSheet(item)); shown += 1; });
+        section.append(list);
+        frag.append(section);
+      });
+
+      els.groups.textContent = '';
+      els.groups.append(frag);
+      els.count.textContent = '';
+      els.count.append(el('b', { text: String(shown) }), document.createTextNode(shown === 1 ? ' sheet' : ' sheets'));
+      say(shown + ' print outs listed.');
+    }
+
+    function renderBroken() {
+      els.groups.textContent = '';
+      els.groups.append(el('div', { class: 'po-empty' }, [
+        el('h2', { text: 'The list didn’t load' }),
+        el('p', { class: 'prose' }, [
+          document.createTextNode('This station reads '),
+          el('code', { text: 'printouts/manifest.json' }),
+          document.createTextNode(' and that file couldn’t be read. The sheets themselves are still in the '),
+          el('code', { text: 'printouts/' }),
+          document.createTextNode(' folder on this site.')
+        ])
+      ]));
+      say('The print outs list could not be loaded.');
+    }
+
+    loadManifest().then(function (res) {
+      var model = normalise(res.data);
+      if (!model.files.length) { renderBroken(); return; }
+      render(model);
+    }).catch(renderBroken);
+  })();
+  </script>
 </body>
 </html>

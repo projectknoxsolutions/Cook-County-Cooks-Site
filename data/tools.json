@@ -147,12 +147,11 @@
     {
       "slug": "printouts",
       "label": "Print Outs",
-      "url": "https://netorgft3272928-my.sharepoint.com/:f:/g/personal/jbilbrey_blufoxmobile_com/Ejz2lXceN4RCiKtlowYhAoABmBPIf_Gc3QTIGKnkXnELDw?e=RjYwzs",
+      "url": "tools/printouts/",
       "room": "office",
       "object": "printer",
       "audience": "rep",
-      "external_only": true,
-      "blurb": "Printable forms, signage, and store paperwork — the shared Print Outs folder in Microsoft 365."
+      "blurb": "Printable forms, signage, and store paperwork — hosted on the site now, so you can preview and print without leaving the kitchen."
     },
     {
       "slug": "exception-report",

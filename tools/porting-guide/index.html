@@ -44,7 +44,7 @@
             <div class="flex justify-between h-16 items-center">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-lg overflow-hidden">
-                        <img id="navLogo" src="Cook County Cooks Logo.jpeg" alt="C" class="w-full h-full object-cover" onerror="this.style.display='none'; this.parentElement.innerHTML='C';">
+                        <span id="navLogo" aria-hidden="true">C</span><!-- was an <img> to "Cook County Cooks Logo.jpeg", a file that has never existed in this repo: it 404'd on every load and its own onerror handler replaced it with this same letter. Rendering the letter directly is what the page always ended up showing, minus the failed request. -->
                     </div>
                     <div>
                         <span class="text-lg font-extrabold tracking-tight text-slate-800">PortPro</span>
