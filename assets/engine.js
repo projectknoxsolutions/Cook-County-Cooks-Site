@@ -64,6 +64,41 @@ const IDLE_FRAMES_BEFORE_PARK = 45;
 /** Debounce for expensive re-measures. Required by SPEC: 150ms. */
 const RESIZE_DEBOUNCE_MS = 150;
 
+/* ── The occluded-window fallback ────────────────────────────────────────────
+ *
+ * Chrome zeroes requestAnimationFrame in a hidden tab, and throttles it hard in
+ * an occluded window, in a background window under Energy Saver, and on an
+ * iPad whose app has been swiped away from. That is correct browser behaviour,
+ * but this site runs on store desktops and iPads where exactly that is the
+ * NORMAL state: the browser sits behind the POS window all day and a kiosk
+ * panel can be composited on screen while the rAF scheduler considers the page
+ * uninteresting. v2.2.3 already shipped a setInterval safety net for this same
+ * class of bug on this same site; this is that idea, done properly.
+ *
+ * It is a FALLBACK, not a second engine, and three rules keep it that way:
+ *
+ *   1. It only exists while the loop is running. armFallback() is called from
+ *      wake() and disarmFallback() from park(), so a parked engine has no timer
+ *      at all — an idle iPad pays literally nothing.
+ *   2. While it is armed it stands down unless rAF has failed to service a
+ *      frame for RAF_STALE_MS. On a healthy page the callback is two boolean
+ *      tests and a subtraction, five times a second, and never touches the DOM.
+ *   3. When it does drive, it calls serviceFrame() — the SAME function tick()
+ *      calls, with the same maths and the same write path. There is exactly one
+ *      update path in this file, so rAF and the interval can never disagree.
+ *
+ * RAF_STALE_MS is deliberately well above the worst frame this page produces
+ * under a 4x-CPU-throttled iPad Pro profile (517ms in the original gauntlet,
+ * 650-720ms on the harness used for this fix), so a merely slow frame never
+ * trips it — only a scheduler that has genuinely stopped. The cost of being
+ * generous is at most ~1.2s before the fallback picks up a window nobody is
+ * looking at; the cost of being tight would be firing during normal raster.
+ */
+const FALLBACK_INTERVAL_MS = 200;   // 5Hz — enough for a scroll to track, cheap enough to ignore
+const RAF_STALE_MS         = 1000;  // no rAF frame for this long ⇒ the scheduler has stopped
+const FALLBACK_DT_CAP      = 250;   // clamp the smoothing delta the fallback reports
+const FALLBACK_IDLE_DRIVES = 12;    // ~2.4s of nothing to do ⇒ park (and disarm the timer)
+
 /** Values closer than this are considered "arrived" / not worth re-writing. */
 const EPS = 0.0005;
 
@@ -182,6 +217,19 @@ const state = {
   idleFrames: 0,
   dissolveInFlight: false,
 
+  // Occluded-window fallback (see FALLBACK_INTERVAL_MS above)
+  fallbackTimer: 0,
+  lastRafAt: 0,         // nowMs() of the last frame rAF actually serviced
+  lastFallbackAt: 0,
+  fallbackIdle: 0,
+
+  // Diagnostics, exposed read-only on the public API. Plain integer bumps.
+  rafFrames: 0,
+  fallbackDrives: 0,
+  settles: 0,
+  repairs: 0,
+  measures: 0,
+
   // Active-room tracking
   activeIndex: -1,
   roomChangeCbs: new Set(),
@@ -266,6 +314,7 @@ function measure() {
   }
   // --- END READ PHASE ---
 
+  state.measures++;
   state.lastGeomSig = geometrySignature();
   state.dirty = true;
   wake();
@@ -297,6 +346,7 @@ function wake() {
     state.running = true;
     state.lastFrameTime = 0;
     state.rafId = requestAnimationFrame(tick);
+    armFallback();
   }
 }
 
@@ -304,6 +354,7 @@ function park() {
   state.running = false;
   if (state.rafId) cancelAnimationFrame(state.rafId);
   state.rafId = 0;
+  disarmFallback();
 }
 
 function tick(now) {
@@ -315,8 +366,41 @@ function tick(now) {
   const dt = state.lastFrameTime ? Math.min(64, now - state.lastFrameTime) : 16.7;
   state.lastFrameTime = now;
 
+  // The fallback's only input. Stamped from nowMs() rather than from `now` so
+  // both sides read the same clock even on an engine without performance.now().
+  state.lastRafAt = nowMs();
+  state.rafFrames++;
+
   if (PERF) perfSample(dt);
 
+  if (serviceFrame(now, dt, false, false, false)) {
+    state.idleFrames = 0;
+    return;
+  }
+
+  // Nothing to compute. This is the cheapest possible frame.
+  if (++state.idleFrames > IDLE_FRAMES_BEFORE_PARK) park();
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * serviceFrame — THE single update path.
+ *
+ * tick() calls it, the occluded-window fallback calls it, the visibilitychange
+ * repair calls it. One scroll read at the top, all arithmetic in the middle, all
+ * DOM writes at the end; no caller can introduce a second way of updating a room
+ * and therefore no caller can disagree with another about what a room looks like.
+ *
+ * @param {number}  now    ms on the nowMs() timeline
+ * @param {number}  dt     frame delta for the dissolve smoothing
+ * @param {boolean} snap   true ⇒ smoothing coefficient 1: land ON the targets for
+ *                         this scroll position instead of easing toward them.
+ * @param {boolean} resolve true ⇒ collapse the cross-dissolve to a coherent
+ *                         composite (see resolveComposite).
+ * @param {boolean} fromFallback true ⇒ rAF is not running, so IntersectionObserver
+ *                         is not being delivered either; re-derive liveness.
+ * @returns {boolean} whether there was anything to do.
+ * ──────────────────────────────────────────────────────────────────────────── */
+function serviceFrame(now, dt, snap, resolve, fromFallback) {
   // ---- 1. Advance the programmatic scroll tween, if any. ----
   // Doing it here rather than in a second rAF keeps the "one loop" guarantee.
   if (state.tween) stepTween(now);
@@ -328,21 +412,86 @@ function tick(now) {
   const scrolled = scrollY !== state.lastScrollY;
 
   // ---- 3. Early-out. ----
-  // Scroll has not moved, no dissolve is settling, no tween is running: there is
-  // literally nothing to compute. This is the cheapest possible frame.
-  if (!scrolled && !state.dirty && !state.dissolveInFlight && !state.tween) {
-    if (++state.idleFrames > IDLE_FRAMES_BEFORE_PARK) park();
-    return;
-  }
+  if (!scrolled && !state.dirty && !state.dissolveInFlight && !state.tween) return false;
+
+  // ---- 4. Liveness, when the observer cannot help. ----
+  // IntersectionObserver callbacks are delivered from the same "update the
+  // rendering" step that runs rAF callbacks — so in a window where rAF has
+  // stopped, IO has stopped too, and a room scrolled into view would never be
+  // marked live and never have its vars written. (That is precisely why `host`
+  // came back with empty --p / --enter in the field report.) Re-derive it from
+  // the cached geometry instead: pure float compares, zero layout reads, and
+  // skipped entirely on the healthy rAF path.
+  if (fromFallback && scrolled) primeLiveNeighbourhood(scrollY);
 
   state.lastScrollY = scrollY;
   state.dirty = false;
-  state.idleFrames = 0;
 
-  computeFrame(scrollY, dt);
+  computeFrame(scrollY, dt, snap);
+  if (resolve) resolveComposite(scrollY);
   flushWrites();
   updatePromotions(scrollY);
   updateActiveRoom(scrollY);
+  return true;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * The occluded-window fallback. Armed by wake(), disarmed by park().
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+function armFallback() {
+  if (state.fallbackTimer || state.destroyed || state.reduceMotion) return;
+  state.fallbackIdle = 0;
+  state.lastFallbackAt = 0;
+  state.fallbackTimer = setInterval(fallbackTick, FALLBACK_INTERVAL_MS);
+}
+
+function disarmFallback() {
+  if (!state.fallbackTimer) return;
+  clearInterval(state.fallbackTimer);
+  state.fallbackTimer = 0;
+}
+
+function fallbackTick() {
+  // Parked, torn down, or reduced-motion: the loop is not supposed to be
+  // producing frames at all, so neither is this.
+  if (state.destroyed || state.reduceMotion || !state.running) return;
+
+  // THE STAND-DOWN TEST. rAF serviced a frame recently, so it is doing its job
+  // and this must not touch anything. Two compares; no DOM, no allocation.
+  const now = nowMs();
+  if (now - state.lastRafAt < RAF_STALE_MS) return;
+
+  const dt = state.lastFallbackAt
+    ? Math.min(FALLBACK_DT_CAP, now - state.lastFallbackAt)
+    : FALLBACK_INTERVAL_MS;
+  state.lastFallbackAt = now;
+  state.fallbackDrives++;
+
+  // Re-arm the real loop. `running` means "a frame is wanted", and wake() is a
+  // no-op while it is true — so if the request we are running on was swallowed
+  // by a scheduler that has since come back (a tab shown again, a window
+  // un-occluded, Energy Saver releasing the page), nothing would ever ask for
+  // another frame and the whole site would stay on this 5Hz drip. Cancel first
+  // so there is never more than one request in flight: the "one shared rAF
+  // loop" guarantee has to survive the fallback, not be broken by it.
+  if (state.rafId) cancelAnimationFrame(state.rafId);
+  state.rafId = requestAnimationFrame(tick);
+
+  // A page the compositor is not showing gets the settled composite rather than
+  // a 5Hz cross-dissolve: nobody can see a dissolve at 5Hz, and a coherent room
+  // is the only thing worth leaving on a screen we cannot repaint smoothly.
+  const hidden = isHidden();
+
+  if (serviceFrame(now, dt, hidden, hidden, true)) {
+    state.fallbackIdle = 0;
+  } else if (++state.fallbackIdle > FALLBACK_IDLE_DRIVES) {
+    park();
+  }
+}
+
+function isHidden() {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -350,7 +499,7 @@ function tick(now) {
  * Not a single DOM access in this function.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function computeFrame(scrollY, dt) {
+function computeFrame(scrollY, dt, snap) {
   const rooms = state.rooms;
   const M = state.M;
   const V = state.V;
@@ -358,7 +507,10 @@ function computeFrame(scrollY, dt) {
 
   // Exponential smoothing coefficient, derived from the real frame delta so the
   // dissolve takes the same wall-clock time at 60Hz, 120Hz or a dropped 30Hz.
-  const k = 1 - Math.exp(-dt / DISSOLVE_TAU);
+  // snap ⇒ k = 1: used when we are repairing a page that has not been ticking,
+  // where easing from a stale value would show the user half a second of the
+  // very ghost we are there to remove.
+  const k = snap ? 1 : (1 - Math.exp(-dt / DISSOLVE_TAU));
 
   let anyInFlight = false;
 
@@ -553,6 +705,125 @@ function settleDormant(i) {
   V[v + V_BLOOM_T] = 0;
 
   writeRoom(state.rooms[i].stage.style, V, state.W, v, i * W_STRIDE);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * resolveComposite — never leave a half-dissolved frame.
+ *
+ * A cross-dissolve is only coherent while it is MOVING. Freeze one at its
+ * midpoint and the page is not "a room fading into another room", it is two
+ * translucent photographs stacked over the ink-950 matte: the field report's
+ * hero at 0.39 opacity over black, no plate readable, and no amount of
+ * scrolling changing it because the loop that drives it had stopped.
+ *
+ * So whenever ticking is about to stop — the tab is being hidden, or the engine
+ * booted into a background tab where rAF will never run — we do not merely
+ * freeze the numbers. We collapse the dissolve to a decision: ONE room is fully
+ * present, every other live room is fully absent. That composite is a real
+ * frame of the film. It is what the room would look like a few hundred
+ * milliseconds either side of where we stopped, and it is stable.
+ *
+ * Which room wins: the one with the highest --enter TARGET, ties going to the
+ * later room in DOM order (which is the incoming one, and paints above anyway,
+ * so the resolution matches what the compositor was already heading toward).
+ * If every live room targets 0 — the far tail of the last room's runway — we
+ * fall back to the room with the most viewport overlap, because resolving to
+ * "all absent" would be a black screen, which is the one outcome worse than a
+ * ghost.
+ *
+ * Rooms outside the live set are deliberately untouched. theme.css registers
+ * --enter with initial-value 1 (and --p 0, --plate-scale 1, --plate-x/y 0), so
+ * a room this engine has never written renders as a lit, static, correctly
+ * framed photograph — that is the documented no-JS design. Those rooms are all
+ * more than a viewport away, so none of them is on screen to contradict the
+ * room we just resolved.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+function resolveComposite(scrollY) {
+  const rooms = state.rooms, M = state.M, V = state.V, live = state.liveFlags;
+
+  let winner = -1, bestEnter = -1;
+  let overlapWinner = -1, bestOverlap = 0;
+
+  for (let i = 0; i < rooms.length; i++) {
+    if (!live[i]) continue;
+
+    // '>=' so a dead-even cross-dissolve resolves to the incoming room.
+    const t = V[i * V_STRIDE + V_ENTER_T];
+    if (t >= bestEnter) { bestEnter = t; winner = i; }
+
+    const o = i * M_STRIDE;
+    const top = M[o + M_TOP];
+    const overlap = Math.min(top + M[o + M_HEIGHT], scrollY + M[o + M_STAGE_H]) -
+                    Math.max(top, scrollY);
+    if (overlap > bestOverlap) { bestOverlap = overlap; overlapWinner = i; }
+  }
+
+  if (bestEnter <= 0) winner = overlapWinner;   // never resolve to an all-black frame
+  if (winner < 0) return;
+
+  for (let i = 0; i < rooms.length; i++) {
+    if (!live[i]) continue;
+    const v = i * V_STRIDE;
+    if (i === winner) {
+      V[v + V_ENTER] = 1;
+      // Bloom is normally gated by --enter; with enter forced to 1 the
+      // consistent value is the ungated curve for this room's own progress.
+      V[v + V_BLOOM] = easeOutQuint(clamp01(V[v + V_P] / 0.55));
+    } else {
+      V[v + V_ENTER] = 0;
+      V[v + V_BLOOM] = 0;
+    }
+  }
+
+  // Nothing is easing any more, so the loop is free to park.
+  state.dissolveInFlight = false;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * The two moments where ticking starts or stops.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * About to stop ticking (tab hidden, or booted hidden). Land on a coherent,
+ * fully-presented room synchronously, before the compositor takes its last
+ * snapshot of the page.
+ */
+function settleHidden() {
+  cancelTween('cancelled');   // before the guards: a flight must never survive a hide
+  if (state.reduceMotion || state.destroyed || !state.rooms.length) return;
+  state.lastScrollY = -1;        // force a full recompute, not an early-out
+  state.dirty = true;
+  state.settles++;
+  serviceFrame(nowMs(), FALLBACK_DT_CAP, true, true, true);
+}
+
+/**
+ * Just became visible again. The page may have been hidden across a window
+ * resize, a rotation, a font swap or a bfcache restore, so the cached geometry
+ * is suspect — re-measure for real (not on the 150ms debounce) and then push a
+ * full synchronous update BEFORE the next rAF, so the first frame the user sees
+ * is already right. Waiting for rAF would show one stale frame; waiting for a
+ * scroll event, as the old code effectively did, would show a stale page until
+ * the user happened to touch it.
+ */
+function repairVisible() {
+  if (state.destroyed || !state.rooms.length) return;
+
+  state.lastFrameTime = 0;       // do not integrate the time the tab was hidden
+  state.lastFallbackAt = 0;
+  state.repairs++;
+
+  measure();                     // full geometry re-measure, synchronous
+  primeLiveNeighbourhood(window.scrollY || window.pageYOffset || 0);
+
+  state.lastScrollY = -1;
+  state.dirty = true;
+
+  // snap: land exactly on this scroll position's values. resolve: NO — the tab
+  // is on screen now, so the true cross-dissolve for where we are is the
+  // correct picture, and it is what the very next rAF frame would compute.
+  serviceFrame(nowMs(), 0, true, false, false);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -1010,13 +1281,25 @@ function onOrientationChange() {
 }
 
 function onVisibilityChange() {
-  if (document.visibilityState === 'visible') {
-    state.lastFrameTime = 0;   // do not integrate the time the tab was hidden
-    state.dirty = true;
-    scheduleRemeasure();
+  if (!isHidden()) {
+    if (state.reduceMotion) {
+      // The loop never runs under reduce; just make sure the static end-state
+      // still matches the geometry we may have missed while hidden.
+      measure();
+      applyReducedMotion();
+      return;
+    }
+    // park() first: while the page was hidden, a resize or an IntersectionObserver
+    // delivery may have called wake(), leaving `running` true on a rAF request
+    // the hidden tab never serviced. Clearing it is what lets wake() below
+    // actually issue a live request instead of short-circuiting.
+    park();
+    repairVisible();     // re-measure + synchronous correct frame, before any rAF
+    scheduleRemeasure(); // and once more after the debounce, for late layout
     wake();
   } else {
-    cancelTween('cancelled');
+    // Ticking is about to stop. Do not leave a mid-dissolve on the glass.
+    settleHidden();
     park();
   }
 }
@@ -1180,15 +1463,37 @@ export function initEngine(root) {
 
   // If IO has not fired yet (it is async), light up the rooms nearest the current
   // scroll position so the very first painted frame is already correct.
-  primeInitialLiveSet();
+  primeLiveNeighbourhood();
+
+  if (isHidden()) {
+    // Booted straight into a background tab. requestAnimationFrame will not run
+    // a single callback here, so starting the loop and hoping is how the page
+    // ended up stranded on one frame's worth of half-written values in the
+    // first place. Write a coherent, fully-presented room right now, then stay
+    // parked — visibilitychange will re-measure and repair when the tab is
+    // actually shown, and any scroll before then re-arms the loop (and with it
+    // the interval fallback) through the normal onScroll path.
+    settleHidden();
+    park();
+    return publicApi();
+  }
 
   wake();
   return publicApi();
 }
 
-/** Mark the room under the current scroll position (and its neighbours) live. */
-function primeInitialLiveSet() {
-  const scrollY = window.scrollY || window.pageYOffset || 0;
+/**
+ * Mark the room under a given scroll position, and its neighbours, live.
+ *
+ * Used at boot (IntersectionObserver delivery is async, and never happens at all
+ * in a tab that loads hidden) and again whenever we are updating without rAF,
+ * where IO is starved for exactly the same reason. Purely arithmetic over the
+ * cached geometry — no layout reads — and additive only: it can promote a room
+ * into the computed set but never drops one, so it can never race the observer
+ * into un-ticking a room that is still on screen.
+ */
+function primeLiveNeighbourhood(atScrollY) {
+  const scrollY = atScrollY == null ? (window.scrollY || window.pageYOffset || 0) : atScrollY;
   const M = state.M;
   for (let i = 0; i < state.rooms.length; i++) {
     const o = i * M_STRIDE;
@@ -1207,6 +1512,23 @@ function publicApi() {
   return {
     get rooms() { return state.rooms.map((r) => r.name); },
     get reducedMotion() { return state.reduceMotion; },
+    /**
+     * Read-only counters. Cheap enough to leave in: a handful of integer bumps
+     * per frame. `fallbackDrives` staying at 0 through a normal session is the
+     * proof that the occluded-window fallback is costing nothing.
+     */
+    get diagnostics() {
+      return {
+        running: state.running,
+        fallbackArmed: !!state.fallbackTimer,
+        rafFrames: state.rafFrames,
+        fallbackDrives: state.fallbackDrives,
+        settles: state.settles,
+        repairs: state.repairs,
+        measures: state.measures,
+        live: state.rooms.map((r, i) => !!state.liveFlags[i]),
+      };
+    },
     scrollToRoom,
     onRoomChange,
     /** Force a re-measure (call after injecting or removing content). */
@@ -1219,7 +1541,8 @@ function publicApi() {
 export function destroyEngine() {
   state.destroyed = true;
   cancelTween('cancelled');
-  park();
+  park();                 // also disarms the fallback interval
+  disarmFallback();       // belt and braces: park() is the only other caller
   clearTimeout(state.resizeTimer);
   if (state.io) { state.io.disconnect(); state.io = null; }
   offAll();
