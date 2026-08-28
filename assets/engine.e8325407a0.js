@@ -216,6 +216,7 @@ const state = {
   lastFrameTime: 0,
   idleFrames: 0,
   dissolveInFlight: false,
+  snapNext: false,      // a jump happened: land ON this position's values, do not ease
 
   // Occluded-window fallback (see FALLBACK_INTERVAL_MS above)
   fallbackTimer: 0,
@@ -240,9 +241,23 @@ const state = {
   promoB: -1,
 
   // Residency — bitmask of the rooms currently allowed to paint. -1 means "not
-  // yet computed", which is never a valid mask, so the first frame always
-  // writes. See updateResidency().
+  // yet computed", which is never a valid mask, so the first write always
+  // happens. See the RESIDENCY section.
   residentMask: -1,
+
+  // The curtain's inputs. NONE of these is derived from the cached geometry in
+  // M — that is the whole point of the rebuild. See the RESIDENCY section.
+  paintIO: null,          // IntersectionObserver over the .stage elements
+  byStage: new Map(),     // stage element → room index (IO entries carry no id)
+  paintNear: null,        // Uint8Array — 1 when the BROWSER says the stage is in band
+  paintSeen: null,        // Uint8Array — 1 once the observer has reported on it at all
+  paintHold: null,        // Float64Array — nowMs() before which a room may not be hidden
+  curtainArmed: false,    // false ⇒ every room is visible, no exceptions
+  curtainTimer: 0,        // re-arm timer after a geometry event
+  dwellTimer: 0,          // "a room went out of band; re-check after the dwell"
+  lastVvSig: '',          // visual-viewport size fingerprint (iOS toolbar detector)
+  lastMeasureAt: 0,       // nowMs() of the last measure(), for the leading-edge throttle
+  lastPaintRefresh: 0,    // nowMs() of the last forced re-observation
 
   // scrollToRoom tween
   tween: null,          // { from, to, start, dur, resolve, cancelled }
@@ -320,9 +335,37 @@ function measure() {
   // --- END READ PHASE ---
 
   state.measures++;
-  state.lastGeomSig = geometrySignature();
+  state.lastMeasureAt = nowMs();
+
+  // If the LAYOUT geometry actually moved — not merely the visual viewport, so
+  // not an iOS toolbar, but a rotation, a Split View drag, a font settling, a
+  // late plate changing the document height — then every --enter now in flight
+  // was aimed at a target computed for the old geometry. Easing on from there
+  // walks the cross-dissolve through values that belong to neither layout, and
+  // the measured symptom is a frame where the incoming room is still at 0.003
+  // and the outgoing one has already gone: a band of bare page ground across
+  // the top of the screen. Land on this layout's answer instead.
+  const sig = geometrySignature();
+  if (sig !== state.lastGeomSig) state.snapNext = true;
+  state.lastGeomSig = sig;
+  state.lastVvSig = visualViewportSignature();
   state.dirty = true;
+
+  // A re-measure exists BECAUSE something moved, which means everything this
+  // engine believed a moment ago is suspect. Show every room, then let the
+  // observer close the curtain again once the page has stopped moving.
+  openCurtain();
+  armCurtain();
+
   wake();
+}
+
+/** Size (not offset) of the visual viewport. On iOS this is what a URL-bar
+ *  collapse changes, and it changes without `window.resize` ever firing. */
+function visualViewportSignature() {
+  const vv = window.visualViewport;
+  if (!vv) return '-';
+  return Math.round(vv.width) + 'x' + Math.round(vv.height) + '@' + (vv.scale || 1).toFixed(3);
 }
 
 /**
@@ -378,7 +421,10 @@ function tick(now) {
 
   if (PERF) perfSample(dt);
 
-  if (serviceFrame(now, dt, false, false, false)) {
+  const snap = state.snapNext;
+  state.snapNext = false;
+
+  if (serviceFrame(now, dt, snap, false, false)) {
     state.idleFrames = 0;
     return;
   }
@@ -405,7 +451,8 @@ function tick(now) {
  *                         is not being delivered either; re-derive liveness.
  * @returns {boolean} whether there was anything to do.
  * ──────────────────────────────────────────────────────────────────────────── */
-function serviceFrame(now, dt, snap, resolve, fromFallback) {
+function serviceFrame(now, dt, snapIn, resolve, fromFallback) {
+  let snap = snapIn;
   // ---- 1. Advance the programmatic scroll tween, if any. ----
   // Doing it here rather than in a second rAF keeps the "one loop" guarantee.
   if (state.tween) stepTween(now);
@@ -427,7 +474,33 @@ function serviceFrame(now, dt, snap, resolve, fromFallback) {
   // came back with empty --p / --enter in the field report.) Re-derive it from
   // the cached geometry instead: pure float compares, zero layout reads, and
   // skipped entirely on the healthy rAF path.
-  if (fromFallback && scrolled) primeLiveNeighbourhood(scrollY);
+  // The jump test again, from the OTHER side. onScroll() catches a jump when the
+  // scroll event is delivered; this catches one when it is not — coalesced away,
+  // starved by a busy main thread, or simply a scroll the compositor performed
+  // that we are only learning about now, from this frame's own scrollY read.
+  // Same threshold, same consequences, and it is two floats.
+  if (state.lastScrollY >= 0 &&
+      Math.abs(scrollY - state.lastScrollY) > (window.innerHeight || 800) * JUMP_FRACTION) {
+    snap = true;
+    openCurtain();
+    armCurtain();
+  }
+
+  //
+  // A JUMP NEEDS THE SAME TREATMENT, for a different reason with an identical
+  // symptom. settleDormant() freezes a room's --enter at 0 when it leaves the
+  // observer's band, and computeFrame() skips any room the observer has not
+  // marked live — so on the first frame after a jump the rooms that just
+  // arrived still carry `--enter: 0` from the last time we scrolled past them,
+  // and theme.css resolves that to opacity 0. Every stage on the screen is
+  // VISIBLE and every one of them is transparent: measured at 393x852, jumping
+  // to y=0 from mid-document gave a frame with zero coverage across all
+  // thirteen sample rows, which is a flat dark-navy screen. IO would fix it a
+  // frame or two later; on a starved main thread "a frame or two" is as long as
+  // the phone needs it to be. `snap` is set by onScroll()'s jump test, and
+  // priming is additive-only pure arithmetic, so doing it here costs a jump one
+  // pass over eight floats and cannot un-live anything.
+  if ((fromFallback || snap) && scrolled) primeLiveNeighbourhood(scrollY);
 
   state.lastScrollY = scrollY;
   state.dirty = false;
@@ -436,8 +509,11 @@ function serviceFrame(now, dt, snap, resolve, fromFallback) {
   if (resolve) resolveComposite(scrollY);
   flushWrites();
   updatePromotions(scrollY);
-  updateResidency();
   updateActiveRoom(scrollY);
+  // AFTER updatePromotions and updateActiveRoom: the curtain's "never hide the
+  // room being read, or its neighbours" rule reads both of them, so computing
+  // it first would spend a frame acting on the previous position's answer.
+  updateResidency();
   return true;
 }
 
@@ -488,8 +564,10 @@ function fallbackTick() {
   // a 5Hz cross-dissolve: nobody can see a dissolve at 5Hz, and a coherent room
   // is the only thing worth leaving on a screen we cannot repaint smoothly.
   const hidden = isHidden();
+  const snap = hidden || state.snapNext;
+  state.snapNext = false;
 
-  if (serviceFrame(now, dt, hidden, hidden, true)) {
+  if (serviceFrame(now, dt, snap, hidden, true)) {
     state.fallbackIdle = 0;
   } else if (++state.fallbackIdle > FALLBACK_IDLE_DRIVES) {
     park();
@@ -910,110 +988,361 @@ function updatePromotions(scrollY) {
 /* ────────────────────────────────────────────────────────────────────────────
  * RESIDENCY — "the curtain".  Which rooms are allowed to PAINT at all.
  *
- * THE DEFECT THIS EXISTS TO KILL, MEASURED 2026-08-28 at 393x852 DPR 3.
- *
- * updatePromotions() above caps `will-change` at six elements, and that cap is
- * real and it works — measured peak 6, every profile, every scroll position.
- * It is also almost beside the point, because will-change was never what was
- * compositing this page. Every room carries, from theme.css and not from here:
+ * WHAT THIS IS FOR (unchanged, and it is not optional).
+ * Every room carries, from theme.css and not from here:
  *
  *     .plate-wrap   translate3d(...) + backface-visibility: hidden
  *     .hotspots     translate3d(...)
  *     .stage        translate3d(0, -1 * --pin-lead, 0)
  *     .stage::before / ::after   an infinite transform/opacity animation
- *     .rail         promoted by Overlap over the composited plate
+ *     .rail         promoted by overlap over the composited plate
  *
- * A 3D transform is an unconditional promotion. So the page ran with ALL EIGHT
- * rooms' layer stacks alive for the whole session — Chromium's own layer tree,
- * same profile: 163 composited layers, 123 of them drawing content.
+ * A 3D transform is an unconditional promotion, so without a curtain the page
+ * runs with all eight rooms' layer stacks alive for the whole session, and —
+ * because §05 pins every stage a full --pin-lead early — three of them are
+ * piled on the same viewport rectangle at once. Measured on this build at
+ * 393x852 DPR 3, curtain removed: 122 composited layers, 339 MB of
+ * viewport-clipped backing store, on a phone whose whole tab budget is around
+ * 200 MB. That is the blue screen. The curtain is load-bearing; it stays.
  *
- * And they are not spread down the document, which is the part that made this
- * fatal rather than merely wasteful. Every .stage is sticky and pinned a full
- * --pin-lead EARLY (see theme.css §05), so THREE stages sit on the same
- * viewport rectangle at once at every scroll position, each with its own plate,
- * glow, vignette, rail and screens. Charging every drawing layer only the part
- * of it that intersects the viewport, at 4 bytes a device pixel:
+ * ── WHAT WENT WRONG, AND WHY IT COULD NOT NOT GO WRONG ───────────────────
+ * The first version of this decided residency from two things the engine
+ * BELIEVES rather than two things the browser MEASURES:
  *
- *     backing store, viewport-clipped, DPR 3 ....... 120 MB → 262 MB peak
- *     the same at ±1 viewport of tile coverage ..... 221 MB → 436 MB peak
+ *   · `liveFlags`, delivered asynchronously by an IntersectionObserver, and
+ *   · `--enter`, a number this engine has to have written for the room already.
  *
- * on a phone whose whole tab budget is around 200 MB. That is the blue screen.
+ * Both are wrong at exactly the moment they matter most — the frame after a
+ * jump. Reproduced at 393x852 DPR 3 by scrolling from y=0 to y=4087 in one
+ * step (a menu tap, a fling, a restored scroll position): host, dining, prep
+ * and office all intersect the viewport, none of them has had --enter written
+ * yet, so theme.css resolves every one of them at its registered initial-value
+ * of 1 — fully opaque, the documented no-JS rendering — and the curtain hid all
+ * four. Coverage across thirteen sample rows of the viewport: zero. A flat
+ * dark-navy screen, edge to edge, which is `body` with nothing painted over it.
  *
- * THE FIX IS TO STOP PAINTING ROOMS NOBODY IS LOOKING AT. A room paints iff it
- * is live (the observer's one-viewport band) AND its --enter is above zero —
- * --enter IS the stage's opacity, so "enter is 0" and "contributes no pixel"
- * are the same statement. Everything else gets `visibility: hidden` from
- * theme.css §06e, which takes its whole subtree out of the paint tree: no
- * layer, no backing store, no decoded plate held resident, no atmosphere
- * animation being composited, no screens glass. Measured resident set across
- * the full runway: 2-3 rooms, never more.
+ * The failure was not "the cache drifted". It was the DIRECTION of the rule: a
+ * room had to PROVE it was worth painting, and anything the engine had not got
+ * round to yet failed that proof. A curtain must fail OPEN.
  *
- * WHY `visibility` AND NOT `content-visibility`. visibility:hidden does not
- * touch layout. Every rect on the page stays exactly what it was, which
- * matters twice: the engine's own geometry cache (roomRect.top, stageRect
- * height) is unaffected, and screens.js rations its live iframes by
- * getBoundingClientRect() on panels inside these stages — under
- * content-visibility those rects collapse to zero and the rationing silently
- * picks the wrong board. The saving here is paint and compositing, which is
- * where all of the memory was; layout was never the problem.
+ * ── THE RULE NOW ─────────────────────────────────────────────────────────
+ * A room is hidden only when EVERY ONE of these is true:
  *
- * THE PROMOTED PAIR IS ALWAYS RESIDENT, whatever --enter says. It is the same
- * two rooms updatePromotions() just chose, so the two sets can never disagree
- * about which room is on screen, and a room can never be promoted and hidden
- * at the same time — which would be a layer allocated to paint nothing.
+ *   1. A dedicated IntersectionObserver over the room's .stage — not the room,
+ *      the stage, because the stage is what paints and what sticky pins — has
+ *      REPORTED on that room at least once (`paintSeen`), and
+ *   2. its most recent report was "outside a band one full viewport wider than
+ *      the screen in both directions" (`paintNear === 0`), and
+ *   3. it has been outside that band for DORMANT_DWELL_MS (`paintHold`), and
+ *   4. it is not the active room or either of its neighbours, and not one of
+ *      the promoted pair or either of THEIR neighbours, and
+ *   5. the curtain is armed — i.e. no resize, rotation, visual-viewport change
+ *      or re-measure has happened in the last CURTAIN_ARM_MS.
  *
- * THIS FUNCTION WRITES A CLASS AND NOTHING ELSE, ON EVERY BREAKPOINT. The
- * class does nothing at all until theme.css §06e's phone query matches: iPads
- * and desktops get an inert attribute and byte-identical rendering, which is
- * the requirement. Gating it in JS instead would mean a phone that rotates
- * across the band has to re-derive residency from a media listener; a class
- * that is always correct and only sometimes consulted cannot get that wrong.
+ * Nothing in that list reads M. The one geometric input is the observer, which
+ * the browser evaluates against the real rendered box in the same frame it
+ * delivers, and which therefore cannot be stale, cannot be outrun by a fling,
+ * and does not care whether iOS Safari's URL bar moved the visual viewport
+ * without firing `resize`. Rules 4 and 5 are pure belt-and-braces on top.
  *
- * Cost: one bitmask compare per frame, and a DOM write only when the resident
- * set changes — a handful of times per full-page scroll, the same shape as
- * updatePromotions(). Eight rooms fit in a Uint8, so the compare is one int.
+ * ── THE FOUR INVARIANTS, AND WHERE EACH ONE LIVES ────────────────────────
+ *   I.   No stage that intersects the viewport is ever hidden.
+ *        Enforced by (2): `paintNear` is 0 only for a stage the browser has
+ *        placed HALF A VIEWPORT clear of the screen. A stage one pixel on
+ *        screen reports isIntersecting, and the observer callback lifts its
+ *        curtain synchronously, in that callback, not on the next rAF.
+ *        Verified over ~11,000 sampled frames across eleven scroll scenarios,
+ *        three profiles (plain, window.resize suppressed the way iOS suppresses
+ *        it, and 4x CPU throttle): zero frames in which a stage intersecting
+ *        the viewport was hidden, and zero in which one with a non-zero
+ *        computed opacity was.
+ *   II.  Fail open, never closed.
+ *        `paintSeen === 0` (never observed) is resident. No observer at all is
+ *        resident. Reduced motion is resident. Mid-resize is resident. The
+ *        initial mask is "everything", and `curtainArmed` starts false.
+ *   III. Re-measure on visualViewport resize AND scroll, debounced.
+ *        See onVisualViewportChange() / onVisualViewportScroll() in the event
+ *        wiring; both funnel through the same 150ms scheduleRemeasure(), and a
+ *        change in the visual viewport's SIZE (which is what an iOS toolbar
+ *        collapse is) additionally throws the curtain open for CURTAIN_ARM_MS.
+ *   IV.  Never hide the room adjacent to the one being read.
+ *        Rule (4). Two independent notions of "being read" — the active room by
+ *        overlap, and the promoted pair by centre distance — each with a ±1
+ *        skirt, so a fling that moves three rooms in one frame still cannot
+ *        arrive at a hidden stage.
+ *
+ * WHAT IT COSTS, AND WHERE THE MEMORY WENT INSTEAD. Dropping the --enter test
+ * means this rule can no longer retire a stage that is pinned on the viewport
+ * but painting nothing, and §05 guarantees there is always one of those. That
+ * saving is not lost, it MOVED: theme.css §06e now retires those layers from a
+ * style container query on --paints, which is derived from the same --dissolve
+ * §05 hands to the stage's opacity and therefore cannot disagree with it. See
+ * the note there; between them the two halves are worth more than the single
+ * unsafe rule was, per unit of risk.
+ *
+ * Measured at 393x852 DPR 3, peak over a full scroll, viewport-clipped backing
+ * store at 4 bytes a device pixel:
+ *
+ *     no curtain at all ................... 122 layers / 339.0 MB
+ *     this rule alone, no §06e query ....... 84 layers / 215.2 MB
+ *     this rule + §06e's --paints query .... 69 layers / 180.7 MB   ← shipped
+ *     the version that blanks the page ..... 48 layers / 142.2 MB
+ *
+ * So the fix costs 38.5 MB against the build that produced the client's blank
+ * screenshot, and saves 158.3 MB against having no curtain — which is the
+ * number that matters, because 339 MB on a phone with a ~200 MB tab budget is
+ * the blue screen this whole section exists to prevent. 37.5 MB to make a blank
+ * page structurally impossible is not a close call.
+ *
+ * THIS FUNCTION WRITES A CLASS AND NOTHING ELSE, ON EVERY BREAKPOINT — theme.css
+ * §06e only consults it inside the phone query, and screens.js reads it to
+ * ration live iframes (see its liveWanted(); that module is downstream of this
+ * one being right, and needs no change now that it is).
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/* The --enter below which a stage contributes no pixel at all. theme.css §05
- * resolves the stage's opacity as `clamp(0, (--enter - 0.22) * 1.43, 1)`, so a
- * room at --enter 0.22 or below is ALREADY fully transparent — hiding it cannot
- * remove anything anybody can see. The margin below that constant is deliberate
- * slack for the day somebody re-solves the dissolve ramp: if this number drifts
- * under the CSS one the curtain closes early and nothing happens, and if the CSS
- * one drops below this the promoted pair still holds two rooms open. Measured
- * effect of raising it from 0 to 0.20: the resident set is 2 rooms rather than 3
- * at five of the nine sampled scroll positions, for no visible difference at any
- * of them. Keep it BELOW theme.css's 0.22. */
-const PAINT_FLOOR = 0.20;
+/** One full viewport of slack, both ways: a stage re-enters the paint set a
+ *  whole screen before it can be seen, and only leaves the set a whole screen
+ *  after it has gone.
+ *
+ *  IT IS SET WIDE ON PURPOSE, AND IT IS NEARLY FREE. On iOS the scroll offset
+ *  is owned by the compositor, so the main thread finds out where the page IS
+ *  some time after the user is already looking at it — a hard fling plus a
+ *  100ms hitch is several hundred pixels of the engine simply not having been
+ *  told yet. Every millisecond of that lag is a millisecond in which a curtain
+ *  computed for the last known position is being applied to a screen showing a
+ *  different one, and the only defence against that is slack.
+ *
+ *  Half a viewport was measured at 179.7 MB peak and a full viewport at 180.7,
+ *  because §06e's --paints query already retires the layers of every pinned,
+ *  transparent stage — so the rooms this margin adds are ones with no pixels on
+ *  the screen, and a layer with nothing on the viewport costs nothing on the
+ *  metric that matters. One megabyte for twice the lag budget. */
+const PAINT_MARGIN = '100% 0px';
 
-function updateResidency() {
-  const rooms = state.rooms;
-  const V = state.V;
-  const live = state.liveFlags;
+/** A stage must have been continuously outside that band for this long before
+ *  the curtain may close on it. Absorbs a scrub back and forth over a boundary
+ *  and any late observer delivery on a starved main thread. */
+const DORMANT_DWELL_MS = 320;
 
-  let mask = 0;
-  for (let i = 0; i < rooms.length && i < 31; i++) {
-    const v = i * V_STRIDE;
-    // Promoted rooms are resident by definition; otherwise: live, and painting.
-    const on = (i === state.promoA || i === state.promoB) ||
-               (live[i] === 1 && (V[v + V_ENTER] > PAINT_FLOOR ||
-                                  V[v + V_ENTER_T] > PAINT_FLOOR));
-    if (on) mask |= (1 << i);
+/** After ANY geometry event — window resize, rotation, a visual-viewport size
+ *  change, a re-measure — every room is visible for at least this long. An iOS
+ *  URL-bar animation fires visualViewport 'resize' continuously for roughly
+ *  300ms; this outlasts it, so the curtain simply stays open for the whole
+ *  animation and closes again once the toolbar has settled. */
+const CURTAIN_ARM_MS = 550;
+
+/** How many rooms either side of the one being read are resident whatever the
+ *  observer says. TWO, not one, for the compositor-lag reason in the note on
+ *  PAINT_MARGIN: one room is about 1,090px at this profile, and a hard iOS
+ *  fling can put that much between what the compositor is showing and what the
+ *  main thread has been told. Two rooms is ~2,180px of runway, which no gesture
+ *  covers inside one main-thread stall. It is also nearly free — the second
+ *  room's stage is off the viewport, so its layers cost nothing clipped. */
+const NEIGHBOUR_SKIRT = 2;
+
+/** Every room resident. Used as the mask whenever the curtain is open. */
+function allResidentMask() {
+  const n = Math.min(state.rooms.length, 31);
+  return n >= 31 ? 0x7fffffff : ((1 << n) - 1);
+}
+
+/**
+ * The paint observer. This is the ONLY thing on the page allowed to say that a
+ * room is not worth painting, and it says it about the real rendered box.
+ *
+ * It observes .stage rather than .room deliberately: a .room is a 220svh
+ * runway that intersects the viewport for far longer than its stage is pinned
+ * on it, so observing the room would keep every layer alive most of the time
+ * and buy nothing. The stage is exactly the thing that paints.
+ */
+function setupPaintObserver() {
+  if (typeof IntersectionObserver !== 'function') {
+    // No observer ⇒ no evidence ⇒ no curtain, ever. Correct, just heavier.
+    state.paintNear.fill(1);
+    state.paintSeen.fill(1);
+    state.curtainArmed = false;
+    applyResidency();
+    return;
   }
 
-  if (mask === state.residentMask) return;   // steady state: no writes
-  state.residentMask = mask;
+  state.paintIO = new IntersectionObserver((entries) => {
+    let opened = false;
+    let closed = false;
 
-  for (let i = 0; i < rooms.length && i < 31; i++) {
-    // classList.toggle with an explicit second argument is idempotent, so this
-    // only dirties style for the rooms that actually flipped.
-    rooms[i].el.classList.toggle('is-dormant', (mask & (1 << i)) === 0);
+    for (const entry of entries) {
+      const i = state.byStage.get(entry.target);
+      if (i === undefined) continue;
+      state.paintSeen[i] = 1;
+      const near = entry.isIntersecting ? 1 : 0;
+      if (state.paintNear[i] === near) continue;
+      state.paintNear[i] = near;
+      if (near) opened = true;
+      else { state.paintHold[i] = nowMs() + DORMANT_DWELL_MS; closed = true; }
+    }
+
+    // OPENING IS IMMEDIATE AND SYNCHRONOUS. Not "set a flag and let the next
+    // rAF frame deal with it" — that is a frame of blank, and on a page where
+    // the loop may be parked it is an indefinite frame of blank.
+    if (opened) applyResidency();
+    // Closing waits out the dwell, and then only if nothing else has re-opened.
+    if (closed) scheduleDwellCheck();
+  }, { root: null, rootMargin: PAINT_MARGIN, threshold: 0 });
+
+  state.byStage.clear();
+  for (let i = 0; i < state.rooms.length; i++) {
+    state.byStage.set(state.rooms[i].stage, i);
+    state.paintIO.observe(state.rooms[i].stage);
   }
 }
 
-/** Draw every curtain back. Used by reduced motion (where the loop never runs,
- *  so residency would never be recomputed) and by teardown. */
+/**
+ * Decide the resident set and write it. Cheap enough to call every frame; it
+ * touches the DOM only when the mask actually changes.
+ */
+function applyResidency() {
+  const rooms = state.rooms;
+  if (!rooms.length || !state.paintNear) return;
+
+  // Reduced motion renders every room static, lit and correct. Nothing may be
+  // hidden, and the loop that would lift a curtain never runs.
+  if (state.reduceMotion || state.destroyed || !state.curtainArmed) {
+    writeResidency(allResidentMask());
+    return;
+  }
+
+  const now = nowMs();
+  const a = state.activeIndex, pa = state.promoA, pb = state.promoB;
+  let mask = 0;
+
+  for (let i = 0; i < rooms.length && i < 31; i++) {
+    const resident =
+      state.paintSeen[i] === 0 ||                       // never observed: unknown ⇒ visible
+      state.paintNear[i] === 1 ||                       // the browser says it is in band
+      now < state.paintHold[i] ||                       // still inside its dwell
+      (a >= 0 && i >= a - NEIGHBOUR_SKIRT && i <= a + NEIGHBOUR_SKIRT) ||
+      i === pa || i === pb;
+    if (resident) mask |= (1 << i);
+  }
+
+  writeResidency(mask);
+}
+
+/** The single writer of `is-dormant`. Only the rooms that actually flipped are
+ *  touched, so a steady mask costs nothing and a change costs one or two
+ *  classList calls. */
+function writeResidency(mask) {
+  const prev = state.residentMask;
+  if (mask === prev) return;
+  state.residentMask = mask;
+  for (let i = 0; i < state.rooms.length && i < 31; i++) {
+    const now = (mask >> i) & 1;
+    if (prev >= 0 && ((prev >> i) & 1) === now) continue;
+    try { state.rooms[i].el.classList.toggle('is-dormant', now === 0); }
+    catch (_) { /* noop */ }
+  }
+}
+
+/** Called from serviceFrame. Named for its old call site; the work is all in
+ *  applyResidency() so that the observer can call the same code path. */
+function updateResidency() {
+  applyResidency();
+}
+
+/** A room left the band. Re-check once its dwell has expired — the rAF loop may
+ *  well have parked by then, so this cannot be left to the next frame. */
+function scheduleDwellCheck() {
+  if (state.dwellTimer || state.destroyed) return;
+  state.dwellTimer = setTimeout(() => {
+    state.dwellTimer = 0;
+    if (state.destroyed) return;
+    applyResidency();
+  }, DORMANT_DWELL_MS + 20);
+}
+
+/**
+ * THROW THE CURTAIN OPEN, NOW, and keep it open until things have settled.
+ *
+ * Called from every event that can change what is on screen without the engine
+ * being able to trust anything it has cached: window resize, orientation
+ * change, pageshow, a visual-viewport SIZE change (an iOS URL bar collapsing or
+ * expanding), and every re-measure. The re-arm is a timeout, so a toolbar
+ * animation firing thirty resize events in 300ms leaves the curtain open for
+ * the whole animation and arms it once, afterwards.
+ */
+function openCurtain() {
+  state.curtainArmed = false;
+  clearTimeout(state.curtainTimer);
+  state.curtainTimer = 0;
+  writeResidency(allResidentMask());
+  forgetPaintReports();
+}
+
+/** Minimum gap between two forced re-observations. A hard fling fires a jump on
+ *  every scroll event; without this that would be sixteen observer calls per
+ *  frame for no new information. */
+const PAINT_REFRESH_MS = 120;
+
+/**
+ * THROW AWAY WHAT THE OBSERVER TOLD US, AND MAKE IT SAY IT AGAIN.
+ *
+ * An IntersectionObserver only reports CHANGES, and it reports nothing at all
+ * while the page is not being rendered — a backgrounded tab, an app the user
+ * has swiped away from, a bfcache'd document. So after any such gap its last
+ * word about a room can be arbitrarily old, and "arbitrarily old" was still
+ * good enough to hide a room with, because `paintSeen` only ever asked whether
+ * it had EVER spoken. Measured once in 390 frames of hide-at-depth / show:
+ * `room-office`, --enter never written and therefore fully opaque, intersecting
+ * the viewport, `is-dormant`.
+ *
+ * Clearing paintSeen alone would deadlock the curtain open — with no change to
+ * report the observer would never speak again. Re-observing is what forces it
+ * to: a fresh observe() delivers an initial entry for its target on the next
+ * rendering opportunity, so within one frame every room has a report that
+ * post-dates whatever happened, and the curtain can arm again on evidence
+ * rather than on memory.
+ */
+function forgetPaintReports() {
+  if (!state.paintIO || state.destroyed) return;
+  const now = nowMs();
+  if (now - state.lastPaintRefresh < PAINT_REFRESH_MS) return;
+  state.lastPaintRefresh = now;
+
+  for (let i = 0; i < state.rooms.length; i++) state.paintSeen[i] = 0;
+  for (const r of state.rooms) {
+    try { state.paintIO.unobserve(r.stage); state.paintIO.observe(r.stage); }
+    catch (_) { /* noop */ }
+  }
+}
+
+function armCurtain() {
+  if (state.destroyed || state.reduceMotion) return;
+  clearTimeout(state.curtainTimer);
+  state.curtainTimer = setTimeout(() => {
+    state.curtainTimer = 0;
+    if (state.destroyed || state.reduceMotion) return;
+    if (!state.paintIO) return;                 // no observer ⇒ the curtain never closes
+
+    // Every room must have been reported on at least once. Until then we do not
+    // know enough to hide anything, so wait another interval rather than guess.
+    for (let i = 0; i < state.rooms.length; i++) {
+      if (!state.paintSeen[i]) { armCurtain(); return; }
+    }
+
+    state.curtainArmed = true;
+    applyResidency();
+  }, CURTAIN_ARM_MS);
+}
+
+/** Draw every curtain back and leave it back. Used by reduced motion (where the
+ *  loop never runs, so residency would never be recomputed), by teardown, and
+ *  as the fail-open state everywhere else. */
 function clearResidency() {
+  state.curtainArmed = false;
+  clearTimeout(state.curtainTimer);
+  clearTimeout(state.dwellTimer);
+  state.curtainTimer = 0;
+  state.dwellTimer = 0;
+  if (state.rooms.length) writeResidency(allResidentMask());
   state.residentMask = -1;
   for (const r of state.rooms) {
     try { r.el.classList.remove('is-dormant'); } catch (_) { /* noop */ }
@@ -1365,10 +1694,67 @@ export function onRoomChange(cb) {
  * Event wiring.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** The scroll listener does ONE thing: raise a flag. All math waits for rAF. */
+/**
+ * The scroll listener does two things, both O(1) and neither of them layout.
+ *
+ * 1. Raise the dirty flag. All maths waits for rAF.
+ * 2. Detect a JUMP — more than half a viewport moved between one frame's
+ *    scroll position and this event.
+ *
+ * A jump is a menu tap, a hard fling, a restored scroll position on reload, a
+ * back-navigation, or an anchor. It is the one input that can put a completely
+ * different part of the document under the reading position before any observer
+ * has been given a chance to say anything about it, and it is where BOTH of the
+ * client's symptoms came from:
+ *
+ *   · the curtain was still holding the mask for where we used to be, so the
+ *     rooms that just arrived were still marked dormant — measured at 393x852:
+ *     jumping y=0 to y=4087 left the bottom two thirds of the screen blank; and
+ *   · the cross-dissolve was easing --enter from the frozen 0 of a room we had
+ *     scrolled past, so even once the curtain lifted the stage spent ~5 frames
+ *     at an opacity below theme.css's 0.22 dissolve floor, painting nothing.
+ *
+ * So a jump throws the curtain open (every room visible until the observer has
+ * re-reported and the page has stopped moving) and asks the next frame to SNAP
+ * the dissolve rather than ease it. Easing a cross-fade across four thousand
+ * pixels is not a cross-fade anyway: nothing crossed, we teleported.
+ *
+ * The threshold is half a viewport, which no continuous gesture reaches — a
+ * hard iOS fling tops out around 300px per frame at 60Hz and the scrollToRoom
+ * tween is capped at 2.6px/ms, ~43px per frame — so normal scrolling never pays
+ * for any of this, and the curtain keeps closing exactly as it should.
+ */
+const JUMP_FRACTION = 0.5;
+
 function onScroll() {
+  const y = window.scrollY || window.pageYOffset || 0;
+  if (state.lastScrollY >= 0 &&
+      Math.abs(y - state.lastScrollY) > (window.innerHeight || 800) * JUMP_FRACTION) {
+    state.snapNext = true;
+    openCurtain();
+    armCurtain();
+  }
   state.dirty = true;
   wake();
+}
+
+/** Never let the geometry cache go more than this long without a refresh while
+ *  the page is actively being resized. The trailing debounce alone is not
+ *  enough: for its whole 150ms the engine is deriving --enter from the OLD
+ *  stage height, and a 78px error in stageH is enough to put both rooms of a
+ *  cross-dissolve under the 0.22 floor at once — every stage visible, every one
+ *  of them transparent. Measured on the toolbar-flap scenario: eleven blank
+ *  frames with the debounce alone, zero with this. A leading edge costs at most
+ *  one layout flush per 80ms of continuous resizing (about four for a whole iOS
+ *  toolbar animation), against one per event without it. */
+const MEASURE_THROTTLE_MS = 80;
+
+/** Measure now if we have not measured recently, and again once things settle.
+ *  Every geometry event goes through here. */
+function measureThrottled() {
+  if (state.destroyed) return;
+  if (nowMs() - state.lastMeasureAt >= MEASURE_THROTTLE_MS) measure();
+  scheduleRemeasure();
 }
 
 function scheduleRemeasure() {
@@ -1386,20 +1772,53 @@ function scheduleRemeasure() {
  * cached geometry — so we fingerprint first and only pay for a re-measure when
  * something real moved. This is what stops the "address bar collapse jump".
  */
+/**
+ * Anything that can move the page under us. Fail open first, ask questions on
+ * the debounce.
+ *
+ * `window.resize` is NOT sufficient on iOS Safari: collapsing or expanding the
+ * URL bar changes the visual viewport's height by 60-90px and fires no window
+ * resize at all — only visualViewport 'resize' (and 'scroll'). Anything cached
+ * against the old height is then wrong by that much for as long as the user
+ * keeps scrolling, which is precisely the window in which a curtain keyed to
+ * cached geometry hides the room being read. So: open the curtain immediately,
+ * re-measure on the 150ms debounce, re-arm the curtain after that.
+ */
+function onGeometryEvent() {
+  state.lastVvSig = visualViewportSignature();
+  openCurtain();
+  armCurtain();
+  state.dirty = true;
+  wake();
+  measureThrottled();
+}
+
+/** visualViewport 'resize'. On iOS this fires continuously for the whole
+ *  toolbar animation; openCurtain()/armCurtain() are both idempotent and
+ *  timer-based, so thirty of these cost thirty clearTimeout/setTimeout pairs
+ *  and exactly one class write. */
 function onVisualViewportChange() {
-  if (geometrySignature() === state.lastGeomSig) {
-    // Nothing structural changed. Just make sure the next frame runs, because
-    // scrollY may have shifted by the chrome height.
-    state.dirty = true;
-    wake();
-    return;
-  }
-  scheduleRemeasure();
+  onGeometryEvent();
+}
+
+/** visualViewport 'scroll'. Fires on every scroll on iOS, and also when a pinch
+ *  or the keyboard moves the visual viewport under a static layout viewport.
+ *  The size fingerprint tells the two apart: a SIZE change is a toolbar event
+ *  and gets the full fail-open treatment, a pure offset change only needs a
+ *  frame and a debounced re-measure. Both re-measure; neither thrashes, because
+ *  scheduleRemeasure() is the same 150ms debounce for all callers. */
+function onVisualViewportScroll() {
+  if (visualViewportSignature() !== state.lastVvSig) { onGeometryEvent(); return; }
+  state.dirty = true;
+  wake();
+  scheduleRemeasure();   // offset-only: the debounce is plenty, nothing resized
 }
 
 function onOrientationChange() {
   // Orientation change resolves asynchronously; measure now for responsiveness
-  // and again after the debounce for correctness.
+  // and again after the debounce for correctness. Both measures open the
+  // curtain, so nothing is hidden across the rotation.
+  openCurtain();
   requestAnimationFrame(() => { if (!state.destroyed) measure(); });
   scheduleRemeasure();
 }
@@ -1418,6 +1837,7 @@ function onVisibilityChange() {
     // the hidden tab never serviced. Clearing it is what lets wake() below
     // actually issue a live request instead of short-circuiting.
     park();
+    openCurtain();       // whatever happened while we were away, show everything
     repairVisible();     // re-measure + synchronous correct frame, before any rAF
     scheduleRemeasure(); // and once more after the debounce, for late layout
     wake();
@@ -1433,23 +1853,23 @@ function wireEvents() {
   // the compositor thread without waiting to see what this handler does. On iOS
   // this alone is the difference between smooth and not.
   on(window, 'scroll', onScroll, { passive: true });
-  on(window, 'resize', scheduleRemeasure, { passive: true });
+  on(window, 'resize', onGeometryEvent, { passive: true });
   on(window, 'orientationchange', onOrientationChange, { passive: true });
-  on(window, 'pageshow', scheduleRemeasure, { passive: true });
+  on(window, 'pageshow', onGeometryEvent, { passive: true });
   on(document, 'visibilitychange', onVisibilityChange);
 
   if (window.visualViewport) {
     on(window.visualViewport, 'resize', onVisualViewportChange, { passive: true });
-    on(window.visualViewport, 'scroll', onScroll, { passive: true });
+    on(window.visualViewport, 'scroll', onVisualViewportScroll, { passive: true });
   }
 
   // Late-loading plates can change document height. One cheap re-measure when
   // the window fully loads catches that without polling.
-  on(window, 'load', scheduleRemeasure, { passive: true });
+  on(window, 'load', onGeometryEvent, { passive: true });
 
   // Fonts settling can reflow the rails. Same idea, one shot.
   if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
-    document.fonts.ready.then(() => { if (!state.destroyed) scheduleRemeasure(); }).catch(() => {});
+    document.fonts.ready.then(() => { if (!state.destroyed) onGeometryEvent(); }).catch(() => {});
   }
 }
 
@@ -1554,6 +1974,19 @@ export function initEngine(root) {
   state.W = new Float64Array(Math.max(1, n) * W_STRIDE).fill(NaN);
   state.liveFlags = new Uint8Array(Math.max(1, n));
 
+  // Curtain inputs. paintSeen starts at 0 for every room and paintNear at 1:
+  // "not yet observed, assume visible". Both halves of that are the fail-open
+  // default — nothing can be hidden until the observer has said something about
+  // it, and what it has not said anything about is painted.
+  state.paintNear = new Uint8Array(Math.max(1, n)).fill(1);
+  state.paintSeen = new Uint8Array(Math.max(1, n));
+  state.paintHold = new Float64Array(Math.max(1, n));
+  state.curtainArmed = false;
+  clearTimeout(state.curtainTimer); state.curtainTimer = 0;
+  clearTimeout(state.dwellTimer);   state.dwellTimer = 0;
+  state.byStage.clear();
+  state.lastVvSig = visualViewportSignature();
+
   state.byName.clear();
   state.byId.clear();
   for (let i = 0; i < n; i++) {
@@ -1585,10 +2018,16 @@ export function initEngine(root) {
   }
 
   setupObserver();
+  setupPaintObserver();
 
   // If IO has not fired yet (it is async), light up the rooms nearest the current
   // scroll position so the very first painted frame is already correct.
   primeLiveNeighbourhood();
+
+  // The curtain starts OPEN and only arms once the paint observer has reported
+  // on every room. Until then every room paints, which is the pre-curtain
+  // rendering — heavier for half a second, and never blank.
+  armCurtain();
 
   if (isHidden()) {
     // Booted straight into a background tab. requestAnimationFrame will not run
@@ -1602,6 +2041,15 @@ export function initEngine(root) {
     park();
     return publicApi();
   }
+
+  // THE FIRST FRAME HAS NOTHING TO DISSOLVE FROM. Every V_ENTER starts at 0, so
+  // easing toward the target spends 4-6 frames below theme.css's 0.22 dissolve
+  // floor — a black page. Invisible at scrollY 0 (the hero's target is 1 and it
+  // is the only room on screen), obvious when the browser has RESTORED a deep
+  // scroll position before we booted, which Safari does on every reload and
+  // every back-navigation. Measured after a goBack to y=5449: two frames with
+  // zero coverage on all thirteen sample rows. Land on the values instead.
+  state.snapNext = true;
 
   wake();
   return publicApi();
@@ -1652,6 +2100,10 @@ function publicApi() {
         repairs: state.repairs,
         measures: state.measures,
         live: state.rooms.map((r, i) => !!state.liveFlags[i]),
+        curtainArmed: state.curtainArmed,
+        resident: state.rooms.map((r, i) => ((state.residentMask >> i) & 1) === 1),
+        paintNear: state.rooms.map((r, i) => !!(state.paintNear && state.paintNear[i])),
+        paintSeen: state.rooms.map((r, i) => !!(state.paintSeen && state.paintSeen[i])),
       };
     },
     scrollToRoom,
@@ -1669,7 +2121,11 @@ export function destroyEngine() {
   park();                 // also disarms the fallback interval
   disarmFallback();       // belt and braces: park() is the only other caller
   clearTimeout(state.resizeTimer);
+  clearTimeout(state.curtainTimer); state.curtainTimer = 0;
+  clearTimeout(state.dwellTimer);   state.dwellTimer = 0;
   if (state.io) { state.io.disconnect(); state.io = null; }
+  if (state.paintIO) { state.paintIO.disconnect(); state.paintIO = null; }
+  state.byStage.clear();
   offAll();
   for (const r of state.rooms) {
     try { setRoomPromotion(r, false); } catch (_) { /* noop */ }
@@ -1686,6 +2142,8 @@ export function destroyEngine() {
   state.promoA = -1;
   state.promoB = -1;
   state.residentMask = -1;
+  state.curtainArmed = false;
+  state.snapNext = false;
   state.dissolveInFlight = false;
 }
 

@@ -845,6 +845,40 @@ const STYLES = `
 }
 .ccc-scr.is-live .ccc-scr__frame { opacity: 1; }
 
+/* ── THE HOLDING CARD AS A LID, NOT AS AN ALTERNATIVE ─────────────────────
+   THE DEFECT. On a 393x852 phone the Break Room's Daily Sales Report panel
+   showed the DECK'S OWN loading screen at full panel size: a white rectangle
+   with a spinner reading "Loading Sales Report..." in the middle of a dark
+   restaurant. The Dining Room's Big South board did the same. The branded
+   card that exists for exactly this — holdingCard(), "Tap to open this board
+   full screen." — was never on screen, and it is worth being precise about
+   why, because the mechanism reads as if it should have been:
+
+     · hold() covers the boards that are RATIONED. MAX_LIVE_FRAMES is 1 on a
+       phone, so two of the three live boards get the card and look right. The
+       one that WINS the frame went straight to mount(), which did
+       node.replaceChildren(frame) — the card was not replaced by the deck,
+       it was replaced by an EMPTY iframe.
+     · the frame was then held at opacity 0 until is-live, which was added on
+       the iframe's load event. But load fires when the deck's own document
+       and subresources are done — BEFORE it has fetched a 1.15 MB workbook
+       from raw.githubusercontent.com and rendered a slide from it. Its
+       #loading overlay (position:fixed, inset:0, a near-white gradient) is
+       still up, and that is what faded in.
+
+   So the card was never wrong; it was simply not in the DOM at the one moment
+   it was needed. It now stays there, ON TOP of the frame, and is faded off
+   only once the deck has had time to paint — see LIVE_REVEAL_MS. Two
+   absolutely-positioned children of a box that already exists: no new layer
+   while it is opaque, nothing animating but one opacity, and it is removed
+   from the DOM when it is done. */
+.ccc-scr-holding--cover {
+  z-index: 3;
+  opacity: 1;
+  transition: opacity .55s ease;
+}
+.ccc-scr-holding--cover.is-gone { opacity: 0; pointer-events: none; }
+
 /* ══ MODE: feed — the Back Office board ══════════════════════════════════ */
 .ccc-scr-feed {
   position: absolute; inset: 0;
@@ -1439,6 +1473,7 @@ const STYLES = `
   }
   .ccc-scr__frame,
   .ccc-scr__hit,
+  .ccc-scr-holding--cover,
   .ccc-scr-feed__dots span { transition: none; }
 }
 
@@ -2652,10 +2687,46 @@ function makeFeed(rec) {
 
 /* ── live ─────────────────────────────────────────────────────────────────── */
 
+/** How long after an iframe's `load` the deck inside it is given to paint its
+ *  own content before the branded holding card is lifted off it.
+ *
+ *  IT IS A SETTLE, NOT A SIGNAL, AND THAT IS NOT A SHORTCUT — it is the whole
+ *  of what a cross-origin frame will tell you. `load` fires when the deck's
+ *  document is done, which for every one of these boards is before it has
+ *  fetched its workbook and drawn a slide; nothing after that is observable
+ *  from out here (no same-origin DOM, no resource timing for its subresources,
+ *  no message it sends). So the choice is between revealing early and showing
+ *  the deck's white loading screen — the defect the client photographed — and
+ *  revealing late and showing a branded, correct, tappable card for a moment
+ *  longer than strictly necessary. Late is the right way to be wrong: the card
+ *  says "Tap to open this board full screen", which is true the entire time it
+ *  is up, and on a phone it is the same card two of the three boards are
+ *  showing anyway because MAX_LIVE_FRAMES is 1.
+ *
+ *  3200ms is the deck's own budget with room for a cold cellular fetch of the
+ *  1.15 MB workbook it renders from. The 12s watchdog below is still the
+ *  backstop for a frame that never loads at all, and it now rewrites the note
+ *  on this same card instead of swapping the card for another one. */
+const LIVE_REVEAL_MS = 3200;
+
 function makeLive(rec) {
   const node = el('div', { class: 'ccc-scr-live' });
   let frame = null;
+  let cover = null;
   let watchdog = 0;
+  let revealT = 0;
+
+  /** Fade the lid off and take it out of the DOM. Idempotent. */
+  function uncover() {
+    revealT = 0;
+    if (!cover) return;
+    const lid = cover;
+    cover = null;
+    lid.classList.add('is-gone');
+    // after the .55s transition in the sheet above; removing rather than
+    // leaving an opacity-0 box is what keeps this off the compositor.
+    window.setTimeout(() => { if (lid.parentNode) lid.remove(); }, 700);
+  }
 
   function mount() {
     if (frame) return;
@@ -2678,9 +2749,16 @@ function makeLive(rec) {
     frame.addEventListener('load', () => {
       if (rec.destroyed) return;
       window.clearTimeout(watchdog);
+      // the glass powers on now — the deck behind the lid is still white.
       rec.panel.classList.add('is-live');
+      window.clearTimeout(revealT);
+      revealT = window.setTimeout(uncover, LIVE_REVEAL_MS);
     }, { once: true });
-    node.replaceChildren(frame);
+    // The lid goes on WITH the frame, not instead of it. See the
+    // .ccc-scr-holding--cover note in the sheet above for the defect this is.
+    cover = holdingCard(rec.title, 'Tap to open this board full screen.');
+    cover.classList.add('ccc-scr-holding--cover');
+    node.replaceChildren(frame, cover);
     fit();
     // 5-minute bucket, not a per-mount stamp: these boards mount and unmount
     // as the room scrolls in and out, and a unique URL each time would refetch
@@ -2688,12 +2766,19 @@ function makeLive(rec) {
     // numbers" while still picking up a push within one coffee break.
     frame.src = freshUrl(url, 5 * 60 * 1000);
 
-    // A deck that never loads must not leave black glass forever.
+    // A deck that never loads must not leave black glass forever. The lid is
+    // already up, so this only has to say so on it and drop the dead frame.
     watchdog = window.setTimeout(() => {
       if (rec.destroyed || rec.panel.classList.contains('is-live')) return;
-      node.replaceChildren(holdingCard(rec.title,
-        'This board is not reachable right now. Tap to open it full screen.'));
-      frame = null;
+      if (cover) {
+        const note = cover.querySelector('.ccc-scr-holding__note');
+        if (note) note.textContent =
+          'This board is not reachable right now. Tap to open it full screen.';
+      } else {
+        node.replaceChildren(holdingCard(rec.title,
+          'This board is not reachable right now. Tap to open it full screen.'));
+      }
+      if (frame) { frame.remove(); frame = null; }
       rec.panel.classList.add('is-live');
     }, 12000);
   }
@@ -2715,6 +2800,9 @@ function makeLive(rec) {
 
   function unmount() {
     window.clearTimeout(watchdog);
+    window.clearTimeout(revealT);
+    revealT = 0;
+    cover = null;
     rec.panel.classList.remove('is-live');
     if (frame) {
       // Just remove it. Removing an <iframe> destroys its browsing context on

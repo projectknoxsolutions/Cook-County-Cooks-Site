@@ -1168,22 +1168,50 @@ function buildKitchen(data) {
  * tween is the thing that keeps the cinema in sync with the scroll position.
  * ────────────────────────────────────────────────────────────────────────── */
 
+/** Where the phone's two-row course menu breaks its lines.
+ *
+ *  ⚠ THIS IS A MARKUP CONSTANT WITH A LAYOUT CONTRACT. theme.css §17 turns the
+ *  strip into two flex rows below 560px and reserves the C³ button's column on
+ *  the FIRST row only, so the split has to be "the wide row first". Four /
+ *  three is what the seven room names measure to: at 375px CSS — the narrowest
+ *  phone this site is built for — the first row's four tickets need 237px of a
+ *  275px allowance and the second row's three need 262px of 351px. Five in the
+ *  first row overflows the C³ reserve at every phone width. If a room is ever
+ *  added or a `short` label lengthened, re-measure before touching this.
+ *
+ *  Above 560px both rows are `display: contents` and this constant has no
+ *  visible effect at all — the seven tickets sit in one flex strip exactly as
+ *  they always have. */
+const TICKET_ROW_BREAK = 4;
+
 function buildTicketRail(data) {
   const header = $('#ticket-rail');
 
-  const tickets = el('nav', { class: 'tickets', 'aria-label': 'Rooms' },
-    ROOM_ORDER.map((roomId, i) => {
-      const meta = data.roomById.get(roomId) || { short: roomId, label: roomId };
-      return el('a', {
-        class: 'ticket',
-        href: `#room-${roomId}`,
-        'data-goto': roomId,
-        'aria-label': meta.label
-      }, [
-        el('span', { class: 'ticket-no', 'aria-hidden': 'true', text: String(i + 1).padStart(2, '0') }),
-        el('span', { text: meta.short || meta.label })
-      ]);
-    }));
+  const ticketEls = ROOM_ORDER.map((roomId, i) => {
+    const meta = data.roomById.get(roomId) || { short: roomId, label: roomId };
+    return el('a', {
+      class: 'ticket',
+      href: `#room-${roomId}`,
+      'data-goto': roomId,
+      'aria-label': meta.label
+    }, [
+      el('span', { class: 'ticket-no', 'aria-hidden': 'true', text: String(i + 1).padStart(2, '0') }),
+      el('span', { class: 'ticket-name', text: meta.short || meta.label })
+    ]);
+  });
+
+  /* Two presentational groups, NOT two navs: they are `display: contents` at
+     every width except the phone band, so assistive tech and the wide layout
+     both see one flat list of seven links either way. A wrapper is what lets
+     the phone reserve the C³ button's space on one line instead of on both —
+     the defect the client photographed was the last ticket sheared under that
+     button. */
+  const rows = [
+    el('div', { class: 'ticket-row' }, ticketEls.slice(0, TICKET_ROW_BREAK)),
+    el('div', { class: 'ticket-row' }, ticketEls.slice(TICKET_ROW_BREAK))
+  ].filter(r => r.childElementCount > 0);
+
+  const tickets = el('nav', { class: 'tickets', 'aria-label': 'Rooms' }, rows);
 
   fill(header, [
     el('a', { class: 'brand', href: '#room-hero', text: 'Cook County Cooks' }),
@@ -1208,11 +1236,31 @@ function buildTicketRail(data) {
   // Highlight follows the engine's own notion of the most-visible room, so the
   // menu is correct however the user got there — tween, flick, or Find-in-page.
   onRoomChange(({ name }) => {
-    for (const t of tickets.children) {
-      const active = t.dataset.goto === name;
-      if (active) t.setAttribute('aria-current', 'true');
+    // `ticketEls`, not `tickets.children`: the tickets are inside two
+    // presentational row groups now (see TICKET_ROW_BREAK).
+    for (const t of ticketEls) {
+      if (t.dataset.goto === name) t.setAttribute('aria-current', 'true');
       else t.removeAttribute('aria-current');
     }
+    /* NOTHING SCROLLS THE STRIP. It is tempting to keep the current ticket in
+       view by writing the scroller's scrollLeft when the room changes, and it
+       was written and then taken out again, because it MOVES A SHEAR rather
+       than removing one. Measured at 1180x820 — iPad landscape, coarse pointer,
+       where the seven tickets are 771px of content in a 737px box — walking
+       into the Walk-In scrolled the strip 34px so "07 FREEZER" came whole into
+       view and "01 PASS" went 34px under the left mask instead. One cut item
+       for another, plus a bar that moves under the reader while they are
+       reading it, which is half of what the client photographed on his phone.
+
+       On a phone this would be dead code anyway: theme.css §17 puts all seven
+       tickets on two rows below 560px, so there is no overflow to scroll and
+       the current room is visible because every room is. The 34px shear at
+       1180x820 is real and is NOT fixed by this pass — it is outside the phone
+       band this work is gated on, and every candidate fix (a smaller C³
+       reserve, tighter ticket padding, the two-row menu) repaints an iPad
+       layout that was signed off and that this pass was required to leave
+       pixel-identical. It is written down here rather than left to be
+       rediscovered. */
   });
 
   return header;

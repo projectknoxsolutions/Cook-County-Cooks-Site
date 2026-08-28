@@ -121,6 +121,18 @@
    number the query can actually see. */
 @property --dark-gate   { syntax: "<number>"; inherits: true;  initial-value: 0; }
 
+/* --paints · IS THIS STAGE PUTTING ANY INK ON THE SCREEN AT ALL?
+   Declared in §06e (phone band only) as clamp(0, --dissolve * 1000, 1), so it
+   is 0 if and ONLY IF --dissolve is 0 — which is the same number §05 hands to
+   the stage's `opacity`. §06e style-queries it to retire the layer stack of a
+   stage that is provably painting nothing. Registered for the same reason
+   --dark-gate is: a style query compares computed values, and an unregistered
+   property computes to its token stream. inherits: false — it is read on the
+   element that declares it and nowhere else. Initial-value 1 (visible), like
+   every other value in this block, so a page whose engine never ran keeps
+   every layer it has. */
+@property --paints      { syntax: "<number>"; inherits: false; initial-value: 1; }
+
 /* --arr · THE ARRIVAL RAMP.  --lit used to be a pure function of --bloom, and
    --bloom is easeOutQuint(--p / 0.55) x --enter — which is EXACTLY ZERO for the
    whole of a room's approach and for the ~100svh of pin-lead it then spends
@@ -1751,6 +1763,32 @@ a { color: inherit; text-decoration: none; }
    · No JS, no class, no curtain: the page renders exactly as it did.
    ═══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 500px), (max-width: 1000px) and (max-height: 500px) {
+  /* THE ONE DECLARATION THAT CAN BLANK THIS PAGE, AND THE ONLY REASON IT IS
+     STILL HERE.
+
+     It shipped once with a residency rule that decided what to hide from what
+     engine.js BELIEVED — an async IntersectionObserver flag and a --enter value
+     the engine may not have written yet — and it hid four fully-opaque stages
+     under the reading position on the first frame after any jump. See the
+     RESIDENCY section of engine.js for the reproduction; the short version is
+     that a room which had not been computed yet resolved --enter to its
+     registered initial-value of 1, was therefore painting at full opacity, and
+     was hidden anyway.
+
+     `is-dormant` now means something a browser measured, not something the
+     engine inferred: a dedicated IntersectionObserver over the .stage elements,
+     rootMargin one full viewport in both directions, plus a dwell, plus a
+     never-hide-the-neighbours skirt, plus a hard fail-open across every resize
+     and visual-viewport change. engine.js is the single writer and the whole
+     rule is documented there. DO NOT add a second writer of this class, and do
+     not widen this selector to anything the observer is not watching.
+
+     Removing the curtain instead was measured and rejected: at 393x852 DPR 3
+     this build without it peaks at 122 composited layers and 339.0 MB of
+     viewport-clipped backing store, against 69 / 180.7 MB with it and the
+     --paints query below. 339 MB on a phone with a ~200 MB tab budget is the
+     blue screen this section exists to prevent, so "just take the curtain out"
+     is not available; it had to be made safe instead. */
   .room.is-dormant .stage { visibility: hidden; }
 
   /* The stage's own matte, which is a full-viewport backing store to hold one
@@ -1773,6 +1811,93 @@ a { color: inherit; text-decoration: none; }
      is genuinely being waited for, and there is no room behind it — see the
      `.hero .stage` rule in §08. */
   .room .stage { background: none; }
+
+  /* ...BUT THE MATTE DOES NOT VANISH, IT MOVES ONE ELEMENT IN, AND FOR FREE.
+
+     The paragraph above is right that `body` is dark behind a stage, and wrong
+     that that is enough. Every plate except the hero's is `loading="lazy"` and
+     `fetchpriority="low"` (app.js buildPlate), so on a phone on a store's LTE
+     the room you arrive at routinely has a stage that IS painting — rail,
+     chips, hotspots, the whole screen panel — over a photograph that has not
+     landed. With no matte, that frame is the page ground with the furniture
+     floating on it: the client's first two screenshots, a Break Room with the
+     pendant glow at the top and nothing under it, and a Back Office whose
+     detractor board reads perfectly against near-black.
+
+     So the fill goes on `.plate` — the <img> itself. It is already the drawing
+     content of the .plate-wrap layer, it is sized `100%/100%` of the cover box
+     (which §06 guarantees is at least the stage, scaled up by --overscan-k), it
+     is behind the decoded bitmap by definition, and an element that is already
+     rastering a background-colour costs no additional backing store. The
+     measured -34.5 MB from taking the matte off .stage is kept in full; the
+     black frame it was silently buying is not.
+
+     It sits INSIDE .plate-wrap's exposure grade, which is the right side of it:
+     the matte comes up with the room's lights instead of sitting at a fixed
+     black behind them. */
+  .room .plate { background-color: var(--ink-950); }
+
+  /* ── THE SECOND CURTAIN, WHICH CANNOT DISAGREE WITH ANYTHING ────────────
+     §05 pins every stage a --pin-lead early and releases it a --pin-lead late,
+     so THREE stages sit on the same viewport rectangle at every scroll
+     position, and one of the three is always at zero opacity — the room you
+     have finished with, whose --enter the engine has resolved to exactly 0.
+     Retiring that one is where a third of the memory saving lives: a
+     full-viewport layer at 393x852 DPR 3 is 12.0 MB, and a stage stack is six
+     of them.
+
+     The rule above cannot do it, and must not try. It hides a room on the
+     evidence of an IntersectionObserver, and an observer knows where a stage IS
+     but not whether it is PAINTING anything — so asking it to retire a
+     transparent-but-on-screen stage means feeding it a number (a --enter
+     threshold) that can be stale, unwritten, or simply not what the compositor
+     resolved. That is the exact defect this section shipped with.
+
+     So this half is not a decision at all. `style(--enter: 0)` asks the
+     COMPUTED VALUE of the same registered <number> that §05 turns into the
+     stage's opacity, on the same element, in the same frame. If it matches, the
+     stage's own `--dissolve` is clamp(0, (0 - 0.22) * 1.43, 1) = 0 and the
+     stage is painting nothing, by arithmetic, whatever the engine believes and
+     whatever the geometry cache says. There is no second source of truth to
+     drift from, no async delivery, no cache. A room this engine has never
+     written resolves --enter to its initial-value of 1 and is untouched; a
+     stale 0 left over from a jump is a stage the browser is ALREADY painting as
+     fully transparent, so hiding its layers removes nothing that was on screen.
+
+     It hides the children rather than the .stage so that .stage's own box, and
+     every rect inside it, is exactly what it was — screens.js rations its live
+     iframes off getBoundingClientRect() on panels in here, and `visibility`
+     (unlike `content-visibility`) changes no rect anywhere.
+
+     Nothing hidden here was hit-testable: at --enter 0, §05's --cut has already
+     put .hotspot and .rail-chips at `clip-path: inset(50%)`, which is neither
+     painted nor hit-tested. The curtain closes strictly inside a window that
+     was already dead.
+
+     WHY IT ASKS --paints AND NOT --enter. --enter 0 is only the settled end of
+     the fade; §05 resolves the stage's opacity as
+     `clamp(0, (--enter - 0.22) * 1.43, 1)`, so everything from --enter 0 up to
+     0.22 is ALSO a stage at opacity zero, and that band is most of the frames
+     — it is the whole approach and the whole departure of every room. Querying
+     --enter directly left those on the table (measured 215.2 MB peak with no
+     query at all and 192.2 MB querying --enter, against 180.7 MB with this).
+     --paints is declared just below as
+     `clamp(0, --dissolve * 1000, 1)`: it is zero exactly when --dissolve is
+     zero, and --dissolve is not a copy of the opacity rule, it IS the opacity
+     rule — §05 declares it once and hands the same variable to `opacity`. One
+     source of truth. Re-solve the dissolve ramp and this follows it for free;
+     there is no threshold here to leave behind.
+
+     `@container style()` is the same feature §06b's --dark-gate already depends
+     on, so it is not a new requirement on the browser. Where it is missing the
+     query never matches and the page merely keeps the layers. */
+  .room .stage { --paints: clamp(0, calc(var(--dissolve) * 1000), 1); }
+
+  @container stage style(--paints: 0) {
+    .plate-wrap,
+    .hotspots,
+    .rail { visibility: hidden; }
+  }
 }
 
 
@@ -3088,6 +3213,14 @@ a { color: inherit; text-decoration: none; }
   min-block-size: 44px;
 }
 
+/* THE ROW GROUPS ARE NOT A LAYOUT AT THIS WIDTH. app.js wraps the seven
+   tickets in two `.ticket-row` divs so the phone band (§17) can reserve the C³
+   button's column on the FIRST line only; `display: contents` dissolves them
+   everywhere else, so the strip below still sees seven flex children in one
+   row exactly as it did before the wrappers existed. Verified pixel-identical
+   at 820x1180, 1180x820, 1366x1024, 1440x900 and 2560x1440. */
+.ticket-row { display: contents; }
+
 #ticket-rail .tickets,
 #ticket-rail > ul,
 #ticket-rail > nav {
@@ -4115,6 +4248,18 @@ dialog#c3-menu[open],
        Four children, four tracks. The last one is not speculative and naming it
        is what keeps the list's `1fr` from eating it. */
     grid-template-rows: auto auto minmax(0, 1fr) auto;
+    /* ⚠ ONE COLUMN, AND IT IS THE CONTENT BOX. An implicit `auto` track is
+       sized against its items' MIN-CONTENT contribution before it is stretched,
+       and a horizontally-scrolling flex child does not always contribute zero:
+       measured at 393x852, chefwall.js's detached Head Chef strip made this
+       track 585.2px wide inside a 348.6px content box, so the strip — and the
+       three cards past the fourth — hung 214px off the right edge of the phone.
+       That is the shear in the client's screenshot ("Nayeri Hernand…"), and it
+       was a GRID defect, not a strip defect: the strip was already a scroller
+       and was simply handed a box wider than the screen. minmax(0, 1fr) makes
+       the track the content box and nothing else, at any child's request.
+       Identical to the old behaviour for every child that fits. */
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-3);
     padding-block: calc(var(--chrome-top) + var(--rail-drop, 9svh))
                    max(var(--sp-2), env(safe-area-inset-bottom, 0px));
@@ -4523,7 +4668,143 @@ dialog#c3-menu[open],
        same scroll position, which is the one thing §08 guarantees cannot
        happen. Re-solve the pair or leave the runway alone. */
   }
-  :root { --band-h: min(50svh, 430px); }
+
+  /* ── THE COURSE MENU, IN TWO LINES ────────────────────────────────────────
+     WHAT WAS WRONG. #ticket-rail is one horizontally-snapped strip, and below
+     ~790px wide it cannot hold what it is asked to hold. Measured, with the
+     strip at scrollLeft 0: content 681px in a 301px box at 393x852, 283px at
+     375x812, 338px at 430x932 — so rooms 05, 06 and 07 were entirely off the
+     right edge and room 04 was cut through its own name. The client's phone had
+     additionally scrolled itself, which is why his screenshot reads
+     "05 OFFICE  06 BREAKROOM  07 FREEZE…" with the C³ button sitting on the
+     last item: same defect, different scrollLeft. A strip with no visible
+     affordance that it scrolls, that shears at the frame edge and hides three
+     of seven rooms, is not a menu.
+
+     WHY NOT A NARROWER STRIP. Measured every way it could be made to fit on one
+     line at 375px, which is the narrowest phone this site is built for:
+       · seven names, no course numbers, 11px  ......  447px needed / 283 have
+       · the same at 10px .............................  401 / 283
+       · the same at 9px ..............................  368 / 283
+       · numbers only, current room named, 34px cells .  341 / 283
+       · seven 44px cells, numbers only, C³ icon-only .  308 / 317   (unlabelled)
+     Only the last one fits, and it fits by throwing every room name away. Seven
+     named rooms and a C³ button do not go on one 375px line. They go on two.
+
+     WHAT IT IS NOW. Two flex rows — four courses, then three — with the course
+     number set above its name instead of beside it. Nothing scrolls, nothing
+     is masked, nothing shears: all seven rooms are on screen at every phone
+     width, every one of them is a full-height 44px target, and the current room
+     is always visible because they all are. Stacking the number is what buys
+     the width: a ticket is then as wide as its NAME, not its name plus its
+     number plus the gap between them — 681px of strip becomes 237px on the
+     first row and 262px on the second at 375px.
+
+     THE C³ BUTTON GETS A COLUMN, NOT A GAP. The reserve is padding on the
+     FIRST row only (app.js's `.ticket-row` wrappers exist for this and nothing
+     else), so the second row runs the full width and the button can never
+     overlap an item at any width or any scroll position. The button is pinned
+     to the first row rather than centred on the pair, for the same reason.
+
+     THE PRICE, AND WHO PAYS IT. The bar goes 52px -> 90px. The band below it
+     pays 38 of that out of its own slack — see --band-h — and the drawer pays
+     the rest, measured at 393x852: 272.8px before, 256.8px after, which is the
+     Pass's fourth tool row going from fully visible to half visible under the
+     drawer's existing bottom fade. Every tool stays reachable and every room
+     stays one tap away, which is the trade this whole block exists to make.  */
+  :root { --topbar-h: 90px; }
+
+  /* 42px, and the floor on this breakpoint is 44. It is off-screen until it
+     takes focus so it cannot move a pixel of any layout, but §17's opening
+     line says 44 is the floor for every target on every breakpoint and this
+     was the one element in the audit that was not. */
+  .skip-link { min-block-size: 44px; display: inline-flex; align-items: center; }
+
+  #ticket-rail {
+    /* the C³ reserve moves off the bar and onto the first row */
+    padding-inline: max(var(--sp-3), env(safe-area-inset-left, 0px))
+                    max(var(--sp-3), env(safe-area-inset-right, 0px));
+  }
+
+  #ticket-rail .tickets,
+  #ticket-rail > ul,
+  #ticket-rail > nav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
+    /* it is not a scroller any more, so it must not carry a scroller's
+       affordances: an edge mask over a complete list only dims the ends. */
+    overflow: visible;
+    scroll-snap-type: none;
+    -webkit-mask: none;
+    mask: none;
+  }
+
+  .ticket-row {
+    display: flex;
+    align-items: stretch;
+    gap: var(--sp-1);
+    min-inline-size: 0;
+  }
+  .ticket-row:first-child { padding-inline-end: calc(4.25rem + var(--sp-2)); }
+
+  .ticket {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-block-size: 44px;
+    padding-inline: var(--sp-2);
+    padding-block: 2px;
+    border-radius: var(--r-xs);
+    text-align: center;
+    line-height: 1;
+    scroll-snap-align: none;
+  }
+  .ticket .ticket-no   { font-size: .78em; line-height: 1; }
+  .ticket .ticket-name { line-height: 1; }
+
+  /* The button sits ON the first row, not centred between the two, because
+     only the first row reserves space for it. */
+  #c3-button { inset-block-start: env(safe-area-inset-top, 0px); }
+
+  /* ── THE BAND PAYS FOR THE SECOND MENU ROW, OUT OF ITS SLACK ─────────────
+     --band-h is a RESERVE, and screens.js packs its panels to the reserve's
+     BOTTOM edge (`align-content: end` in the narrow block above), so the unused
+     part of it is a strip of photograph ABOVE the panels. Measured at 393x852,
+     reserve 426px: the Pass's three title cards use 285 of it, the Host Stand's
+     promo card 249, the Back Office's monitor 290, the Break Room's board 196.
+     Only the Dining Room fills it — two 16:9 boards at 196.1 plus a 12px gap,
+     404.2px — and the Dining Room is the one that must not move.
+
+     So the reserve shrinks by exactly the 38px the second menu row costs, and
+     is floored at what two 16:9 boards need at this width. Because the panels
+     are bottom-packed, taking 38px off the TOP of the reserve while the top of
+     the reserve itself moves DOWN 38px leaves every panel on exactly the pixel
+     it was on, in every room, and gives the 38px back to the column below.
+     Where the floor binds — 430x932, where the boards are already share-bound
+     against a 430px cap — the reserve is left alone and the drawer pays.
+
+     1.125 is 2 x 9/16: two boards, sixteen-by-nine, stacked. The 12px is
+     screens.js's row gap. `min(…, reserve)` is what keeps this from ever
+     GROWING the band and moving the Dining Room's boards the other way.
+
+     MEASURED, Dining Room board heights, before -> after:
+       393x852 196.1 -> 196.1   390x844 194.6 -> 194.6   375x812 186.6 -> 186.6
+       430x932 209.0 -> 209.0                                                */
+  :root {
+    --band-reserve: min(50svh, 430px);
+    --band-floor: calc((100vw
+                        - max(var(--gut), env(safe-area-inset-left,  0px))
+                        - max(var(--gut), env(safe-area-inset-right, 0px))) * 1.125
+                       + var(--sp-3));
+    --band-h: min(max(var(--band-floor), var(--band-reserve) - 38px),
+                  var(--band-reserve));
+  }
   .rail { --rail-drop: 7svh; gap: var(--sp-2); }
   .rail-title { font-size: var(--t-3); max-width: 14ch; }
   .rail-chips .chip { min-block-size: 54px; }
@@ -4646,6 +4927,41 @@ dialog#c3-menu[open],
   .room[data-room="host"] .rail        { gap: var(--sp-2); }
   .room[data-room="host"] .rail-title  { font-size: var(--t-4); }
   .room[data-room="host"] .rail-chips  { gap: var(--sp-1); }
+}
+
+/* ═══ THE WALK-IN'S KEYPAD LABEL, WHICH READ "R CODE" ON A PHONE ══════════
+   The keypad is the only control in this room and the only thing that opens
+   the door, and on a phone its label was being cut in half — the client's
+   frame shows "R CODE" printed across the door in a black plate.
+
+   IT IS A CLIP, NOT AN OVERFLOW, and the clip is this file's. §05's ownership
+   gate puts `clip-path: inset(var(--cut-clip))` on .frz-pad so a room you have
+   scrolled past cannot reach through an invisible plate; --cut-clip is
+   inset(-24px) while the room owns the page, and 24px is described there as
+   "nothing clipped, focus rings and shadows included". That allowance is
+   correct for a focus ring and wrong for freezer.js's label, which on a narrow
+   viewport is right-aligned to the pad (freezer.js's own NARROW_MEDIA rule,
+   "the label cannot centre under a keypad that is against the frame edge") and
+   therefore hangs a long way to the LEFT of it. Measured at 393x852: the pad
+   is 36.4px wide, the label 110.8px, so 74.4px of it sits outside the pad and
+   50.4px of that was outside the 24px allowance. At 852x393 the pad is 27.1px
+   and the label 115px — 87.9px outside, worse. On a desktop the same label is
+   CENTRED on a keypad drawn twice the size, so it overhangs about 25px a side
+   and loses roughly a pixel to the clip; that is why this has never shown up
+   anywhere but on a phone, and it is why this rule is gated to a phone.
+
+   88px is the worst measured overhang plus margin. The binary is restated
+   rather than adjusted, so the OTHER half of the gate is bit-for-bit what §05
+   wrote: --live-cut 0 still resolves this to inset(50%), which is the one
+   declaration that makes an element neither painted nor hit-tested. Only the
+   live-state allowance moves, and only on .frz-pad.                        */
+@media (max-width: 560px), (max-width: 1000px) and (max-height: 560px) {
+  .frz-pad {
+    clip-path: inset(calc((1 - var(--live-cut)) * 50% - var(--live-cut) * 88px));
+  }
+  /* and the same 44px floor as the portrait block above, for a phone on its
+     side — 195x43 measured at 852x393. */
+  .skip-link { min-block-size: 44px; display: inline-flex; align-items: center; }
 }
 
 /* Very short landscape phones — keep the list usable */

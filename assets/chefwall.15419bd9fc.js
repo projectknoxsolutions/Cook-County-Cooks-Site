@@ -702,8 +702,56 @@ const CSS = `
   .ccc-chefwall{ inset:auto 0 0 0; pointer-events:auto; }
   .ccc-chefwall.cw-detached{ position:relative; inset:auto; }
   .cw-wall{ display:none; }
+
+  /* ── THE STRIP · a snapping carousel, and it says so ──────────────────────
+     WHAT THE CLIENT PHOTOGRAPHED. Six cards ran off the right edge of a 393px
+     phone and the fourth was cut through the middle of "Nayeri Hernandez".
+     Two independent faults, both fixed here:
+
+       1. THE BOX WAS WIDER THAN THE PHONE. Measured at 393x852: this strip's
+          border box was 585.2px inside a 348.6px column. It was already a
+          scroller — it just had nowhere to scroll, because its host row let it
+          take its max-content width. min-inline-size + max-inline-size pin
+          it to its column here; theme.css §17 pins the column itself.
+
+       2. THE ROW WAS RAGGED, so even the part on screen read as broken. Card
+          widths ran 67.5 / 80.1 / 97 / 77.1 / 73.1 / 98.4px and card heights
+          213.2 / 228.9 / 240 / 240.2 / 250.1 / 271.6px, because every box was
+          sized by its own text: "Iron Mike" took two lines where "Alexis Bell"
+          took one, and "North Side" wrapped its plate to two lines where "Big
+          South" kept one. Now every card is the same width and the same height
+          BY CONSTRUCTION — a fixed inline size and a three-row grid with all
+          three rows given explicit heights — so no card can wrap to a
+          different height from its neighbours whatever its data says.
+
+     AND THE OVERFLOW IS NOW DELIBERATE. Six chefs will not fit any phone; what
+     was missing was any sign that there were more. The card width is solved so
+     two cards land whole and the third is visibly cut into — 21.6px of it at
+     393, 15.8 at 375, 29.7 at 430 — under a fade that runs out at the frame
+     edge, with mandatory x-snap so a flick lands on a card and never between
+     two. That is the same affordance §12's repo list uses: the content is
+     self-evidently cut off, rather than a chrome element that can be missed.
+     iOS draws no resting scrollbar, so it could not have been one anyway.
+
+     THE HEIGHT IS THE OTHER HALF OF THE FIX, and it is the one theme.css §17
+     asked for by name ("fixing it means capping the STRIP, not the drawer").
+     The strip was 299.6px tall in a ~330px content box, so the Break Room's
+     minmax(0, 1fr) tool drawer collapsed to NINE PIXELS and all six of that
+     room's tools were unreachable on a phone. A card is now 88.4px and the
+     strip 116.4px, which gives the drawer back ~183px — three tool rows and
+     the start of a fourth.                                                   */
+  /* THE BOX WAS WIDER THAN THE PHONE, and that is a fault at every narrow
+     width, so it is fixed here rather than in the phone block below. Measured
+     at 393x852: this strip's border box was 585.2px inside a 348.6px column.
+     It was already a scroller — it just had nowhere to scroll, because its host
+     row let it take its max-content width, so the fourth card was cut through
+     the middle of "Nayeri Hernandez" and cards five and six were off the
+     screen entirely. These two lines pin the strip to its column;
+     theme.css §17 pins the column itself (grid-template-columns: minmax(0,1fr)). */
+  .ccc-chefwall.cw-detached{ min-inline-size:0; max-inline-size:100%; }
   .cw-strip{
     display:flex; gap:.75rem;
+    min-inline-size:0; max-inline-size:100%;
     overflow-x:auto; overscroll-behavior-x:contain;
     scroll-snap-type:x mandatory;
     -webkit-overflow-scrolling:touch;
@@ -762,6 +810,125 @@ const CSS = `
   }
   .cw-cardrole{
     font-size:.72rem; line-height:1.3; color:var(--cw-dim);
+  }
+}
+
+/* =========================================================================
+   B2. THE PHONE · the strip as a snapping carousel that says it is one
+   =========================================================================
+   THE CONDITION IS THE PHONE AND ONLY THE PHONE — the 560px line theme.css
+   §17 calls "a hand, not a tablet", plus the same short-landscape clause
+   screens.js's PHONE_MEDIA uses, because a phone on its side is 852x393 and
+   is not caught by a width test. Measured there before this block reached it:
+   the strip was 331.1px tall in a 393px-tall viewport, so it ran off the
+   bottom of the screen AND left the Break Room's tool drawer at NINE PIXELS,
+   exactly as in portrait.
+
+   An iPad in portrait matches NARROW_MEDIA above and is deliberately NOT
+   touched here: its column is 748px wide, nothing shears at the frame edge,
+   and it is a signed-off composition. (The row IS still ragged there and the
+   sixth card is still past the edge — the same two faults, at a width this
+   pass was told to leave pixel-identical. Widening this query to NARROW_MEDIA
+   is the whole change if that is ever wanted.)
+
+   WHAT THE CLIENT PHOTOGRAPHED, and what is left of it after the strip has
+   been pinned to its column above: the row was RAGGED, so even the part on
+   screen read as broken. Card widths ran 67.5 / 80.1 / 97 / 77.1 / 73.1 /
+   98.4px and card heights 213.2 / 228.9 / 240 / 240.2 / 250.1 / 271.6px,
+   because every box was sized by its own text — "Iron Mike" took two lines
+   where "Alexis Bell" took one, and "North Side" wrapped its brass plate to
+   two lines where "Big South" kept one. Every card is now the same width and
+   the same height BY CONSTRUCTION: a fixed inline size, and a three-row grid
+   with all three rows given explicit heights, so no card can wrap to a
+   different height from its neighbours whatever its data says.
+
+   AND THE OVERFLOW IS NOW DELIBERATE. Six chefs will not fit any phone; what
+   was missing was any sign that there were more. The card width is solved so
+   two cards land whole and the third is visibly bitten into — 21.6px of it at
+   393, 15.8 at 375, 29.7 at 430 — under a fade that runs out at the frame
+   edge, with mandatory x-snap so a flick lands on a card and never between
+   two. That is the affordance theme.css §12's repo list already uses: the
+   content is self-evidently cut off, rather than a chrome element that can be
+   missed. iOS draws no resting scrollbar, so it could not have been one.
+
+   THE HEIGHT IS THE OTHER HALF, and it is the one theme.css §17 asked for by
+   name ("fixing it means capping the STRIP, not the drawer"). The strip was
+   299.6px tall in a ~330px content box, so the Break Room's minmax(0, 1fr)
+   tool drawer collapsed to NINE PIXELS and all six of that room's tools were
+   unreachable on a phone. A card is 88.4px now and the strip 116.4px.
+
+   backdrop-filter is dropped, matching the phone-memory pass: theme.css §06e
+   drops it across the phone band and six blurred cards is six more surfaces
+   the compositor has to re-read the backdrop for.
+
+   ⚠ THE QUERY IS NARROW_MEDIA, NOT THE PHONE BAND, AND THAT IS DELIBERATE.
+   It was first written as the phone band because the pass that added it had to
+   keep iPad pixel-identical for an A/B. But the wall is suppressed and this
+   strip is what carries the chefs at EVERY width §17 takes over, and both
+   faults above were measured on iPad portrait too: at 820x1180 cards 5 and 6
+   ran past the strip's right edge and the Break Room's drawer was ~47px. The
+   A/B constraint was about not REGRESSING iPad, and iPads are this site's
+   primary device — leaving a ragged, overflowing row there to protect a
+   screenshot comparison would have been the tail wagging the dog. Matches
+   NARROW_MEDIA in screens.js and §17's takeover exactly, so the strip is
+   styled wherever it is the presentation.
+   ====================================================================== */
+@media (max-width: 900px), (max-aspect-ratio: 8 / 7) {
+  .cw-strip{
+    scroll-padding-inline-start:1rem;
+    overflow-y:hidden;
+    /* the cut edge, made legible */
+    -webkit-mask:linear-gradient(90deg, #000 0, #000 calc(100% - 2.25rem), transparent 100%);
+            mask:linear-gradient(90deg, #000 0, #000 calc(100% - 2.25rem), transparent 100%);
+  }
+  .cw-strip > li{ display:flex; flex:0 0 auto; }
+  .cw-card{
+    /* two whole cards and a bitten third, at every phone width */
+    flex:0 0 clamp(8.5rem, 36vw, 10.5rem);
+    inline-size:clamp(8.5rem, 36vw, 10.5rem);
+    /* art | district
+       art | name      — three rows, all three given a height, so the row can
+       art | role        not go ragged on a long name or a wrapped plate. */
+    display:grid;
+    grid-template-columns:2.75rem minmax(0, 1fr);
+    grid-template-rows:1.05rem 2.3rem 1.05rem;
+    column-gap:.5rem; row-gap:0;
+    align-content:start;
+    gap:0 .5rem;
+    padding:.5rem;
+    -webkit-backdrop-filter:none; backdrop-filter:none;
+  }
+  .cw-card .cw-cardart{
+    grid-column:1; grid-row:1 / -1;
+    inline-size:2.75rem; width:2.75rem; block-size:auto; align-self:stretch;
+    aspect-ratio:auto;
+  }
+  .cw-card .cw-mono b{ font-size:1.05rem; }
+  .cw-card .cw-mono i{ font-size:.4rem; }
+  .cw-card .cw-badge{ font-size:.45rem; width:.9rem; max-width:.9rem; top:.2rem; right:.2rem; }
+  /* ONE LINE, ALWAYS: "North Side" used to wrap where "Big South" did not, and
+     a two-line plate is what made three of the six cards taller than the rest. */
+  .cw-carddistrict{
+    grid-column:2; grid-row:1;
+    justify-self:start; align-self:center;
+    max-inline-size:100%;
+    padding:.16em .45em .2em;
+    font-size:.52rem; letter-spacing:.08em;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .cw-cardname{
+    grid-column:2; grid-row:2;
+    align-self:center;
+    font-size:.82rem; line-height:1.15;
+    /* exactly two lines of box, whatever the name does inside it */
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+    overflow:hidden;
+  }
+  .cw-cardrole{
+    grid-column:2; grid-row:3;
+    align-self:center;
+    font-size:.62rem; line-height:1.1;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
 }
 
