@@ -28,9 +28,12 @@
  *          meters, and real celebration for a met goal or a new personal record.
  *
  *   live   the two Dining boards. Real iframes of the Win the Weekend decks,
- *          rendered at a virtual desktop width and scaled down — but at 960px,
- *          not 1280px, because the decks size their type in vw and a narrower
- *          virtual viewport makes the content itself come out ~33% larger.
+ *          rendered into a virtual viewport and scaled down. The decks are
+ *          FLUID, so the number that decides everything is that viewport's
+ *          HEIGHT: tall enough for the deck's tallest slide or the slide is
+ *          cut off, no taller than that or the scale factor — and with it
+ *          every glyph on the glass — is smaller than it needs to be. Each
+ *          board runs at its own measured floor. See LIVE_MIN_VIRTUAL_H.
  *
  *   report the Break Room television. The Daily Sales Report's own numbers,
  *          composed natively for a 297px screen and cycled like a TV. It
@@ -90,57 +93,111 @@ const BUCKET_MS = 600000;
  *  are height-bound, not width-bound. */
 const LIVE_RENDER_WIDTH = 960;
 
-/** ⚠ THE NUMBER THE DINING BOARDS WERE GETTING WRONG.
+/** ⚠ THE ONE NUMBER THE DINING BOARDS TURN ON.
  *
  *  A `live` panel renders its deck into a virtual viewport and scales that
- *  uniformly into the glass. The virtual viewport has always taken the PANEL'S
- *  OWN ASPECT — width `renderWidth`, height `renderWidth / aspect` — so the
- *  scaled frame covers the glass exactly, corner to corner, with no bars and
- *  no crop. That part was never the bug and is unchanged.
+ *  uniformly into the glass. The viewport takes the PANEL'S OWN ASPECT — width
+ *  `round(H * aspect)`, height `H` — so the scaled frame covers the glass
+ *  corner to corner with no bars and no crop. That has never been the bug.
  *
- *  The bug was the SIZE of that viewport. Both Win-the-Weekend decks are
- *  FLUID, not fixed-canvas: `.s{min-height:100vh; display:flex; overflow-y:
- *  auto}`, one slide shown at a time by their own 7-second timer, laid out
- *  against whatever viewport they are handed and clipped by the body when the
- *  content does not fit. At the old 960 x 541 virtual viewport ten of Chicago's
- *  seventeen slides and ten of Big South's eighteen ran off the bottom of the
- *  glass — a Top-5 board showing four rows and half of the fifth, which is
- *  exactly the "the slides don't line up completely" the client reported.
+ *  What the number decides is SIZE. Both Win-the-Weekend decks are FLUID, not
+ *  fixed-canvas: `.s{min-height:100vh; display:flex; justify-content:safe
+ *  center; overflow-y:auto}`, one slide at a time on their own 7s timer, laid
+ *  out against whatever viewport they are handed and cut by the body when it
+ *  does not fit. So `H` is a two-sided constraint: too small and slides are
+ *  cut off (the client, twice); too large and the scale factor `panelW / vw`
+ *  is smaller than it needs to be and every glyph on the glass shrinks with it
+ *  (the client, once he saw 960).
  *
- *  Because the decks are fluid, the fix is not a scale factor and not the
- *  panel's aspect (both boards are already 1.775, within 0.2% of 16:9 and of
- *  each other). It is the virtual viewport's HEIGHT. Measured slide by slide,
- *  driving each deck with its own sh() and taking the deepest laid-out edge:
+ *  ── WHY THE BOARDS LOOK EMPTY, WHICH IS NOT THE SAME QUESTION ─────────────
+ *  Most of the black on a Top-5 board is the DECK'S own margin, not our scale.
+ *  Measured at the 1703x960 the boards shipped at: `.t5{max-width:900px;
+ *  margin:0 auto}` puts that card in 900 of 1703px, so 47% of the glass width
+ *  is the deck centring itself; `justify-content:safe center` then centres its
+ *  656px of content in 960px and spends another 32% of the height. The widest
+ *  thing either deck ever draws is `.dg{max-width:1400px}`. None of that is
+ *  reachable from here: the crop would have to be uniform, and HEIGHT is
+ *  already the binding dimension, so trimming width buys exactly nothing.
  *
- *      virtual height   Chicago (17)     Big South (18)
- *      541  (old)       10 clipped       10 clipped   worst -917px
- *      721               1 clipped        2 clipped   worst -737px
- *      811               1 clipped        1 clipped   worst -99px
- *      902               0 clipped        1 clipped   worst -8px
- *      930               0 clipped        0 clipped
- *      960               0 clipped        0 clipped
+ *  ── WHY NOT JUST HAND THEM A NARROW VIEWPORT ──────────────────────────────
+ *  Because their type is `clamp(min_rem, k*vw, max_rem)` and at any width at
+ *  or above ~1010px every vw-driven size is already pinned at its MAX cap —
+ *  `.hd h2` 3.8rem/60.8px, `.t5p` 2.6rem/41.6px, `.t5v` 2.4rem/38.4px, `.t5nm`
+ *  2.2rem/35.2px — measured identical at vw 1300, 1500, 1703 and 2200. The
+ *  knee where narrowing would start to pay is at vw ~1010 and we can never
+ *  reach it: below vw 1300 the store-rankings table is cut off SIDEWAYS inside
+ *  `.tw{overflow:auto; max-width:1300px}` with its nowrap cells — measured
+ *  -37px at vw 1250 and -172px at vw 1100. Height is the only lever there is.
  *
- *  The cliff between 721 and 902 is the decks' own flex-wrap: their District
- *  Ranker and Top-10 boards wrap into fewer rows as the viewport grows. 960
- *  is the first round number clear of BOTH decks' worst slide with ~5% of
- *  headroom, which matters because the slides are data-driven and a row added
- *  tomorrow must not put the boards back where they started.
+ *  ── THE CURVE, MEASURED ───────────────────────────────────────────────────
+ *  Each deck driven slide by slide at `round(aspect*H) x H`, with its own row
+ *  animations parked at their end state first — the decks start their rows on
+ *  a translateY, so an unsettled scrollHeight over-reports by 20-40px and an
+ *  unsettled rect under-reports the NPS boards, which self-fit — and a slide
+ *  counted as cut when any painted or text box lands outside the viewport or
+ *  outside a scroll-clipping ancestor:
  *
- *  It is a HEIGHT, and the width is derived from it and the panel's own
- *  measured aspect — so both dining boards and the break-room television get
- *  the same treatment from the same number rather than three hand-tuned
- *  widths, and a re-measured panel in rooms.js re-derives instead of drifting.
+ *      H     vw(chi)  Chicago (17)        vw(bs)  Big South (18)
+ *      541    960     9 cut, worst -904    956    11 cut, worst -362
+ *      721   1279     1 cut, worst -728   1275     3 cut, worst -189
+ *      811   1439     1 cut, worst  -43   1434     1 cut, worst  -99
+ *      853   1513     0 cut               1508     1 cut, worst  -57
+ *      880   1561     0 cut  ← SHIPPED    1556     1 cut, worst  -30
+ *      902   1600     0 cut               1595     1 cut, worst   -8
+ *      910   1614     0 cut               1609     0 cut
+ *      935   1659     0 cut               1653     0 cut  ← SHIPPED
+ *      960   1703     0 cut               1697     0 cut  (both, before)
  *
- *  The cost is honest and worth stating: a taller virtual viewport is a
- *  smaller scale factor, so the deck's own type lands smaller on the glass
- *  than it did at 960 wide. It is smaller and WHOLE instead of larger and cut
- *  in half, which is the trade the client asked for in the same sentence.
+ *  The floor is ONE SLIDE in each deck, and it is a different slide, which is
+ *  why this is per board and not one shared number. Every other slide clears
+ *  its deck's floor by a mile:
  *
- *  The Daily Sales Report is indifferent to this number: it is a fixed
+ *      Chicago   853  District Ranker   (next tallest: Top 5 Money Makers 721,
+ *                                        the other Top 5 boards 687, Store
+ *                                        Rankings 510, Top 10 NPS 488)
+ *      Big South 910  Top 10 NPS        (next tallest: District Ranker 758,
+ *                                        Head Chef 743, Store Rankings 718,
+ *                                        the Top 5 boards 533-575)
+ *
+ *  Below 811 a second cliff opens: the District Ranker's
+ *  `repeat(auto-fit,minmax(320px,1fr))` grid needs vw >= 1416 to keep its four
+ *  districts on one row, and the aspect-locked vw falls under that at H < 799.
+ *
+ *  ── WHAT IS SHIPPED, AND WHAT IT COSTS ────────────────────────────────────
+ *  880 and 935: each deck's measured floor plus ~3%. That is +9.1% of scale on
+ *  Chicago and +2.7% on Big South against the 960 both were running at, and it
+ *  spends headroom to get it — Chicago 107px down to 27px, Big South 51px to
+ *  25px. 3% is the honest margin here, not a round number chosen to look safe:
+ *  neither deck's growth quantum fits in ANY margin we could afford (one more
+ *  metric tile row on a District Ranker card is +85px, one more NPS row is
+ *  +81px), so the margin can only absorb sub-row drift — a font metric, a
+ *  longer label, a border — and 960 never covered a row either.
+ *
+ *  The ceiling, for whoever asks next: the absolute floors 853/910 with zero
+ *  margin are +12.5% and +5.6%. That is ALL the size that exists in an iframe
+ *  of these decks. At 1440 it moves a Top-5 store name from 7.9 rendered CSS
+ *  px to 8.9 at best. If these boards have to be legible rather than merely
+ *  whole, the answer is the one the Back Office and the Break Room already
+ *  took: render the numbers natively at the panel's own scale (`feed` and
+ *  `report`), and stop iframing a 1400px deck into 350px of glass.
+ *
+ *  The Daily Sales Report is indifferent to all of this: it is a fixed
  *  1920x1080 canvas that scales itself with `Math.min(innerWidth/1920,
  *  innerHeight/1080)`, so its size on the glass is panelWidth/1920 whatever we
- *  hand it. It still wants the panel's aspect, or it letterboxes itself. */
+ *  hand it — which is exactly why the break-room television is on `report` and
+ *  not here. Anything that arrives in `live` mode without a measured floor
+ *  gets LIVE_MIN_VIRTUAL_H, which stays at the value both boards used to run
+ *  at rather than borrowing a floor that was measured against another deck. */
 const LIVE_MIN_VIRTUAL_H = 960;
+
+/** The measured floor, per board. Keys are `rec.slug`. A board with no entry
+ *  falls back to LIVE_MIN_VIRTUAL_H above. Re-measure — do not nudge — if a
+ *  deck's slide set changes: the value is the tallest slide's own height plus
+ *  ~3%, and the tallest slide is named in the table above. */
+const LIVE_MIN_VIRTUAL_H_BY_SLUG = {
+  'wtw-chicago':   880,   // floor 853, District Ranker
+  'wtw-big-south': 935    // floor 910, Top 10 NPS
+};
 
 /** Hard ceiling on simultaneous `live` iframes. iPads are real. Cheap modes
  *  (title / image / feed) are not counted — they cost a few DOM nodes.
@@ -980,9 +1037,10 @@ const STYLES = `
    The Daily Sales Report is a FIXED 1920x1080 canvas that scales ITSELF by
    Math.min(innerWidth/1920, innerHeight/1080). Inside an iframe its type
    therefore lands at panelWidth/1920 of its authored size WHATEVER virtual
-   viewport we hand it — the lever that rescued the two Dining boards (a
-   NARROWER virtual viewport, because those decks size their type in vw) does
-   nothing at all here. At 297px of glass the factor is 0.155: the deck's
+   viewport we hand it — the one lever the two Dining boards still have (a
+   SHORTER virtual viewport, because those decks are fluid and their scale is
+   panelW / (H * aspect)) does nothing at all here. At 297px of glass the
+   factor is 0.155: the deck's
    28-42px store names arrive at 4.3-6.5 CSS px and its 16px table rows at
    2.5. Putting a 12px floor under the deck's smallest type needs a
    television ~75% of the plate wide. Re-shooting the room does not rescue it
@@ -2335,7 +2393,7 @@ function buildSlide(district, data, index, total) {
   const meta = district.meta || {};
 
   const head = el('div', { class: 'ccc-scr-feed__head' }, [
-    el('p', { class: 'ccc-scr-feed__eyebrow', text: 'Days since last detractor' }),
+    el('p', { class: 'ccc-scr-feed__eyebrow', text: 'Days since the last bad NPS survey' }),
     el('h3', { class: 'ccc-scr-feed__district', text: district.label }),
     el('p', { class: 'ccc-scr-feed__goal', text: `Goal ${goal} days` })
   ]);
@@ -2379,7 +2437,7 @@ function makeFeed(rec) {
   let loaded = false;
   let pending = false;
 
-  const TITLE = () => rec.title || 'Days since last detractor';
+  const TITLE = () => rec.title || 'Days since the last bad NPS survey';
   const WAITING = 'Bringing up the streak board\u2026 tap to open the Daily Sales Report.';
   const OFFLINE = 'The streak board is not reachable right now. Tap to open the Daily Sales Report.';
 
@@ -2605,7 +2663,9 @@ function makeLive(rec) {
    * The virtual viewport keeps the panel's own aspect — that is what makes the
    * scaled frame land corner to corner with no bars and no crop — and is made
    * big enough that the deck inside it lays a whole slide out rather than
-   * clipping one. See LIVE_MIN_VIRTUAL_H for the measurements behind 960.
+   * clipping one, and NO bigger, because every px of height above that floor
+   * is a px of scale taken off every glyph on the glass. See
+   * LIVE_MIN_VIRTUAL_H for the measurements behind 880 and 935.
    *
    * The scale is uniform, so nothing is distorted, and the frame is positioned
    * at the plane's top-left with `transform-origin: top left`, so the scaled
@@ -2617,9 +2677,12 @@ function makeLive(rec) {
     if (!w || !h) return;
 
     const aspect = w / h;                       // the panel's, as measured
-    // Derived, not hand-tuned per board: the height the decks need, the
-    // panel's own aspect, and whatever floor rooms.js asked for.
-    const vw = Math.max(rec.renderWidth, Math.round(LIVE_MIN_VIRTUAL_H * aspect));
+    // Derived, not hand-tuned: the height THIS deck was measured to need, the
+    // panel's own aspect, and whatever floor rooms.js asked for. Per slug
+    // because the two decks' tallest slides are different slides and 57px
+    // apart — see LIVE_MIN_VIRTUAL_H_BY_SLUG.
+    const minH = LIVE_MIN_VIRTUAL_H_BY_SLUG[rec.slug] || LIVE_MIN_VIRTUAL_H;
+    const vw = Math.max(rec.renderWidth, Math.round(minH * aspect));
     const vh = Math.max(1, Math.round(vw / aspect));
 
     const scale = w / vw;                       // uniform: no distortion

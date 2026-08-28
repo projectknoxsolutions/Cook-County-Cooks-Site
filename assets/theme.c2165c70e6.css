@@ -547,8 +547,16 @@ a { color: inherit; text-decoration: none; }
   margin-inline-end: calc(-1 * var(--track-caps));
 }
 
-/* Reading copy */
-.lede, .rail-tagline {
+/* Reading copy.
+   NOTHING IN THE RESTAURANT SETS THIS ANY MORE. The hero's lede and every
+   room's .rail-tagline were removed on 2026-08-28 at the client's instruction
+   ("I want those types of descriptions to be removed on every page" — see the
+   note over buildRail() in app.js), and the rules that styled them went with
+   them. This stays in the vocabulary because it is a PRIMITIVE: the size,
+   weight, colour and measure any block of reading copy on this site takes. The
+   next one that appears should wear it rather than invent a second set of
+   numbers. */
+.lede {
   font-size: var(--t-1);
   font-weight: 350;
   line-height: var(--lh-lead);
@@ -1784,6 +1792,41 @@ a { color: inherit; text-decoration: none; }
 
 .hero .stage { background: var(--ink-950); }
 
+/* ── THE MASTHEAD IS THE WHOLE HERO NOW (2026-08-28) ───────────────────────
+   The lede and the "Walk the line" scroll cue were removed at the client's
+   instruction — "the main page has 'Every tool' all the way to 'walk the
+   line'. I want to remove the descriptions" — so .hero-lede, .scroll-cue and
+   the @keyframes cue-draw that drew its hairline are gone from this section
+   with them. app.js's buildHero() says why nothing became unreachable.
+
+   THE PADDING IS THE RE-BALANCE, and it is the only other thing that changed.
+   `align-content: center` centres the CONTENT BOX, so it is the DIFFERENCE
+   between the two block paddings that decides where the type lands:
+
+       content centre = 100svh/2 + (padding-top − padding-bottom)/2
+
+   The glass anyone actually looks at starts under the fixed ticket rail, so the
+   masthead is optically centred when that difference is exactly --topbar-h.
+
+   With three children the rule centred the STACK, and the masthead — the thing
+   the client says he loves — was the top third of it. Measured, title box only,
+   before: 86px above the centre of the sub-rail glass at 1024x768 and 88px at
+   1366x768 / 1440x900 / 1512x751 / 1600x900 / 1920x1080 / 2560x1440, 83px at
+   390x844 and 85px at 820x1180. At 844x390 it was worse than off-centre — the
+   masthead's box started at y 17, i.e. UNDER the 60px ticket rail.
+
+   Removing the lede and the cue fixes most of that on its own, but not all of
+   it: --sp-9 (80px) at the foot against --topbar-h + --sp-8 at the head is a
+   difference of --topbar-h − 20, which would have left the lone masthead ~10px
+   high. --sp-8 at the foot makes the difference --topbar-h exactly, at every
+   width and at both --topbar-h values (52-68px fluid, 72px over 2000px).
+
+   MEASURED AFTER, offset of the masthead's box centre from the centre of the
+   glass below the ticket rail: 0px at 1024x768, 1366x768, 1440x900, 1512x751,
+   1600x900, 1920x1080, 2560x1440, 390x844, 820x1180 and 844x390. Ten out of
+   ten, because the identity above is exact and does not depend on the type
+   scale. NOTE that this rule is NOT overridden in the ≤900px band — .hero-inner
+   is declared once, here — which is why the phone sizes are in that list. */
 .hero-inner {
   position: absolute;
   inset: 0;
@@ -1791,8 +1834,10 @@ a { color: inherit; text-decoration: none; }
   display: grid;
   align-content: center;
   justify-items: start;
+  /* one child now — the gap is inert, and kept only so a second one could
+     never land flush against the masthead */
   gap: var(--sp-5);
-  padding: calc(var(--topbar-h) + var(--sp-8)) var(--gut) var(--sp-9);
+  padding: calc(var(--topbar-h) + var(--sp-8)) var(--gut) var(--sp-8);
 }
 
 .hero-title {
@@ -1825,40 +1870,19 @@ a { color: inherit; text-decoration: none; }
   }
 }
 
-.hero-lede { max-width: 40ch; }
-
-.scroll-cue {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-3);
-  color: var(--fg-dim);
-  min-block-size: 44px;
-  /* The hero's stage is pointer-events: none like every other (§05), so the
-     one link in it has to opt back in — and take the same ownership gate as
-     the rail's chips, or it goes on swallowing taps at the top of the Pass. */
-  pointer-events: auto;
-  clip-path: inset(var(--cut-clip));
-
-  &::before {
-    content: "";
-    inline-size: clamp(34px, 6vw, 72px);
-    block-size: 1px;
-    background: linear-gradient(90deg, var(--brass), transparent);
-    animation: cue-draw 3.4s var(--ease-in-out) infinite;
-    transform-origin: 0 50%;
-  }
-}
-
-@keyframes cue-draw {
-  0%, 100% { transform: scaleX(.35); opacity: .5; }
-  45%      { transform: scaleX(1);   opacity: 1;  }
-}
+/* .hero-lede, .scroll-cue and @keyframes cue-draw stood here. All three were
+   removed on 2026-08-28 with the elements they styled (see the note at the top
+   of this section). The hero now has exactly one child, and the hero's stage no
+   longer contains a single interactive element — which is why §08a's ownership
+   gate no longer has a seventh member. */
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
    08 · THE RAIL
    ═══════════════════════════════════════════════════════════════════════════
-   Title, tagline and tool chips over a busy dark photograph.
+   Title and tool chips over a busy dark photograph. (There was a tagline
+   between them until 2026-08-28; the client asked for every room description
+   to come off the art. app.js's buildRail() carries the quote and the reasons.)
 
    NO SCRIM SLAB.  Legibility comes from three stacked cheap tricks instead:
      1. the plate's own lower-left vignette lobe (§06) already darkens this
@@ -1871,8 +1895,8 @@ a { color: inherit; text-decoration: none; }
    --fg-muted (#dcd5c8) past 11:1.
 
    The rail also STAGGERS ITSELF off --enter with no JS and no timers: each
-   element remaps the same number through a different window, so the title
-   arrives, then the rule, then the tagline, then the chips.
+   element remaps the same number through a different window, so the kicker
+   arrives, then the title, then the rule, then the chips.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .rail {
@@ -1982,7 +2006,7 @@ a { color: inherit; text-decoration: none; }
      The exit no longer staggers. It is 13-19px of scroll wide; four elements
      striking out across it would be four frames, which is not a beat, and a
      stagger there costs margin that the guarantee needs. Entry still staggers
-     kicker → title → rule/tagline → chips, inside a window that ends with the
+     kicker → title → rule → chips, inside a window that ends with the
      CHIPS — the thing the client is actually asking for — at full strength by
      coverage 0.58. Be honest about what that stagger is now: the whole entry
      is u 0.1603 → 0.1749, about 15px of scroll at a 900px viewport, so the four
@@ -2104,11 +2128,6 @@ a { color: inherit; text-decoration: none; }
                0 0 15px rgb(var(--shade) / .88),
                0 0 28px rgb(var(--shade) / .66);
 }
-.room[data-room="host"] .rail-tagline {
-  text-shadow: var(--shadow-text),
-               0 0  6px rgb(var(--shade) / .86),
-               0 0 16px rgb(var(--shade) / .72);
-}
 
 /* ── THE HOST STAND, MOVED TO THE TOP LEFT ───────────────────────────────
    The client, on this room: "I would also like for the Host Stand text to be
@@ -2211,6 +2230,35 @@ a { color: inherit; text-decoration: none; }
    re-derived off the plate that is actually shipping. Do not resurrect
    49.3 / 30.5 — they encode a traced edge on art that is being replaced. */
 
+/* ── THE BREAK ROOM AND THE HEAD CHEF FRAMES ──────────────────────────────
+   The client, on this room, in the same breath as asking for the taglines to
+   go: "When you remove the description, move 'The Break Room' down so that the
+   text doesn't cover the head chef pictures."
+
+   THIS OVERRIDES SPEC-v4's "Break Room is finished, do not touch its
+   composition" — quoted at the top of §09, and true right up until the person
+   who wrote it asked for this. What SPEC-v4 froze and what stays frozen: the
+   card is still bottom-left, still over the locker bank, still at the room's
+   own gutter, and this room still keeps the v3 z-order that stops the
+   `training-*` brackets coming up through the glyphs (§09). Only its height in
+   the frame moved.
+
+   WHY THIS ROOM AND NOT THE TABLE ABOVE. --rail-foot is the wrong tool here.
+   It anchors a plate line, and the overscan multiplies every plate distance
+   from the frame's centre by --overscan-k, so ONE foot percentage lands 24px
+   off the bottom edge at 768 tall and 17px off it at 1080 — a card that looks
+   composed on one monitor and looks like it is sliding off the next. The frames
+   are the constraint, not a line in the photograph, and what has to clear them
+   is measured in the card's own height. So the Break Room stays out of the
+   table and takes two rules in §17 instead — under the same
+   `(min-width: 901px) and (min-aspect-ratio: 8 / 7)` guard §17 already uses for
+   the Host Stand, because both are compositions the phone column replaces
+   wholesale. Read them there: "THE BREAK ROOM AND THE HEAD CHEF FRAMES".
+
+   The five frame openings are `CHEF_FRAMES` in rooms.js — x 33.53 / 40.80 /
+   48.07 / 55.34 / 62.61, all y 41.88, w 4.09, h 11.11, in percent of the
+   2400x1340 plate. They are photographed frames; they cannot move. */
+
 :is(.room[data-room="pass"],
     .room[data-room="dining"],
     .room[data-room="host"]) .rail {
@@ -2257,7 +2305,7 @@ a { color: inherit; text-decoration: none; }
 
 :is(.room[data-room="pass"],
     .room[data-room="dining"],
-    .room[data-room="host"]) :is(.rail-title, .rail-tagline) {
+    .room[data-room="host"]) .rail-title {
   max-inline-size: min(var(--rail-measure), 34ch);
 }
 :is(.room[data-room="pass"],
@@ -2335,7 +2383,8 @@ a { color: inherit; text-decoration: none; }
 /* .rail is pointer-events:none; only the things you can actually click get it
    back. `.rail > *` used to hand it to the title and the tagline as well, and
    elementFromPoint at the centre of two Host Stand hotspots returned
-   H2.rail-title and P.rail-tagline — they were unclickable with a mouse. */
+   H2.rail-title and the tagline paragraph that used to follow it — the two
+   hotspots under them were unclickable with a mouse. */
 .rail > * { pointer-events: none; }
 .rail-chips,
 .rail > :is(a, button, ul, ol) { pointer-events: auto; }
@@ -2361,8 +2410,10 @@ a { color: inherit; text-decoration: none; }
 .frz-pad {
   clip-path: inset(var(--cut-clip));
 }
-/* .scroll-cue is the seventh, and it is declared in §07 next to the rest of
-   the hero rather than here. */
+/* There used to be a seventh member of this list, .scroll-cue, declared in §07
+   next to the rest of the hero. The hero's link was removed on 2026-08-28 and
+   the hero's stage now holds no interactive element at all, so this list is the
+   whole of it. */
 
 /* THE ONE RAIL CHILD THIS FILE DID NOT AUTHOR. app.js hands chefwall.js the
    Break Room's rail as its `stripHost`, so the Head Chef strip is a real child
@@ -2392,17 +2443,31 @@ a { color: inherit; text-decoration: none; }
   max-width: 15ch;
 }
 
+/* ── THE RULE, RE-SET FOR A FOUR-ROW STACK (2026-08-28) ────────────────────
+   This used to be the divider BETWEEN two things — the title above it and the
+   tagline below — so a flat `gap: --sp-4` either side was right. With the
+   tagline gone it sits between a display-scale name and a row of chips, and a
+   symmetric gap made it read as belonging to neither: a stray hairline
+   floating in the middle of the card.
+
+   So it is re-hung as the title's UNDERLINE and the chips' separator, which is
+   what it now is. --sp-2 off the top and --sp-2 onto the bottom turns one 16px
+   gap either side into 8px above and 24px below — the 3:1 the rest of this
+   file uses to say "these two belong together, that one does not".
+
+   THE TWO MARGINS CANCEL, AND THAT IS DELIBERATE. §08a anchors this block by
+   its FOOT and grows it upward, so any net change in block height moves the
+   title up or down the photograph. -8 + 8 = 0 means the re-balance is purely
+   a redistribution: every room's title sits exactly where losing the tagline
+   put it, and the one room that needed more than that (the Break Room, whose
+   chef frames are what started this) is solved in §08a with a number of its
+   own rather than by quietly stretching this rule. */
 .rail-rule {
   inline-size: clamp(64px, 16cqi, 190px);
+  margin-block: calc(-1 * var(--sp-2)) var(--sp-2);
   opacity: var(--e3);
   transform: scaleX(var(--e3));
   transform-origin: 0 50%;
-}
-
-.rail-tagline {
-  opacity: var(--e3);
-  transform: translate3d(0, calc((1 - var(--e3)) * 16px), 0);
-  text-shadow: var(--shadow-text);
 }
 
 .rail-chips {
@@ -3906,18 +3971,32 @@ dialog#c3-menu[open],
      put the Pass's title through the middle of its own tablets at 390x844. */
   .rail {
     align-content: normal;
-    /* kicker · title · tagline · the tool list · anything a module appended.
-       The fifth row is not speculative: chefwall.js detaches its Head Chef
-       strip into the Break Room's rail at init (app.js passes it as
-       `stripHost`), so that room really does have a sixth child. Naming the
-       row keeps the list's `1fr` from eating it. */
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    /* kicker · title · the tool list · anything a module appended.
+       ⚠ THE COUNT IS LOAD-BEARING AND IT CHANGED ON 2026-08-28. This was five
+       tracks — kicker, title, TAGLINE, list, appended — and the tagline row was
+       removed from the markup that day. Left at five, the `minmax(0, 1fr)` that
+       makes the drawer scroll would have landed on the CHEF STRIP instead of on
+       the list: chefwall.js detaches its Head Chef strip into the Break Room's
+       rail at init (app.js passes it as `stripHost`), so that room really does
+       have a fourth child, and at 390x844 the list would have grown past the
+       bottom of the screen while an empty strip row took the leftover height.
+       Four children, four tracks. The last one is not speculative and naming it
+       is what keeps the list's `1fr` from eating it. */
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     gap: var(--sp-3);
     padding-block: calc(var(--chrome-top) + var(--rail-drop, 9svh))
                    max(var(--sp-2), env(safe-area-inset-bottom, 0px));
     padding-inline: max(var(--gut), env(safe-area-inset-left, 0px))
                     max(var(--gut), env(safe-area-inset-right, 0px));
   }
+
+  /* §17's Break Room drop (see "THE BREAK ROOM AND THE HEAD CHEF FRAMES"
+     below) is a wide-viewport composition and is guarded by
+     `(min-aspect-ratio: 8 / 7)`, so it never reaches this band — the phone
+     column's own padding-block below is what runs here, unmodified. The chef
+     frames are not on screen at this aspect either: --art-x .40 points the crop
+     at the locker wall and chefwall.js has detached its strip into the rail.
+     Nothing to clear, nothing to reset. */
 
   /* A room whose screens have moved into the band starts its type under it.
      screens.js sets this attribute on the .stage the moment it relocates, so
@@ -3958,7 +4037,7 @@ dialog#c3-menu[open],
   }
   :is(.room[data-room="pass"],
       .room[data-room="dining"],
-      .room[data-room="host"]) :is(.rail-title, .rail-tagline, .rail-chips) {
+      .room[data-room="host"]) :is(.rail-title, .rail-chips) {
     max-inline-size: none;
   }
 
@@ -4050,20 +4129,28 @@ dialog#c3-menu[open],
      at this size a single specular highlight in the plate lands on one glyph
      stem and takes that pixel to 3:1 on its own. A 2px shadow under the glyph
      costs nothing and removes the outlier. */
-  .rail-kicker, .rail-tagline {
+  .rail-kicker {
     text-shadow: var(--shadow-text), 0 1px 2px rgb(var(--shade) / .92);
+    font-size: var(--t--2);
   }
-  .rail-kicker { font-size: var(--t--2); }
   .rail-title  { font-size: var(--t-3); max-width: 16ch; }
-  .rail-tagline {
-    font-size: var(--t-0);
-    max-width: 40ch;
-    /* three lines is a paragraph on a phone; two is a caption */
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
+  /* The tagline's phone rules — a --t-0 caption clamped to two lines — went
+     with the element on 2026-08-28. What it was buying here was HEIGHT, and the
+     drawer takes that height automatically because it is the row carrying
+     `minmax(0, 1fr)`. Measured, the Pass at 390x844: the caption's track was
+     36.3px and its gap 8px, and the drawer went from 224.6px to 268.8px — 44px,
+     four fifths of one 54px tool row. At 820x1180: track 23.6 + gap 12, drawer
+     304.6 -> 340.1.
+
+     ⚠ THE BREAK ROOM IS THE EXCEPTION AND IT IS A PRE-EXISTING DEFECT, NOT ONE
+     THIS CHANGE INTRODUCED. chefwall.js's detached Head Chef strip is this
+     room's fourth child and it asks for ~258px at 390x844 out of a ~330px
+     content box, so the `minmax(0, 1fr)` drawer collapses and six tools sit in
+     a scroller a few pixels tall. Measured at 390x844: 9px before this change,
+     10px after; at 820x1180, 9px before and 47px after. So the tagline's
+     removal made it very slightly better and nothing here made it worse — but
+     it is still wrong, and fixing it means capping the STRIP (a chefwall.js
+     component this file is not allowed to reach inside), not the drawer. */
   .rail-rule { display: none; }
 
   /* ── THE DRAWER ──────────────────────────────────────────────────────────
@@ -4167,7 +4254,11 @@ dialog#c3-menu[open],
      none of that is its business any more. */
   .room[data-room="freezer"] .rail {
     align-content: end;
-    grid-template-rows: auto auto auto auto auto;
+    /* four tracks, matching the four children the rail now builds — see the
+       ⚠ note on the shared `grid-template-rows` above. Every track is `auto`
+       here because this room inverts the column and lets the chip box size
+       itself against `max-block-size` below rather than taking the leftover. */
+    grid-template-rows: auto auto auto auto;
   }
   .room[data-room="freezer"] .rail-chips {
     block-size: auto;
@@ -4303,10 +4394,81 @@ dialog#c3-menu[open],
   :root { --band-h: min(50svh, 430px); }
   .rail { --rail-drop: 7svh; gap: var(--sp-2); }
   .rail-title { font-size: var(--t-3); max-width: 14ch; }
-  .rail-tagline { -webkit-line-clamp: 2; font-size: var(--t--1); }
   .rail-chips .chip { min-block-size: 54px; }
-  /* the tagline is the first thing to go when a room has a long tool list */
-  .room[data-room="freezer"] .rail-tagline { display: none; }
+  /* The Walk-In used to drop its tagline here — fourteen chips plus a caption
+     did not fit a 844px phone. Every room has lost its tagline now, so the
+     special case has nothing left to remove and is gone. */
+}
+
+/* ═══ THE BREAK ROOM AND THE HEAD CHEF FRAMES ═════════════════════════════
+   The client: "When you remove the description, move 'The Break Room' down so
+   that the text doesn't cover the head chef pictures." §08a carries the rest of
+   the argument, including why this room is not in §08a's --rail-foot table and
+   what SPEC-v4 froze that is still frozen.
+
+   THE OBJECT. Five picture-frame openings, `CHEF_FRAMES` in rooms.js: plate-x
+   33.53 / 40.80 / 48.07 / 55.34 / 62.61, all plate-y 41.88, 4.09 x 11.11 — so
+   the row's bottom edge is plate-y 52.99 and its left edge is plate-x 33.53.
+   They are photographed frames. Only the type can move.
+
+   WHERE IT STOOD. Measured worst case over the room's whole live scroll window
+   (title block = kicker + title + rule; the plate dollies to --plate-scale 1.068
+   and drifts, so every stop from arrival to the cut is in the number), the type
+   block INTERSECTED the frames before this pass: 5,604px2 of frame 0 and
+   4,870px2 of frame 1 at 1512x751 — the client's own window, and the overlap in
+   his screenshot; 2,532px2 of frames 0 and 1 at 1366x768; 1,521px2 at 1600x900;
+   1,486px2 of three frames at 1024x768; and 47.3px of clearance at 1920x1080.
+
+   WHAT THE TWO RULES DO, AND WHY THERE ARE TWO.
+   1. THE DROP is bottom padding, not a plate line. --rail-foot would have been
+      the obvious tool and it is the wrong one here (the argument is in §08a).
+      `clamp(--sp-5, 4.2svh, --sp-7)` is 24px at the floor, 32px at 768 tall,
+      44px from 1048 tall up — it gives back most of the base 7svh where the
+      frame is short and the card has nowhere to go, and stops giving at 44px so
+      a 1440-tall monitor does not end up with its chips on the bottom edge.
+   2. THE COMPRESSION only exists below 860px tall, which is the SAME threshold
+      §17's Host Stand rule already uses ("above ~860px tall the frame has the
+      room"), for the same underlying reason: the card's height is set by its
+      chips and its display title, neither of which shrinks with the viewport,
+      while the space under the frames does. One step down the scale on the
+      title takes ~25px off the block AND ~28% off its width, which is what
+      clears frame 0 HORIZONTALLY at 1512x751 — where the drop alone still left
+      the title's right edge 4.9px inside the frame's left edge.
+
+   MEASURED AFTER, worst separation over the whole runway, nearest frame:
+     1024x768   50.5px      1366x768   78.1px      1440x900   52.0px
+     1512x751  108.9px      1512x982   85.4px      1600x900   52.0px
+     1920x1080 126.6px      2560x1440 288.3px
+   Zero intersection at every one, at every scroll position sampled. The 860px
+   step opens no hole: 1600x861..880 (uncompressed) measures 43.1px and
+   1600x860 (compressed) 132.9px, so crossing the boundary can only make the
+   gap bigger. Also checked: 960x800 65.2px, 1180x820 67.5px, 1280x800 56.7px.
+
+   AND THE GROUND UNDER THE NEW POSITION WAS RE-MEASURED, because §08's note on
+   this room's kicker — brass letters that once read 2.19:1 at their median on a
+   tan leather sofa arm — is about exactly the corner the type has just moved
+   further into. It moved into the dark half of it: worst pixel under a glyph,
+   glyph fill erased so the wash, the plate and the type's own text-shadow are
+   all still in the frame, animations and transitions frozen —
+     kicker  13.64 / 13.61 / 13.32 / 13.62 / 13.90 : 1
+     title   15.78 / 16.73 / 16.45 / 14.97 / 16.31 : 1
+   at 1024x768, 1366x768, 1512x751, 1600x900, 1920x1080 respectively. The card
+   dropped onto the navy wall and the locker faces, which are the darkest large
+   field in this photograph; the sofa arm is behind the CHIPS, which carry their
+   own glass.
+
+   ⚠ BOTH RULES ARE GUARDED BY `(min-aspect-ratio: 8 / 7)`, which is the exact
+   complement of §17's takeover condition. The phone column is a different
+   composition — its own padding-block, its own crop (--art-x .40 points at the
+   locker wall, and the frames are not in the shot) — and neither of these
+   belongs in it. */
+@media (min-width: 901px) and (min-aspect-ratio: 8 / 7) {
+  .room[data-room="breakroom"] .rail {
+    padding-block-end: clamp(var(--sp-5), 4.2svh, var(--sp-7));
+  }
+}
+@media (min-width: 901px) and (min-aspect-ratio: 8 / 7) and (max-height: 860px) {
+  .room[data-room="breakroom"] .rail-title { font-size: var(--t-4); }
 }
 
 /* ═══ THE HOST STAND IN A CRAMPED WIDE FRAME ══════════════════════════════
@@ -4329,9 +4491,21 @@ dialog#c3-menu[open],
    box, neither is true.
 
    So the card is COMPRESSED rather than moved: one step down the type scale on
-   the title and the tagline, and the rhythm pulled in. Nothing is dropped, the
-   chips keep their 44px minimum block size, and the saving (~69px) is more
-   than the ~40px the worst case in this box was over by. Everything outside
+   the title, and the rhythm pulled in. Nothing is dropped, the chips keep
+   their 44px minimum block size, and the saving is more than the ~40px the
+   worst case in this box was over by.
+
+   ── 2026-08-28 · THIS BOX GOT EASIER, AND NOT ONE NUMBER HERE MOVED ────────
+   The rule used to step the TAGLINE down as well; that line is gone with the
+   element. What the tagline's removal bought is HEAD room, not foot room, and
+   that is exactly the right way round for a foot-anchored card: measured at
+   1024x768, the block's foot is unchanged at 400.9px — 28.5px above the ticket
+   spike's plate-y 55.5% line, the clearance this composition was signed off
+   with — while its TOP dropped from 162.3px to 218.7px. Same at 1100x800
+   (foot 417.6, clearance 29.6) and at 1140x860 (foot 448.9, clearance 31.9).
+   56px more air under the top bar means `safe end` has that much further to go
+   before it fires, so the failure this whole box exists to catch is further
+   away than when it was written. Everything outside
    the box is untouched — this is the only rule in the file that reads the room
    name and the viewport box together, and it exists because the ART puts a
    television and a podium the exact distance apart that it does. */
@@ -4339,7 +4513,6 @@ dialog#c3-menu[open],
    and (max-width: 1140px) and (max-height: 860px) {
   .room[data-room="host"] .rail        { gap: var(--sp-2); }
   .room[data-room="host"] .rail-title  { font-size: var(--t-4); }
-  .room[data-room="host"] .rail-tagline{ font-size: var(--t-0); }
   .room[data-room="host"] .rail-chips  { gap: var(--sp-1); }
 }
 
@@ -4423,8 +4596,7 @@ dialog#c3-menu[open],
   .rail > .ccc-chefwall,
   .hotspots > [data-screen],
   .hotspots > [data-chefwall-host],
-  .frz-pad,
-  .scroll-cue { clip-path: none !important; }
+  .frz-pad { clip-path: none !important; }
 
   /* the rail arrives, it does not perform */
   .rail::before { opacity: 1 !important; }
@@ -4435,8 +4607,6 @@ dialog#c3-menu[open],
   .hotspot::after { animation: none !important; opacity: .5 !important; transform: none !important; }
   .hotspot::before { opacity: .85 !important; }
   .hotspot-dot, .hotspot > .dot { opacity: 1 !important; }
-
-  .scroll-cue::before { animation: none !important; transform: scaleX(1) !important; }
 
   /* the wrong-code shake is the one animation here that carries meaning, so
      it is replaced rather than removed: the alert colour still lands. */
@@ -4494,13 +4664,13 @@ dialog#c3-menu[open],
 
 @media print {
   #ticket-rail, #c3-button, #c3-menu, .hotspots, .plate-glow, .plate-vig,
-  .scroll-cue, .keypad-scrim { display: none !important; }
+  .keypad-scrim { display: none !important; }
   .room, .hero { block-size: auto; margin: 0; page-break-inside: avoid; }
   .stage { position: static; block-size: auto; opacity: 1; overflow: visible; }
   .plate-wrap { position: static; inset: 0; transform: none; filter: none; }
   .rail { position: static; padding: var(--sp-5) 0; }
   body { background: #fff; color: #000; }
-  .rail-title, .rail-tagline, .rail-kicker { color: #000; text-shadow: none; }
+  .rail-title, .rail-kicker { color: #000; text-shadow: none; }
 
   /* the footer index is the point of a printed page: every tool, every URL */
   #site-footer { background: #fff; color: #000; padding: 0; }

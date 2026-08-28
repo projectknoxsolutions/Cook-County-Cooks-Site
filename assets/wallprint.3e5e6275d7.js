@@ -16,8 +16,8 @@
  *
  * rooms.js owns where it hangs:
  *
- *     { slug:'commission-payouts', kind:'print', x:11.5, y:24.0,
- *       w:15.5, h:22.0, label:'Commission Payouts 2026', rotate:-1.4 }
+ *     { slug:'commission-payouts', kind:'print', x:9.0, y:25.0,
+ *       w:12.0, h:17.0, label:'Commission Payouts 2026', rotate:-1.4 }
  *
  * app.js dispatches `kind:'print'` here and nowhere else. Everything below is
  * composed from that box, the engine's published numbers, and the table in §2.
@@ -50,29 +50,46 @@
  * ── WHY THE SHEET IS LANDSCAPE ──────────────────────────────────────────────
  * Because the measured box says so, and the box is right. .hotspots is sized to
  * the plate's COVER box (theme.css §06), whose aspect is the plate's own
- * 2400x1340 — so 15.5% of width by 22.0% of height is 372 x 294.8 PLATE PIXELS,
- * i.e. 1.262:1. Landscape US Letter is 11/8.5 = 1.294:1. That is a 2.5% match,
+ * 2400x1340 — so 12.0% of width by 17.0% of height is 288 x 227.8 PLATE PIXELS,
+ * i.e. 1.264:1. Landscape US Letter is 11/8.5 = 1.294:1. That is a 2.3% match,
  * not a coincidence: the page being printed is a wide grid of six payout
  * tables, and landscape is how anybody would actually run it off. The sheet
  * therefore fills its box rather than being letterboxed inside it.
  *
- * ── WHAT IS BEHIND IT, MEASURED ─────────────────────────────────────────────
+ * ── WHAT IS BEHIND IT, MEASURED — AND WHY THE BOX MOVED ─────────────────────
  * plates/office.4e4c6d7172.webp has a wall CORNER — a dead-vertical seam at plate-x
- * 22.21% (traced by column-differencing the plate at fourteen heights; it moves
- * 0.17% over the full frame). The hotspot box runs 11.5 → 27.0, so 69% of the
- * sheet is on the left return wall and 31% on the back wall.
+ * 22.21% (re-traced for this pass by column-differencing the plate at fourteen
+ * heights: 21.92 to 22.25 over the nine bands that are wall, mean 22.19, i.e.
+ * it moves 0.33% over the height of the wall and the published figure holds).
  *
- * That was checked before drawing anything, and it does NOT need the geometry
- * moved. At the plate's real exposure the seam is a soft tonal step of about
- * 5 luminance levels over ~40px, not an architectural line — there is no
- * moulding, no highlight and no hard edge for a sheet to visibly bridge. The
- * region is otherwise empty wall (std dev 6.8/8.5/11.1 per channel across the
- * whole box; mean rgb 21,21,38). What the seam DOES change is the light: over
- * the left wall the field falls off toward the corner (col means 20.0 → 14.6),
- * which is the corner's own ambient occlusion, not a directional fall. A sheet
- * standing in front of the wall is not in the corner and does not inherit it —
- * so the paper's own sheen is lit from the pendant at plate-x ~50%, i.e. up and
- * to the RIGHT, and its contact shadow is thrown down and to the LEFT. Both are
+ * The first cut of this sheet ran 11.5 → 27.0, so 69% of it sat on the left
+ * return wall and 31% on the lit back wall, and the client read exactly that:
+ *
+ *   "I also want to reduce the size of the Commission Report on the Back
+ *    Office Page because it looks like it's taped to both walls on the screen."
+ *
+ * He was right. The seam is a soft tonal step rather than an architectural
+ * line, which is why it was signed off the first time — but a sheet of paper
+ * spanning it still reads as a page bent around a corner, because the light on
+ * one side of it does not match the light on the other. rooms.js now runs the
+ * box 9.0 → 21.0, ENTIRELY ON THE RETURN WALL, with 1.21% of plate width
+ * between the sheet's box and the seam. MEASURED against the shipped plate,
+ * the widest thing this module paints:
+ *
+ *     paper's own right edge, with the plane's -1.4deg  ...  plate-x 21.11
+ *     the top-right tape tab, which overhangs it by 3.6cqw   plate-x 21.32
+ *     the contact shadow, thrown down and LEFT                (further left)
+ *
+ * so the nearest painted pixel to the corner is 0.89% of the plate away from
+ * it, at every viewport and at every point of the push-in (measured at 2560,
+ * 1920, 1600, 1440, 1366 and 1024: max 21.114 for the box at all six).
+ *
+ * The wall the sheet now hangs on is FLATTER than the one it used to span:
+ * mean rgb(18.9 16.6 31.8), std dev 2.9/2.5/2.2 per channel over the new box
+ * against 6.8/8.5/11.1 over the old one — the old figure was carrying the
+ * corner's own ambient occlusion, and this box has none of it. The paper's
+ * sheen is still lit from the pendant at plate-x ~50%, i.e. up and to the
+ * RIGHT, and its contact shadow is still thrown down and to the LEFT. Both are
  * derived from the plate, neither is guessed.
  *
  * ── WHAT MAKES IT READ AS PAPER AND NOT AS A PANEL ──────────────────────────
@@ -143,21 +160,18 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * PAPER is the sheet's lit colour: a warm off-white, three points down from
  * white on red and fourteen on blue, so it carries the room's tungsten without
- * going cream. INK is PAPER x INK_REFLECTANCE, which is labels.js §3's model
- * and its number — a printed mark is not a colour, it is the same paper
- * returning about a quarter of the light it was going to return anyway.
+ * going cream. The MODEL for the ink is PAPER x INK_REFLECTANCE, which is
+ * labels.js §3's model and its number — a printed mark is not a colour, it is
+ * the same paper returning about a quarter of the light it was going to return
+ * anyway. That model gives rgb(61 60 58), and it is not what ships; the note
+ * on INK_CSS below says why, and it is the same argument §1b makes for the
+ * walk-in's stock.
  *
- * MEASURED, at the lit end (see the report):
- *   body / title / section head  rgb(61 60 58)   9.34:1
- *   commission green             rgb(13 66 41)   9.74:1
- *   GP / kicker / stamp / footer rgb(66 64 60)    8.77:1
- * All three clear the 7:1 floor this build is held to, with margin — and the
- * margin is spent, not wasted. MEASURED OFF THE RENDERED PAGE at 2560x1440,
- * darkest painted pixel against the paper beside it: 8.13 / 7.15 / 7.05 with
- * the first pair of values, i.e. the antialiasing and §5's 0.035cqw blur cost
- * roughly 1.2 points at 10px type. The two secondary inks were darkened by
- * that much so the SHIPPED PIXELS clear 7:1, not just the stylesheet.
- * The hairlines are rules, not type, and are not held to this.
+ * The floor this build is held to is 7:1, measured on the PIXELS THAT SHIP and
+ * not in the stylesheet — and measured as the FLOOR of several frames rather
+ * than as one reading, because the sheet is rasterised under a moving scale.
+ * The as-shipped table is at the end of this section.
+ * The hairlines are rules, not type, and are not held to it.
  * ────────────────────────────────────────────────────────────────────────── */
 
 const PAPER = [240, 236, 226];
@@ -168,13 +182,76 @@ const inkFrom = (paper) =>
   paper.map((v) => Math.round(Math.max(0, Math.min(255, v * INK_REFLECTANCE))));
 
 const PAPER_CSS = rgb(PAPER);
-const INK_CSS   = rgb(inkFrom(PAPER));
+
+/* ⚠ THE MODEL IS NOT THE SHIPPED VALUE, and §1's note above says why. What
+   inkFrom(PAPER) gives is rgb(61 60 58), and that is the DERIVATION — a printed
+   mark returning a quarter of the light the paper returns. What ships is
+   rgb(31 31 29), which is the same mark RASTERISED at 7.8 to 8.6 CSS px on a
+   surface that is then scaled 1.12 to 1.22 by .hotspots' own transform. This is
+   §1b's argument, run for the second time and on the other sheet, and it only
+   became necessary when rooms.js moved this one off the wall corner and took
+   41% of its area with it.
+
+   MEASURED, the FLOOR of three lit frames (--p 0.45 / 0.50 / 0.55) at each of
+   1024x768, 1366x768, 1440x900, 1920x1080 and 2560x1440, darkest painted pixel
+   against the lightest paper pixel beside it, with every other element on the
+   sheet set to visibility:hidden so no neighbouring row can bleed into the crop
+   through the plane's 1.4 degrees:
+
+       body ink at rgb(61 60 58) ..... 4.50 : 1   the model
+       body ink at rgb(42 42 40) ..... 5.48 : 1
+       body ink at rgb(31 31 29) ..... 7.68 : 1   with §5's weights and stroke
+
+   Taking the FLOOR of several frames rather than one reading is the change of
+   method that matters here, and it is forced by the same subpixel phase §1b
+   documents: the identical string measured 5.46:1 and 9.59:1 two frames apart
+   at 1920x1080 with nothing changed but where the sheet landed on the pixel
+   grid. .hotspots is scaled by --overscan-k AND by --plate-scale, which is
+   still moving while the room dollies, so a single frame proves nothing.
+
+   ── AS SHIPPED ────────────────────────────────────────────────────────────
+   The FLOOR, per class, over every element of that class at three lit frames
+   (--p 0.45 / 0.47 / 0.53 — the window in which --wp-exp reaches 1 and the
+   Back Office still owns the screen) at each of five widths:
+
+                    2560   1920   1440   1366   1024      worst
+       title       14.53  14.52  13.70  13.00  13.26      13.00
+       kicker      11.10  11.61      —      —      —      11.10
+       stamp       12.10  12.44  11.36  10.76      —      10.76
+       section     11.24   9.81  11.87   9.18  10.24       9.18
+       column head  7.86   9.48  11.00  11.31      —       7.86
+       product     10.67  10.64  12.03  10.45  11.44      10.45
+       GP figure    7.68   8.41      —      —      —       7.68
+       payout       8.69   9.98  10.57   9.09   9.79       8.69
+       footer      11.17  16.43  11.11  14.95   8.84       8.84
+
+   ⚠ WITH ARCHIVO ACTUALLY LOADED. The face comes from Google Fonts and is the
+   one thing on this page that is not in the repository; measured against the
+   system fallback the same table floors at 7.83, and the difference is not
+   noise — Archivo is a VARIABLE face on a wdth axis, so every font-stretch on
+   this sheet is a real instance rather than a no-op, and a narrower instance
+   is a thinner stem. Measure with the font, or you are measuring something
+   else.
+
+   The gaps are classes that are not on the page at that width rather than
+   classes that failed: the GP column is off the sheet below 216px of container
+   and the eyebrow below 180px (§5's ladder), and the stamp is off it inside
+   the 4:3 crop band (§5's media block). Nothing that IS printed measures under
+   7.68:1 at any width at any of the three frames. Before this pass, by the
+   same method, the same sheet floored at 3.37:1.
+
+   The hairlines are rules, not type, and are not held to this. */
+const INK_CSS   = rgb([31, 31, 29]);
 /* The commission column. The live page prints the rep's own number in green and
    the store's GP in black; keeping that distinction is the entire point of the
    sheet, so the green is kept and darkened until it clears 7:1 on this paper. */
-const INK_PAY   = 'rgb(13 66 41)';
-/* Secondary: kicker, date stamp, column heads, footer, the GP column. 8.77:1. */
-const INK_SOFT  = 'rgb(66 64 60)';
+const INK_PAY   = 'rgb(4 34 21)';
+/* Secondary: kicker, date stamp, column heads, the GP column. It is only a
+   shade off the body ink now, and that is deliberate — at this size the
+   hierarchy is carried by SIZE and WIDTH, exactly as §1b argues for the cold
+   sheet, because a secondary ink light enough to read as secondary is an ink
+   that cannot reach the floor. */
+const INK_SOFT  = 'rgb(38 38 35)';
 
 
 /* ─── 1b · THE SECOND STOCK: THE SHEET IN THE WALK-IN ────────────────────────
@@ -280,7 +357,7 @@ const COLD_INK_SOFT  = 'rgb(44 46 50)';
  *
  * It is a SUMMARY of that page, not a transcription: the source prints 41 rows
  * across six product tables plus the multi-play and accessory blocks, and this
- * sheet is 372 x 295 plate pixels. What is kept is the top of every table — the
+ * sheet is 288 x 228 plate pixels. What is kept is the top of every table — the
  * rows a rep actually quotes — in the source's own order and with the source's
  * own two columns, GP then commission. What is dropped is the tail of each
  * table (IE / IE Plus / NOW / prepaid on internet; tablets, watches and BAPIS
@@ -297,16 +374,36 @@ const SHEET_CARD = {
   kicker: 'Cook County Cooks · C³',
   title:  '2026 Commission Payouts',
   stamp:  'Updated Sept 1, 2026',
-  /* Two columns of tables, laid out left then right. `opt` marks a block that
-     is dropped on a narrow stage so the rows that survive can be set larger —
-     see §5's container queries. */
+  /* Two columns of tables, laid out left then right.
+
+     THREE THINGS CAN BE SHED, and they are shed from the BOTTOM of each table
+     in the source's own order, so what survives is always the top of it — the
+     rows a rep actually quotes:
+
+       `opt`  on a BLOCK   the whole table goes  (Xfinity Mobile, Multi-Play)
+       'opt'  on a ROW     the last row of a table goes   (300 Mbps, NOW TV)
+       'opt2' on a ROW     the second-to-last goes too    (500 Mbps, TV Core)
+       'opt3' on a ROW     the third-to-last goes too     (Gig, Sports & News)
+
+     Every one of them is driven by a container query in §5, and every query
+     spends what it frees on TYPE SIZE. See the ladder at the foot of §5 for
+     what comes off at which width and why the trade is the right way round.
+
+     ⚠ 'opt3' IS ALSO A CONTRAST DECISION AND NOT ONLY A SPACE ONE, and that is
+     the one place the two arguments meet. "Sports & News" is the longest
+     product name on the sheet by 20%, and while it is on the page it caps
+     --wp-k at 1.93 (see §5's ceiling note) — which at 165px of container is
+     7.96px of body type, and 7.96px of body type floors at 5.15:1. Taking that
+     row off makes "TV Premium" the longest name, lifts the cap to 2.24, and is
+     what pays for the 8.7px that clears the floor. Two rows of two tables set
+     legibly beats three rows of two tables set grey. */
   columns: [
     [
       { head: 'Internet', rows: [
         ['2 Gig',        '$200', '$15'],
         ['1.2 Gig',      '$200', '$15'],
-        ['Gig',          '$180', '$11'],
-        ['500 Mbps',     '$155',  '$6'],
+        ['Gig',          '$180', '$11', 'opt3'],
+        ['500 Mbps',     '$155',  '$6', 'opt2'],
         ['300 Mbps',     '$110',  '$5', 'opt']
       ] },
       { head: 'Xfinity Mobile', opt: true, rows: [
@@ -320,15 +417,22 @@ const SHEET_CARD = {
       { head: 'TV & Entertainment', rows: [
         ['TV Premium',   '$145', '$15'],
         ['TV Plus',      '$125', '$11'],
-        ['Sports & News','$110',  '$7'],
-        ['TV Core',       '$75',  '$6'],
+        ['Sports & News','$110',  '$7', 'opt3'],
+        ['TV Core',       '$75',  '$6', 'opt2'],
         ['NOW TV',        '$25',  '$3', 'opt']
       ] },
       { head: 'Multi-Play Bonus', opt: true, rows: [
         ['Double Play',   '$30', '+$4.50'],
         ['Triple Play',   '$50', '+$7.50'],
         ['Quad Play',     '$70', '+$10.50'],
-        ['Accessories',      '—', '20%']
+        /* ⚠ THE EMPTY GP CELL IS DELIBERATE. Accessories pay a percentage of
+           the sale and have no fixed gross profit, so the source prints no
+           figure for them and neither does this. It was an em dash until the
+           contrast pass: an em dash is a bar 0.06em tall, it never reaches full
+           ink coverage at 8.4px, and it floored at 5.29:1 — the only mark on
+           the page under this build's 7:1. A mark that carries no reading and
+           cannot be printed legibly is better not printed. */
+        ['Accessories',       '', '20%']
       ] }
     ]
   ],
@@ -452,14 +556,27 @@ function boxVars(x, y, w, h) {
  *     --wp-hold = clamp(0, (p - 0.55) * 4, 1)           the departing room
  *     --wp-lit  = clamp(0, 0.52*arr + 0.48*bloom³ + hold, 1)
  *
- * and the exposure is then 0.30 + 0.70 x that. 0.30 is not arbitrary: the
- * office's dark plate is 0.373x the luminance of its lit twin over this exact
- * box (measured, mean L 8.16 vs 21.88), and §06's grade sits at 0.68 brightness
- * at the dark end — so the wall this paper hangs on arrives at about a quarter
- * of its service brightness, and paper at 0.30 keeps the same paper-to-wall
- * ratio in the dark room that it has in the lit one (~14:1 against ~11:1).
- * Sheet and wall come up together instead of the sheet glaring out of a room
- * that has not been lit yet.
+ * and the exposure is then 0.30 + 0.70 x that. 0.30 is not arbitrary: it is
+ * solved from the ratio between the office's dark plate and its lit twin OVER
+ * THE SHEET'S OWN BOX, and that box has moved — so the ratio was re-measured
+ * for this pass rather than assumed:
+ *
+ *     old box, plate-x 11.5-27.0 / y 24-46 ... mean L8 8.15 vs 22.23 ... 0.366
+ *     new box, plate-x  9.0-21.0 / y 25-42 ... mean L8 6.56 vs 18.17 ... 0.361
+ *
+ * i.e. the return wall falls off at very nearly the same rate as the pair of
+ * walls the old box spanned, which is what you would expect of a room lit by
+ * one pendant. Running §5's own f^2.2 / r = constant through the new number
+ * gives f = 0.295 against the 0.300 that is here, so THE FLOOR STANDS TO TWO
+ * DECIMALS and is left alone. §06's grade sits at 0.68 brightness at the dark
+ * end, so the wall this paper hangs on arrives at about a quarter of its
+ * service brightness, and paper at 0.30 keeps the same paper-to-wall ratio in
+ * the dark room that it has in the lit one. Sheet and wall come up together
+ * instead of the sheet glaring out of a room that has not been lit yet.
+ *
+ * (The published relative-luminance ratio over the same two boxes is 0.275 and
+ * 0.314; the L8 figures above are the ones the original derivation used and
+ * are quoted so the two are comparable.)
  *
  * ⚠ THREE THINGS THAT LOOK LIKE TIDYING AND ARE NOT.
  *
@@ -517,6 +634,11 @@ function boxVars(x, y, w, h) {
  *   --wp-k                  the type scale. 1 on a wide stage; raised by the
  *                           container queries at the foot of this sheet.
  *   --wp-paper/--wp-ink/--wp-pay/--wp-soft   the four colours
+ *   --wp-gp-w / --wp-pay-w / --wp-hd-w       the two money columns and the
+ *                           head over them, in em of the ROW's font — see the
+ *                           @property note at the top of the stylesheet. They
+ *                           are lengths, not numbers, and they are registered
+ *                           so that "2.34em" resolves once, on the paper.
  *   --wp-lit / --wp-exp     the room's lights and this sheet's exposure (§4)
  *   --ccc-print-font        face override (defaults to --ccc-font-ui)
  *   --ccc-print-show        set to 0 from a media query to take the sheet off
@@ -538,6 +660,38 @@ const CSS = `
 @property --wp-hold { syntax: "<number>"; inherits: false; initial-value: 0; }
 @property --wp-lit  { syntax: "<number>"; inherits: true;  initial-value: 1; }
 @property --wp-exp  { syntax: "<number>"; inherits: true;  initial-value: 1; }
+
+/* ── THE TWO MONEY COLUMNS, IN em OF THE ROW AND NOT IN cqw ────────────────
+   REGISTERED AS <length>, and that is the whole point. A registered property
+   COMPUTES AT ITS OWN DECLARATION, so "2.34em" written on .ccc-wp__paper is
+   resolved there — against the paper's own font-size, which is the row font —
+   and inherits down as an absolute pixel length. Both the figure and the
+   column head it sits under therefore get the SAME box, even though the head
+   sets at 0.68 of the row's size and an unregistered "2.34em" would resolve
+   against each element's own font and hand them two different widths.
+
+   THE BUG THIS KILLS. These two were 9.9cqw / 6.6cqw, re-solved by hand to
+   7.2cqw in one breakpoint and left alone in the others — and cqw does not
+   know about --wp-k. The moment the type scale moved, "$200" was 19px of
+   figure in a 16.7px box: no clip on these (they are flex:0 0 auto with
+   text-align:end and no overflow rule), so the digits simply painted LEFT,
+   out of their box and into the product name beside them. MEASURED on the
+   shipped build at 1920, 1600, 1440 and 1366: eight overflowing cells at
+   every one of them, worst at "Sports & News $110" where the two strings met.
+   In em they track --wp-k for nothing, at every step, for ever.
+
+   THE NUMBERS, measured off the rendered page as multiples of the row's own
+   font-size (widest string in each column, plus the head that sits over it):
+       "$200"     2.222em      "GP"      1.112em   ->  --wp-gp-w  2.34em
+       "+$10.50"  3.620em      "COMM"    2.390em   ->  --wp-pay-w 3.76em
+   and once the Multi-Play table is off the sheet the widest payout is "$23"
+   at 1.674em, so the figure box comes in to 1.85em while the HEAD's box stays
+   at 2.50em — the head is justify-content:flex-end, so its right edge stays
+   flush with the figures whatever its width, and "COMM" is the one string on
+   the sheet that is wider than the numbers it heads. */
+@property --wp-gp-w  { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --wp-pay-w { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --wp-hd-w  { syntax: "<length>"; inherits: true; initial-value: 0px; }
 
 /* ── THE BUTTON ────────────────────────────────────────────────────────────
    It is a theme.css §09 .hotspot and stays one — that is what buys the
@@ -681,6 +835,11 @@ const CSS = `
      with a 7.1px name inside it. Every size below is relative to this one. */
   font-size: calc(2.5cqw * var(--wp-k));
   line-height: 1.70;
+  /* the two money columns, in em of THIS font-size — see the @property note */
+  --wp-gp-w:  2.34em;
+  --wp-pay-w: 3.76em;
+  /* "COMM" at 86% width and 0.1em of tracking is 3.25em of the ROW's font. */
+  --wp-hd-w:  3.76em;
 
   display: flex;
   flex-direction: column;
@@ -699,7 +858,36 @@ const CSS = `
      sharp and the photograph under it is not. A third of a pixel of blur at the
      size this actually renders costs nothing legible and removes the last tell. */
   filter: blur(0.022cqw);
+
+  /* ── DOT GAIN ─────────────────────────────────────────────────────────────
+     Toner spreads. A 0.18px stroke in the glyph's own colour is that, and it is
+     the last term in §1's contrast argument rather than a decoration: at 8.4px
+     a 700-weight stem covers about four fifths of the pixels it crosses, and
+     four fifths of the way to the ink is not the ink. The stroke pushes the
+     centre of each stem to full coverage without changing the letterform's
+     colour, its width or its weight — the same thing a laser printer does to a
+     6pt rule, and the reason a printed page reads darker than its PDF.
+
+     MEASURED, the floor of three lit frames at 2560x1440, 1920x1080 and
+     1366x768, every class on the sheet:
+         no stroke ....... 6.43 : 1        0.10px ...... 6.43 : 1
+         0.18px .......... 7.30 : 1        0.22px ...... 7.89 : 1
+     0.22 and not 0.40, because past about a third of a pixel the counters in
+     "8", "e" and "$" start to close at 6px and the page goes muddy — which is
+     the same failure -webkit-font-smoothing caused from the other direction,
+     and is why that one is still not here.
+
+     ⚠ -webkit-text-stroke-COLOR is left alone deliberately: it defaults to
+     currentColor, so the green payout column strokes green and the secondary
+     ink strokes secondary. Setting it would flatten all four inks to one.
+
+     ⚠ AND IT IS SCOPED TO THE LANDSCAPE SHEET, below, not declared here. The
+     walk-in's note is a different stock at a different size with its own
+     measured ink (§1b), it already clears the floor, and it is not this
+     pass's to move. Declaring the stroke on .ccc-wp__paper would have changed
+     every glyph on a sheet nobody asked about. */
 }
+.ccc-wp--card .ccc-wp__paper { -webkit-text-stroke: 0.22px; }
 
 /* the paper bending away at the curl */
 .ccc-wp__paper::after {
@@ -767,8 +955,12 @@ const CSS = `
 .ccc-wp__kicker,
 .ccc-wp__stamp {
   color: var(--wp-soft, ${INK_SOFT});
-  font-size: calc(1.85cqw * var(--wp-k));
-  font-weight: 600;
+  font-size: calc(2.0cqw * var(--wp-k));
+  /* 700, and every 600 on this sheet went the same way in the same pass — see
+     the contrast note at the foot of §1. On a page this size weight is the
+     term that decides whether a stem ever reaches full ink coverage, and every
+     class that measured under 7:1 was a 600. */
+  font-weight: 700;
   font-stretch: 82%;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -861,22 +1053,41 @@ const CSS = `
   text-transform: uppercase;
 }
 .ccc-wp__colhead {
-  color: var(--wp-soft, ${INK_SOFT});
-  font-size: calc(1.7cqw * var(--wp-k));
-  font-weight: 600;
-  font-stretch: 78%;
+  /* THE FULL INK, not the secondary one, and it is the second place that rule
+     is broken (the footer in §5 is the first). "GP" and "COMM" are the smallest
+     type on the sheet — 6.3px at 165px of container — and at the secondary ink
+     they floored at 3.76:1, which was not close. Size, weight and colour all
+     moved; none of the three did it alone. */
+  color: var(--wp-ink, ${INK_CSS});
+  font-size: calc(2.1cqw * var(--wp-k));
+  font-weight: 700;
+  /* 86% and not 78%, and the eight points are the LAST of the four terms in
+     §1's contrast argument. Archivo is a variable face on a wdth axis, so a
+     narrower instance is a narrower STEM as well as a narrower letter, and at
+     6.7px that is the difference between a stem that reaches full ink coverage
+     and one that does not: MEASURED, "GP" at 2560x1440 floored at 7.04:1 at
+     78% and 8.02:1 at 86%, with nothing else touched. The tracking is what
+     keeps it reading as a column head. */
+  font-stretch: 86%;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
+  /* Tight, because this is a head and not a line of body copy — and because
+     the size bump above would otherwise have cost 4px of table box at every
+     step, which at 193px of container is a whole row. */
+  line-height: 1.25;
 }
-.ccc-wp__colhead span:first-child { inline-size: 6.6cqw; text-align: end; }
-.ccc-wp__colhead span:last-child  { inline-size: 9.9cqw; text-align: end; }
+.ccc-wp__colhead span:first-child { inline-size: var(--wp-gp-w); text-align: end; }
+.ccc-wp__colhead span:last-child  { inline-size: var(--wp-hd-w); text-align: end; }
 
 .ccc-wp__row {
   display: flex;
   align-items: baseline;
   gap: 1.2cqw;
-  font-weight: 600;
+  /* 700 — the product name and the GP figure. At 600 "Gig" measured 5.62:1 on
+     the shipped pixels at 1920 and "$180" 5.08:1; nothing else about either
+     changed. */
+  font-weight: 700;
   font-stretch: 90%;
 }
 /* the dotted leader a printed rate card actually has */
@@ -889,16 +1100,16 @@ const CSS = `
 }
 .ccc-wp__gp {
   flex: 0 0 auto;
-  inline-size: 6.6cqw;
+  inline-size: var(--wp-gp-w);
   text-align: end;
   color: var(--wp-soft, ${INK_SOFT});
 }
 .ccc-wp__pay {
   flex: 0 0 auto;
-  /* 9.9cqw and not 8.4: the widest cell on the sheet is the Quad Play bonus,
-     "+$10.50", and at 8.4 it was clipped to "+$10.5(" at 1920. A rate card that
-     truncates a payout is worse than no rate card. */
-  inline-size: 9.9cqw;
+  /* the widest cell on the sheet is the Quad Play bonus, "+$10.50", and the box
+     is sized to it in em of the row — see the @property note above. A rate card
+     that truncates a payout is worse than no rate card. */
+  inline-size: var(--wp-pay-w);
   text-align: end;
   color: var(--wp-pay, ${INK_PAY});
   font-weight: 700;
@@ -917,7 +1128,7 @@ const CSS = `
      body ink it is 7.9:1. Size and colour both moved; neither alone did it. */
   color: var(--wp-ink, ${INK_CSS});
   font-size: calc(2.3cqw * var(--wp-k));
-  font-weight: 600;
+  font-weight: 700;
   font-stretch: 82%;
   letter-spacing: 0.03em;
   white-space: nowrap;
@@ -1364,92 +1575,268 @@ const CSS = `
    The sheet is a fixed fraction of the plate's COVER box, and that box is
    max(100cqw, 100svh x 1.791) x --overscan-k — so how many CSS pixels of paper
    there are is decided by the viewport's HEIGHT at least as often as by its
-   width. MEASURED, bounding rect at --p 0.30: 440 x 348 at 2560x1440,
-   331 x 262 at 1920x1080, 276 x 219 at BOTH 1600x900 and 1440x900,
-   237 x 188 at BOTH 1366x768 and 1024x768.
+   width. It is also 41% less paper than it was: rooms.js moved this sheet off
+   the wall corner (11.5 → 27.0 became 9.0 → 21.0, see §0) and 15.5% x 22.0% of
+   the plate became 12.0% x 17.0%, i.e. 372 x 294.8 plate pixels became
+   288 x 227.8. EVERY NUMBER BELOW WAS RE-SOLVED FOR THAT SHEET; none of them
+   survived the move unchanged.
 
    Which is exactly why these queries are NOT on the stage. A stage-width query
-   put 1366x768 and 1024x768 — the same 235px of paper — two steps apart and
-   overflowed the smaller one by 49px. The queries below are anonymous, so they
-   resolve against the nearest container, which is .ccc-wp: the sheet asks how
-   many pixels of ITSELF there are and answers in its own terms.
+   put 1366x768 and 1024x768 — the same paper — two steps apart and overflowed
+   the smaller one by 49px. The queries below are anonymous, so they resolve
+   against the nearest container, which is .ccc-wp: the sheet asks how many
+   pixels of ITSELF there are and answers in its own terms.
 
    ⚠ THE THRESHOLDS ARE LAYOUT PIXELS, NOT THE PIXELS YOU MEASURE ON SCREEN.
    .hotspots is scaled by --overscan-k (1.10 by default, 1.06 at one breakpoint,
-   1 under reduced motion), and a container query resolves against the element's
-   LAYOUT size, before any ancestor transform. So the sheet whose bounding rect
-   is 330px wide is a 300px container, and 275 is 250. 288 and 232 are set in
-   that space; do not "correct" them to the on-screen figures.
+   1 under reduced motion) AND by --plate-scale, which runs 1.02 to 1.10 across
+   a room's own runway. A container query resolves against the element's LAYOUT
+   size, before any ancestor transform, so it does NOT move while the plate
+   dollies — which is the one mercy in this: the step a viewport lands on is a
+   constant, and only the pixels it renders at grow. MEASURED, layout container
+   against bounding rect at --p 0.30 and at --p 1:
 
-   A document that fits at 440 is grey mush at 235, and the answer a printer
-   would give is not "set it smaller" — it is "print less of it". So the
-   optional rows come off first, then the optional blocks, and what survives
-   takes the room back. That is labels.js §5's argument applied to a table.
+       2560x1440    309px container      347 → 376 on screen
+       1920x1080    232px                260 → 282
+       1600x900 / 1440x900   193px       217 → 235
+       1366x768 / 1024x768   165px       185 → 201
+
+   So a 165px container sets 8px type that renders at 9.1-9.7px. Do not
+   "correct" the thresholds to the on-screen figures.
+
+   ── THE LADDER, AND WHY IT TRADES THIS WAY ─────────────────────────────────
+   A document that fits at 413 is grey mush at 165, and the answer a printer
+   would give is not "set it smaller" — it is "print less of it". Every step
+   below sheds from the BOTTOM of the tables and spends every pixel it frees on
+   --wp-k, so the BODY SIZE STAYS FLAT while the CONTENT thins out:
+
+     container   what is printed                          --wp-k   body px
+     > 340       4 tables x 5 rows   (unchanged)           1.00     8.5+
+     ≤ 340       4 tables x 4 rows                         1.08     8.36 @309
+     ≤ 288       2 tables x 5 rows                         1.46     8.47 @232
+     ≤ 216       2 tables x 4 rows, no GP column           1.78     8.61 @193
+     ≤ 180       2 tables x 2 rows, no GP column           2.10     8.66 @165
+
+   Before this pass the same four containers set 7.74 / 8.24 / 6.87 / 5.86px,
+   i.e. the sheet got 41% smaller and the type came with it. Now it does not:
+   the body holds 8.36-8.66px of LAYOUT type — 9.4 to 10.5 as rendered — at
+   every desktop shape, and it is FLAT across all four of them. What moves
+   instead is how many rows are on the page: sixteen, ten, eight, four.
+
+   ── WHERE THE CEILINGS COME FROM, MEASURED ─────────────────────────────────
+   Two of them, and they bind in different places.
+
+   1. HEIGHT. The page is 79.29cqw tall (a 1.264:1 box) and everything on it is
+      set in cqw, so WHETHER IT FITS DEPENDS ON --wp-k AND THE ROW COUNT ALONE
+      and not on the container width at all. MEASURED, the --wp-k at which the
+      content exactly fills the page:
+          4 tables x 5 rows   1.01        2 tables x 5 rows   1.58
+          4 tables x 4 rows   1.10        2 tables x 4 rows   1.84
+                                          2 tables x 2 rows   2.40
+      Every k above is set under its ceiling, and the slack that leaves is a
+      few px of white above the footer rule — which is what the bottom of a
+      printed excerpt looks like.
+
+   2. THE WIDEST PRODUCT NAME, and this is the one that actually decides the
+      ladder. "Sports & News" is 6.985em of the row's own font, and a column is
+      a fixed fraction of the paper, so THAT ceiling is also width-independent:
+      with both money columns on the row it caps --wp-k at about 1.50 no matter
+      how much paper there is. That is why the last two steps drop the GP
+      COLUMN rather than a row — dropping GP is worth 2.34em of measure and
+      takes the ceiling to 1.93 — and why the last step then drops the row that
+      holds the LONGEST NAME rather than the last row of the table: with
+      "Sports & News" off the page "TV Premium" is the longest and the ceiling
+      goes to 2.24. The commission is the number the sheet exists to print
+      ("green = yours"); the store's gross profit is context, and the footer
+      that explains it goes at the same step.
+
+   ── WHAT IS NOT ALLOWED TO GO ──────────────────────────────────────────────
+   The title, the stamp, the footer's right half and the top three rows of both
+   surviving tables. The footer is what says the page is an excerpt, and the
+   whole object is a button that opens the full sheet.
 
    theme.css §17 removes the object hotspots entirely below 900px and on any
    viewport narrower than 8:7, and this sheet is a ".hotspots > .hotspot", so it
    goes with them — the same handoff to the rail's full-width tap list that the
    printer, the two clipboards and the recipe cards already make. That is the
    right answer and not a limitation: at 390px the whole plate is 24% of its
-   width and this sheet would be 68 pixels of paper. */
+   width and this sheet would be 53 pixels of paper. */
+
+/* ── STEP 1 · ≤ 340px — the last row of every table goes ───────────────────
+   340 and not 288, because 288 was solved for the old sheet and the new one is
+   77% of its width: at k 1.00 the full page sets 0.025 x container, so a 309px
+   container — a 2560x1440 desktop, the LARGEST shape this room is shot for —
+   was setting 7.7px body. 340 is the container at which the full page still
+   clears 8.5px, and below it the fourth row of each table buys the size back.
+   All four product families survive here; that matters more at the top of the
+   range than five rows of two of them does. */
+@container (max-width: 340px) {
+  .ccc-wp--card .ccc-wp__paper { --wp-k: 1.08; padding: 5.0cqw 4.8cqw 4.2cqw; }
+  .ccc-wp--card .ccc-wp__cols  { column-gap: 4.4cqw; }
+  .ccc-wp--card .ccc-wp__col + .ccc-wp__col { padding-inline-start: 2.2cqw; margin-inline-start: -2.2cqw; }
+  .ccc-wp--card .ccc-wp__sect  { font-size: calc(2.05cqw * var(--wp-k)); letter-spacing: 0.085em; }
+  .ccc-wp--card .ccc-wp__block + .ccc-wp__block { margin-block-start: 2.3cqw; }
+  .ccc-wp--card .ccc-wp__row, .ccc-wp--card .ccc-wp__colhead { gap: 1.0cqw; }
+  /* the tail row of each table — 300 Mbps and NOW TV, §2a's own order */
+  .ccc-wp--card .ccc-wp__row[data-wp-opt] { display: none; }
+  /* Both halves of the footer no longer fit on one line at this size: the two
+     strings are 31.76em of the row font against 30.0em of measure. The left
+     half is a legend for a column the page still prints, so it stays and the
+     RULE that carries it is what closes up. MEASURED: at k 1.08 they set 265px
+     against 274px of measure — 9px, which is inside the tolerance a font stack
+     fallback can move, so the left half is clipped rather than trusted. */
+  .ccc-wp--card .ccc-wp__foot span:first-child { min-inline-size: 0; }
+}
+
+/* ── STEP 2 · ≤ 288px — the second table in each column goes ───────────────
+   The step where the page changes shape rather than density: Xfinity Mobile
+   and the Multi-Play bonus come off, Internet and TV & Entertainment go back
+   to five rows each, and --wp-k jumps from 1.08 to 1.48 — the largest single
+   move on the ladder, and the one the client's "reduce the size" is paid for
+   with. The money columns re-solve themselves (the @property note at the head
+   of §5): with Multi-Play gone the widest payout is "$23", so the figure box
+   comes in from 3.76em to 1.85em while the head's stays at 2.50em for "COMM".
+   That 1.91em is exactly what buys "Sports & News" instead of "Sports & N…". */
 @container (max-width: 288px) {
-  .ccc-wp--card .ccc-wp__paper { --wp-k: 1.42; padding: 5.2cqw 5.4cqw 4.4cqw; }
+  .ccc-wp--card .ccc-wp__paper {
+    --wp-k: 1.46; padding: 5.0cqw 4.0cqw 4.2cqw;
+    --wp-pay-w: 1.85em; --wp-hd-w: 3.35em;
+    /* The page runs SHORT here, not long: ten rows at k 1.46 leave 12.6px of a
+       111px table box empty, which reads as a page that stopped rather than as
+       a page that fits. The leading is what takes it — 1.80 against 1.70 puts
+       0.85px back into each of the twelve lines in the column and lands the
+       last row on the footer rule. Opening the leading is what a printer does
+       with a short table; setting the type bigger is not, because the widest
+       product name is already at its ceiling (see the note above). */
+    line-height: 1.80;
+  }
   .ccc-wp--card .ccc-wp__title { font-size: 5.9cqw; }
-  .ccc-wp--card .ccc-wp__colhead { font-size: calc(1.55cqw * var(--wp-k)); }
-  /* The money columns are re-solved for what is left on the page. 9.9cqw was
-     solved for "+$10.50", and the Multi-Play table that value lives in is the
-     block this step drops — so the widest thing either column now has to hold
-     is "$200". Both go to 7.2cqw, the row gap closes from 1.2 to 0.8, and the
-     2.7cqw that frees is the difference between "Sports & News" and
-     "Sports & N…" on 213px of paper. */
-  .ccc-wp--card .ccc-wp__gp, .ccc-wp--card .ccc-wp__colhead span:first-child { inline-size: 7.2cqw; }
-  .ccc-wp--card .ccc-wp__pay { inline-size: 7.2cqw; }
-  /* The HEAD's box is wider than the column it heads, and that is correct, not
-     a mismatch: .ccc-wp__colhead is justify-content:flex-end, so the last item's
-     RIGHT edge is pinned to the column's right edge whatever its width — the
-     head and the figures stay flush. What the extra width buys is room for the
-     word: "COMM" in Archivo at 78% stretch is 3.67em (two M's at ~0.95em each
-     plus 0.1em of tracking per character), which is 8.1cqw at this step's
-     2.2cqw head size and was overhanging a 7.2cqw box by a whole stem. */
-  .ccc-wp--card .ccc-wp__colhead span:last-child { inline-size: 8.8cqw; }
-  .ccc-wp--card .ccc-wp__row, .ccc-wp--card .ccc-wp__colhead { gap: 0.8cqw; }
-  /* The section head closes up. "TV & ENTERTAINMENT" is eighteen tracked
-     uppercase characters and it is the widest string on the sheet; at 2.15cqw /
-     0.11em it fits a 42cqw column at 250px of paper and ellipsises at 213px,
-     because glyph advances round UP relative to the box as the box gets
-     smaller. Closing the setting is what a printer does with a long heading. */
-  .ccc-wp--card .ccc-wp__sect { font-size: calc(1.95cqw * var(--wp-k)); letter-spacing: 0.07em; }
-  .ccc-wp--card .ccc-wp__block + .ccc-wp__block { margin-block-start: 2.4cqw; }
-  /* the second table in each column goes; the rows that survive get the size */
+  .ccc-wp--card .ccc-wp__cols  { column-gap: 3.8cqw; }
+  .ccc-wp--card .ccc-wp__col + .ccc-wp__col { padding-inline-start: 1.9cqw; margin-inline-start: -1.9cqw; }
+    .ccc-wp--card .ccc-wp__row, .ccc-wp--card .ccc-wp__colhead { gap: 0.8cqw; }
+  /* "TV & ENTERTAINMENT" is eighteen tracked uppercase characters and it is the
+     widest string on the sheet; at 2.15cqw / 0.11em it ellipsises the moment
+     the column stops growing. Closing the setting is what a printer does with a
+     long heading. */
+  .ccc-wp--card .ccc-wp__sect { font-size: calc(2.00cqw * var(--wp-k)); letter-spacing: 0.075em; }
+  .ccc-wp--card .ccc-wp__block + .ccc-wp__block { margin-block-start: 2.3cqw; }
+  /* the second table in each column goes; the rows that survive come back and
+     take the size */
   .ccc-wp--card .ccc-wp__block[data-wp-opt] { display: none; }
+  .ccc-wp--card .ccc-wp__row[data-wp-opt] { display: flex; }
   .ccc-wp--card .ccc-wp__foot span:first-child { display: none; }
 }
-@container (max-width: 232px) {
-  .ccc-wp--card .ccc-wp__title { font-size: 6.2cqw; }
+
+/* ── STEP 3 · ≤ 216px — the GP column goes, and the fourth row with it ─────
+   The ceiling that binds from here down is the product name, not the page
+   height (see the note above), so this step spends a COLUMN rather than a row
+   and gets 0.30 of --wp-k for it — nearly three times what dropping the fourth
+   row of each table is worth. What is left on every line is the product and
+   what it pays the rep, which is the sheet in one sentence.
+   The footer's legend went at the step above, so nothing on the page is now
+   explaining a column that is not there. */
+@container (max-width: 216px) {
+  /* The leading goes back to 1.70 from the 1.80 the step above opened it to:
+     that step had a SHORT page to fill and this one does not — four rows and a
+     two-line head in an 85px table box is 86.3px at 1.80 and 82.9 at 1.70, and
+     the difference is the bottom row of the Internet table. */
+  .ccc-wp--card .ccc-wp__paper { --wp-k: 1.78; line-height: 1.70; }
+  .ccc-wp--card .ccc-wp__title { font-size: 6.4cqw; }
+  .ccc-wp--card .ccc-wp__gp,
+  .ccc-wp--card .ccc-wp__colhead span:first-child { display: none; }
+  .ccc-wp--card .ccc-wp__row[data-wp-opt] { display: none; }
+  .ccc-wp--card .ccc-wp__sect { font-size: calc(1.82cqw * var(--wp-k)); letter-spacing: 0.040em; }
+  /* The head is two nowrap strings in a space-between row and it stops fitting
+     before anything else on the page does. MEASURED at 193px of container:
+     "COOK COUNTY COOKS · C³" sets 101px and "UPDATED SEPT 1, 2026" 87px against
+     176px of measure, so the eyebrow crossed the stamp and ran off the sheet.
+     The stamp is the one that has to stay — a rate card with no date on it is
+     worse than one with no publisher on it. */
   .ccc-wp--card .ccc-wp__kicker { display: none; }
 }
 
-/* ── THE ROOM'S OWN CROP, AND THE ONE DESKTOP SHAPE WHERE IT REACHES US ────
+/* ── STEP 4 · ≤ 180px — two rows a table, and the longest name goes ────────
+   The last step, and the one where the space argument and the contrast
+   argument turn out to be the same argument.
+
+   At the step above --wp-k is capped at 1.93 by "Sports & News" — 6.985em of a
+   measure that holds 8.83em once the payout box and its gap are out of it —
+   and 1.93 at 165px of container is 7.96px of body type, which floors at
+   5.15:1. There is no arrangement in which that row survives AND the page
+   clears 7:1. So 'opt3' takes it, and the Gig row with it so the two tables
+   stay level; "TV Premium" becomes the longest name, the ceiling goes to 2.24
+   and --wp-k to 2.10 — 8.66px, the LARGEST body type anywhere on this ladder,
+   on the smallest sheet. Four payouts set legibly beats six set grey, and the
+   footer has said the page is an excerpt the whole way down.
+
+   The eyebrow goes here too, and for the older reason: the head is two nowrap
+   strings in a space-between row and it stops fitting before anything else on
+   the page does. At 165px "COOK COUNTY COOKS · C³" sets 97px and "UPDATED
+   SEPT 1, 2026" 83px against 151px of measure, so the two cross. The stamp is
+   the one that stays — a rate card with no date on it is worse than one with
+   no publisher on it. */
+@container (max-width: 180px) {
+  /* Four rows in a 67px table box leave 4.5px of it empty, and the leading is
+     what takes it back — 1.82 against the 1.70 of the step above. */
+  .ccc-wp--card .ccc-wp__paper { --wp-k: 2.10; padding: 5.0cqw 4.0cqw 4.4cqw; line-height: 1.78; }
+  .ccc-wp--card .ccc-wp__title { font-size: 7.2cqw; }
+  .ccc-wp--card .ccc-wp__row[data-wp-opt2],
+  .ccc-wp--card .ccc-wp__row[data-wp-opt3] { display: none; }
+  /* THE SECTION HEAD SETS OVER TWO LINES HERE, at full size, instead of being
+     shrunk until it fits one. "TV & ENTERTAINMENT" is eighteen tracked
+     uppercase characters in a 72px column: the step above closes the tracking
+     to 0.018em to hold it on one line, and at 5.5px the result floors at
+     6.72:1 — under this build's floor, on a heading. Two lines at 6.6px is
+     8.9:1 and is what a printer would set anyway.
+
+     The min-block-size is what keeps the two tables level across the fold:
+     "INTERNET" sets on one line and its neighbour on two, so both reserve two,
+     and the rows below them start on the same baseline. */
+  .ccc-wp--card .ccc-wp__sect {
+    font-size: calc(1.88cqw * var(--wp-k));
+    letter-spacing: 0.045em;
+    white-space: normal;
+    min-block-size: calc(2 * 1.2em);
+  }
+}
+
+/* ── THE ROOM'S OWN CROP, AND THE THREE DESKTOP SHAPES WHERE IT REACHES US ─
    This is a MEDIA query and everything above it is a container query, and the
    difference is the point: what follows is not about how big the sheet is, it
    is about which part of the PHOTOGRAPH is on screen.
 
    theme.css §06 sizes .hotspots to the plate's cover box and §06d gives the
    Back Office --art-x .5, so at aspects below the plate's own 1.791 the frame
-   throws away (1 - aspect / (1.791 x --overscan-k)) of the plate's width, half
-   off each side. With --overscan-k 1.10 that makes the left-most visible plate
-   column 50 x (1 - aspect / 1.9701), and this sheet's left edge is at plate-x
-   11.5 — so the sheet starts leaving the frame at
+   throws away (1 - aspect / (1.791 x --overscan-k x --plate-scale)) of the
+   plate's width, half off each side — and --plate-scale runs 1.02 to 1.10
+   across the room's runway, so the crop TIGHTENS as you scroll. That algebra
+   predicts the threshold and not the amount (there is a --plate-x parallax
+   translate in the transform as well), so what follows is measured.
 
-       50 x (1 - aspect / 1.9701) > 11.5   →   aspect < 1.517
+   ── WHY THIS BLOCK HAD TO BE RE-SOLVED ─────────────────────────────────────
+   The sheet's left edge used to be at plate-x 11.5 and is now at 9.0. Every
+   one of those 2.5 points is 2.5% of the plate's width closer to the frame
+   edge, so the shapes that crop it changed and the amount they crop changed
+   with them. MEASURED, worst clip of the sheet's own box while the Back Office
+   still owns the screen (i.e. up to the last frame elementFromPoint puts this
+   hotspot on top), across the whole runway:
 
-   MEASURED, at --p 0.30, against the shipped plate:
-       1024x768   aspect 1.333   sheet 71.4% on screen   (x = -67.7)
-       1366x768   aspect 1.779   sheet  100% on screen
-       1440x900   aspect 1.600   sheet  100% on screen
-       1600x900 / 1920x1080 / 2560x1440   aspect 1.778   100%
-   i.e. exactly one common desktop shape, the 4:3 iPad in landscape, and the
-   threshold predicts it.
+       aspect 1.90 / 1.80          0%            1706x900, 1620x900
+       aspect 1.778 / 1.779        0%            2560x1440, 1920x1080,
+                                                 1600x900, 1366x768
+       aspect 1.70                 7.5%          1530x900
+       aspect 1.60                 4 - 30%       1440x900, 1680x1050
+       aspect 1.50                16 - 48%       1350x900
+       aspect 1.40                37 - 67%       1260x900
+       aspect 1.333               52 - 80%       1024x768
+       aspect 1.25                69 - 96%       1280x1024
+
+   The old block covered aspect < 38/25 (1.52) and would have left 16:10 —
+   1440x900, 1680x1050, 1920x1200, one of the commonest desktop shapes there
+   is — with its product names sheared off at the frame edge. The band now runs
+   to 5/3 (1.667), which is where the measurement says the sheet stops being
+   whole, and it is cut in two because 16:10 and 4:3 need very different
+   answers.
 
    THIS IS THE ROOM'S COMPOSITION, NOT THIS MODULE'S, and rooms.js's geometry is
    measured and not ours to move. The same crop treats the room's other four
@@ -1457,19 +1844,108 @@ const CSS = `
    algebra its right edge is outside the frame at every aspect below 1.872 —
    which includes 1920x1080. The site has always shipped that.
 
+   ⚠ WHAT THIS BLOCK CANNOT DO. Below about 4:3 the crop takes more than half
+   the sheet before the room has finished arriving, and no amount of moving the
+   printing about on the paper puts a two-figure table into what is left: at
+   1280x1024 the sheet is 69% out of frame at arrival and 96% out of it by the
+   time the room hands over. The fix for that is not in this file — it is an
+   --art-x for the Back Office at those aspects in theme.css §17, or a plate-x
+   for this hotspot in rooms.js. Both are the room's business. What is below
+   holds to 4:3 and degrades honestly under it.
+
    What this module CAN do is decide which part of its own paper the printing
-   lands on. Below the threshold it sets the page to ONE column, in the right
-   66% — past the 28.6cqw the crop takes — so the surviving frame carries a
-   complete, aligned, readable table with its title over it, instead of two
-   tables with their product names sheared off at the frame edge. A printer
-   setting a page for a narrow window does exactly this. What survives is the
-   Internet table, which is the one a rep quotes first, and the footer still
-   says the sheet is an excerpt and the button still opens the whole tool.   */
-@media (min-aspect-ratio: 8 / 7) and (max-aspect-ratio: 38 / 25) {
-  .ccc-wp--card .ccc-wp__paper { padding-inline-start: 34cqw; }
-  .ccc-wp--card .ccc-wp__title { font-size: 4.6cqw; }
+   lands on. Inside the band it sets the page to ONE column, indented past the
+   part of the paper the frame is eating, so the surviving frame carries a
+   complete, aligned, readable table with its title over it instead of two
+   tables sheared off at the frame edge. A printer setting a page for a narrow
+   window does exactly this. What survives is the Internet table, which is the
+   one a rep quotes first, and the footer still says the sheet is an excerpt
+   and the button still opens the whole tool.                                */
+
+/* 16:10 and 3:2 — 1440x900, 1680x1050, 1920x1200, 1350x900. The crop takes
+   16-25% of the paper for most of the runway and 48% on the last frame before
+   the Break Room takes the screen; 32cqw clears the first two thirds of that
+   and is as far as the indent can go before the surviving measure stops
+   holding "Sports & News". */
+@media (min-aspect-ratio: 3 / 2) and (max-aspect-ratio: 5 / 3) {
+  .ccc-wp--card .ccc-wp__paper { padding-inline-start: 30cqw; }
+  .ccc-wp--card .ccc-wp__title { font-size: 5.0cqw; }
   .ccc-wp--card .ccc-wp__cols  { grid-template-columns: 1fr; }
   .ccc-wp--card .ccc-wp__col + .ccc-wp__col { display: none; }
+  /* ONE COLUMN IS ONE TABLE, and the ladder's row count does not survive the
+     fold. The container queries solve this page as TWO columns: at 344px of
+     container — a 2560x1600 desktop, aspect 1.60, which is inside this band —
+     the ladder prints four tables of five rows, and stacking half of them into
+     a single column is 46cqw of content in a 40cqw box, which .ccc-wp__cols'
+     own overflow:hidden would eat the bottom of, silently. So the fold takes
+     the optional table and the optional row with it, and what is left is the
+     Internet table's top four rows in whatever measure the crop has spared. */
+  .ccc-wp--card .ccc-wp__block[data-wp-opt] { display: none; }
+  .ccc-wp--card .ccc-wp__row[data-wp-opt]   { display: none; }
+  /* The footer is the longest single line on the page and the indent is taken
+     out of its measure too: MEASURED at 1440x900, "Excerpt — tap for the full
+     sheet" set 122px against 123px and ellipsised on the last word. 2.2cqw
+     against 2.3 is 117px in 127 — and it is the smallest move that clears it,
+     because this line is also the lowest-contrast line on the sheet. */
+  /* The footer's left half is a legend and the indent has taken a third of the
+     measure it needs: at 344px of container (2560x1600) the two halves want
+     273px of a 227px line and BOTH ellipsised. The ladder already drops the
+     legend below 288px of container; inside this band it has to go at every
+     container, because here it is the crop and not the paper that sets the
+     measure. The right half — the one that says the page is an excerpt — is
+     what the space buys. */
+  .ccc-wp--card .ccc-wp__foot span:first-child { display: none; }
+  .ccc-wp--card .ccc-wp__foot { font-size: calc(2.2cqw * var(--wp-k)); }
+}
+
+/* 4:3 and 5:4 — 1024x768, 1280x1024, 1152x864. The crop takes 52% of the paper
+   at arrival, so the indent has to be nearly twice the one above and there is
+   only about 40cqw of measure left on the other side of it. Three things move
+   with it, all of them because of that measure:
+     · the title comes down to 5.2cqw and is allowed to set over two lines —
+       "Commission Payouts 2026" is 140px of type in 66px of column, and a
+       heading that wraps is a heading, while one that ellipsises is a defect;
+     · the footer wraps too, at 2.05cqw, because it is the one line on the page
+       that has to survive: it is what says this is an excerpt;
+     · the column heads go. "GP COMM" over a two-figure row is a legend, and a
+       legend is the first thing off a page this narrow.
+   MEASURED at 1024x768: the printing occupies the right 40cqw of the paper,
+   which is 66 of 165 layout px, and the frame is showing 48% of the sheet at
+   arrival — so the whole of it is inside the visible strip with 7% to spare. */
+@media (min-aspect-ratio: 8 / 7) and (max-aspect-ratio: 3 / 2) {
+  .ccc-wp--card .ccc-wp__paper { padding-inline-start: 66cqw; }
+  .ccc-wp--card .ccc-wp__title { font-size: 5.0cqw; white-space: normal; }
+  .ccc-wp--card .ccc-wp__rule  { margin: 0.9cqw 0 1.1cqw; }
+  .ccc-wp--card .ccc-wp__cols  { grid-template-columns: 1fr; }
+  .ccc-wp--card .ccc-wp__col + .ccc-wp__col { display: none; }
+  /* one column is one table — see the note in the band above */
+  .ccc-wp--card .ccc-wp__block[data-wp-opt] { display: none; }
+  .ccc-wp--card .ccc-wp__row[data-wp-opt]   { display: none; }
+  /* "GP COMM" over a two-figure row is a legend, and a legend is the first
+     thing off a page this narrow — and so is the GP figure itself. The ladder
+     already drops both below 216px of container; this band has to drop them
+     one step earlier because the indent, not the paper, is what sets the
+     measure here. MEASURED at 1280x1024 (220px of container, 66px of column):
+     "500 Mbps" + GP + payout is 73px and ellipsised; without GP it is 53. */
+  .ccc-wp--card .ccc-wp__colhead { display: none; }
+  .ccc-wp--card .ccc-wp__gp      { display: none; }
+  /* AND THE HEAD GOES WITH IT, which is the one place on the ladder the date
+     stamp is allowed to go. 40cqw of measure is 50px: "UPDATED SEPT 1, 2026"
+     needs 87 of it and would set over three lines, which costs 35px of a
+     115px page — more than the table it is dated. This band is the emergency
+     one (see the ⚠ above); what it prints is a title, one table and the line
+     that says the sheet is an excerpt, and nothing else fits. */
+  .ccc-wp--card .ccc-wp__head   { display: none; }
+  /* The footer is the one line on the page that has to survive — it is what
+     says this is an excerpt — so here it is allowed to set over as many lines
+     as it needs instead of being clipped to one. */
+  .ccc-wp--card .ccc-wp__foot {
+    display: block;
+    white-space: normal;
+    font-size: calc(2.0cqw * var(--wp-k));
+    line-height: 1.32;
+  }
+  .ccc-wp--card .ccc-wp__foot span { overflow: visible; }
 }
 
 /* Reduced motion: the room is already lit (theme.css §18 pins the plate), so
@@ -1524,7 +2000,12 @@ function buildBlock(doc, block) {
 
   for (const [name, gp, pay, flag] of block.rows) {
     const row = el(doc, 'div', 'ccc-wp__row');
-    if (flag === 'opt') row.dataset.wpOpt = '';
+    // Two shed tiers, not one: 'opt' is the last row of the table and goes
+    // first, 'opt2' is the one above it and goes at the next step down. §5's
+    // ladder spends both on type size; §2a says which rows they are.
+    if (flag === 'opt')  row.dataset.wpOpt  = '';
+    if (flag === 'opt2') row.dataset.wpOpt2 = '';
+    if (flag === 'opt3') row.dataset.wpOpt3 = '';
     row.appendChild(el(doc, 'span', 'ccc-wp__name', name));
     row.appendChild(el(doc, 'span', 'ccc-wp__gp', gp));
     row.appendChild(el(doc, 'span', 'ccc-wp__pay', pay));

@@ -28,6 +28,22 @@
    "blurb": "Hand this to every new Xfinity customer at the close — what they bought, what happens next, and who to call."
   },
   {
+   "file": "Google Review Print Out.pdf",
+   "label": "Google Review Print Out",
+   "type": "pdf",
+   "group": "counter",
+   "bytes": 463158,
+   "blurb": "Four review cards per page, one page per store — print your store's page, cut, and hand one over at the close. The QR code goes straight to that store's Google review."
+  },
+  {
+   "file": "NPS Start-Stop QR Codes.pdf",
+   "label": "NPS Start/Stop QR Codes",
+   "type": "pdf",
+   "group": "counter",
+   "bytes": 891778,
+   "blurb": "Opt-in and opt-out cards for Xfinity text updates — 27 pages, one per store, four cards to a page with cut marks. Scan START to turn texts on, STOP to turn them off."
+  },
+  {
    "file": "Channel Line Up.pdf",
    "label": "Channel Line Up",
    "type": "pdf",
@@ -68,14 +84,6 @@
    "blurb": "The January 2026 edition — policy, dress code, time off, and the answers to what reps ask HR first."
   },
   {
-   "file": "GP And Commission Payout.pdf",
-   "label": "GP and Commission Payout",
-   "type": "pdf",
-   "group": "reference",
-   "bytes": 71572,
-   "blurb": "What a sale actually pays — GP tiers and commission payout, printed for the coaching conversation."
-  },
-  {
    "file": "NPS Black And White.pdf",
    "label": "NPS — Black and White",
    "type": "pdf",
@@ -90,14 +98,6 @@
    "group": "reference",
    "bytes": 142128,
    "blurb": "The Spanish wording for the survey follow-up text, so a Spanish-speaking customer knows what the score means."
-  },
-  {
-   "file": "Important Links For Store Managers - QR CODES.pdf",
-   "label": "Important Links for Store Managers — QR Codes",
-   "type": "pdf",
-   "group": "reference",
-   "bytes": 131099,
-   "blurb": "One page of QR codes for the manager links you're always hunting for — print it and tape it up in the back office."
   }
  ]
 }

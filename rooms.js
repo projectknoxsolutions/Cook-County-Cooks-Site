@@ -126,7 +126,7 @@ export const HOTSPOTS = {
        the mount sits inside the bezel. */
     { slug:'daily-sales', kind:'screen', mode:'feed',
       x:36.0, y:22.9, w:28.0, h:28.4,
-      label:'Days Since Last Detractor' },
+      label:'Days Since The Last Bad NPS Survey' },
 
     /* The right-hand brick wall was re-measured against the same new plate.
        Its objects are larger and closer than in the previous composition,
@@ -138,7 +138,17 @@ export const HOTSPOTS = {
        gives us live type at any size, and it keeps us from re-shooting a room
        whose square-on monitor took four attempts to get right. Sits above the
        bottom-left rail card with clear air between them. */
-    { slug:'commission-payouts', kind:'print', x:11.5, y:24.0, w:15.5, h:22.0,
+    /* ⚠ IT MUST STAY LEFT OF PLATE-X 22.2.
+       This plate has a wall corner — a dead-vertical seam at plate-x 22.21%
+       (traced by column-differencing at 14 heights; it moves 0.17% over the
+       full frame). The first cut of this sheet ran 11.5 → 27.0, so 69% of it
+       sat on the left return wall and 31% on the back wall, and the client
+       read exactly that: "it looks like it's taped to both walls on the
+       screen." Now 9.0 → 21.0, entirely on the return wall with 1.2% of
+       clearance, and smaller as he asked. 12.0% x 17.0% of a 2400x1340 plate
+       is 288 x 227.8 plate px = 1.264:1; landscape US Letter is 1.294:1, so
+       the page still fills its box rather than being letterboxed in it. */
+    { slug:'commission-payouts', kind:'print', x:9.0, y:25.0, w:12.0, h:17.0,
       label:'Commission Payouts 2026', rotate:-1.4 },
 
     { slug:'printouts',        kind:'tool', x:78.1, y:35.0, w:7.9, h:17.2, label:'Print Outs', edge:'right' },

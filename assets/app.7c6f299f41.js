@@ -37,16 +37,16 @@
  * ========================================================================== */
 
 import { initEngine, scrollToRoom, onRoomChange } from './engine.bf3009e5e2.js';
-import { initOverlay, openTool } from './overlay.98e42f922b.js';
-import { mountRoomScreens } from './screens.8cb03df582.js';
+import { initOverlay, openTool } from './overlay.4af204bca5.js';
+import { mountRoomScreens } from './screens.6455361beb.js';
 import { initChefWall } from './chefwall.3c6129e091.js';
-import { initLabels } from './labels.4279977940.js';
-import { buildWallPrint, revealWallPrints } from './wallprint.466f214160.js';
+import { initLabels } from './labels.c26d13eaea.js';
+import { buildWallPrint, revealWallPrints } from './wallprint.3e5e6275d7.js';
 import { initFreezer } from './freezer.35040b26ef.js';
 import {
   loadEnvelope, unseal, restore, remember, cryptoAvailable
-} from './coldstore.e2629ee255.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.05b8f028ad.js';
+} from './coldstore.4c31cefcc6.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.ed8e720284.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -790,7 +790,35 @@ function buildHotspot(spot, data) {
 }
 
 /**
- * The rail: kicker, title, rule, tagline, and a chip for EVERY tool in the room.
+ * The rail: kicker, title, rule, and a chip for EVERY tool in the room.
+ *
+ * ── NO ROOM DESCRIPTION, ANYWHERE ON THE ART (2026-08-28) ──────────────────
+ * The client, on the whole site: "I love the Title of each page to be on the
+ * screen … however, I don't like the descriptions on the page … for instance,
+ * on the pass, I love the title and the clickable boxes with the links in them,
+ * but I don't like the 'Quotes fired and plated — the tools you touch on every
+ * sale'. I want those types of descriptions to be removed on every page." His
+ * reason is compositional — "I think that would make the slides fit better" —
+ * and it is a real one: the tagline was the only row in this stack whose height
+ * came from the length of a sentence, and it pushed everything above it further
+ * up the frame into whatever the photograph put there. The Break Room is the
+ * proof (§08a): its title ran into the head chef frames.
+ *
+ * `meta.tagline` IS STILL IN THE DATA, deliberately not deleted:
+ *   · `blurb` on each TOOL is a different string with a different job — the
+ *     viewer prints it — and has to survive untouched. Hand-deleting one of
+ *     the two description fields out of tools.json is how you lose the other,
+ *     and tools.json is not one file: index.html inlines a copy that app.js
+ *     PREFERS over the fetch (see build/sync-inline-tools.mjs), so a data
+ *     deletion is a two-file edit plus a build step, for no visible gain;
+ *   · nothing renders it any more, so keeping it costs exactly nothing on
+ *     screen. THE ONLY OTHER READER IS buildFooter() IN §6, and that function
+ *     is not called — the client had the footer recap removed earlier ("I want
+ *     the freezer to be the last thing someone could see"). The C³ menu, which
+ *     IS the tool index now, never carried a description and still does not;
+ *   · if he asks for them back it is one line here.
+ * So this builds FOUR children, not five, and theme.css §08 / §08a / §17 are
+ * re-balanced around four rows.
  *
  * The chip list is the client's hard requirement ("links must be easy to find"):
  * a tool with no hotspot — every one of the freezer's manager tools, the head
@@ -850,8 +878,11 @@ function buildRail(roomId, index, data) {
     // each other by a whole course while both are on screen.
     el('p', { class: 'rail-kicker', text: `Course ${COURSE[index - 1] || index}` }),
     el('h2', { class: 'rail-title', id: titleId, text: meta.label }),
+    // The rule closes the title block. It used to divide title from tagline;
+    // with the tagline gone it is the only thing between a display-scale name
+    // and a row of chips, which is why §08 now gives it more air below than
+    // above rather than the one flat `gap` the five-row stack used.
     el('hr', { class: 'rail-rule' }),
-    el('p', { class: 'rail-tagline', text: meta.tagline || '' }),
     chips
   ]);
 }
@@ -1094,11 +1125,24 @@ function buildHero() {
           el('span', { text: 'Cook' }),
           el('span', { text: 'County' }),
           el('span', { text: 'Cooks' })
-        ]),
-        el('p', { class: 'lede hero-lede', text: 'Every tool in the building — plated, lit, and one tap away.' }),
-        el('a', { class: 'scroll-cue', href: '#room-pass' }, [
-          el('span', { text: 'Walk the line' })
         ])
+        // THE MASTHEAD IS THE WHOLE HERO NOW. The client named both ends of
+        // what used to sit under it: "the main page has 'Every tool' all the
+        // way to 'walk the line'. I want to remove the descriptions." So the
+        // lede (`Every tool in the building — plated, lit, and one tap away.`)
+        // and the `Walk the line` scroll cue are both gone, and §07's
+        // .hero-lede / .scroll-cue rules with them.
+        //
+        // NOTHING BECOMES UNREACHABLE. The cue was an <a href="#room-pass">,
+        // i.e. one way into the first room — but #ticket-rail is fixed, is
+        // built before the hero paints, and carries all seven rooms as real
+        // anchors at every scroll position (§4). The page also still scrolls.
+        // The one thing the cue did that survives nowhere else is SAY that the
+        // page scrolls; the ticket rail showing "01 PASS … 07 FREEZER" over the
+        // storefront says it better, and it is on screen already.
+        //
+        // The og:description meta in index.html keeps that sentence: it is the
+        // link preview, not the page, and he was talking about the page.
       ])
     ])
   ]);
@@ -1356,6 +1400,19 @@ function buildFooter(data) {
 
       groups.push(el('section', { 'aria-labelledby': headingId }, [
         el('h3', { class: 'kicker', id: headingId, text: meta.label }),
+        // THE SECOND COPY OF meta.tagline, AND IT STAYS — because it is not on
+        // the page and cannot get onto it. "Remove the descriptions on each
+        // page" is about the type standing on the room art: he named the
+        // Pass's, and said it in the same breath as "that would make the slides
+        // fit better". This is not a slide. It is a room heading's subtitle in
+        // a plain-text directory — and, since the footer recap was removed at
+        // his earlier instruction, buildFooter() is not called at all (see the
+        // boot order in §7), so this line renders nowhere in the shipped page.
+        // Deleting it would be deleting dead code on a live instruction's
+        // authority, and it would take the one thing that still explains what
+        // is filed under "Prep Station" out of the file that would come back
+        // first if the index ever returns. If the index does return and he
+        // does not want the subtitle, it is this one line.
         el('p', { class: 'micro', text: meta.tagline || '' }),
         ...body
       ]));
