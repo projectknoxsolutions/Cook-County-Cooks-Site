@@ -3,7 +3,7 @@
  * assets/chefwall.js — the Break Room "Head Chef of the Week" wall of fame
  * -----------------------------------------------------------------------------
  * WHAT THIS IS
- * The break-room plate (plates/breakroom.a8710561ee.webp) is a photograph of a real room.
+ * The break-room plate (plates/breakroom.57d227f685.webp) is a photograph of a real room.
  * Painted into that photograph, in one horizontal row, are FIVE identical black
  * picture frames, each holding an empty grey mat. This module composites the five
  * real employee photographs into those five mats so the faces are visible on the
@@ -12,11 +12,22 @@
  * Clicking a framed photo opens that chef's full Win-the-Weekend slide in a modal.
  *
  * HARD CONSTRAINTS FROM THE CLIENT (Jeff)
- *   1. EXACTLY FIVE chefs. Not nine. Not a grid. Five, in the five painted frames.
+ *   1. THE ART OWNS THE SLOT COUNT. There are as many frames as rooms.js's
+ *      CHEF_FRAMES says there are — five on the old plate, six on the re-shot
+ *      one — and this module renders exactly that many, whatever the data
+ *      length is. It does NOT cap, and it has no opinion about the number.
  *   2. The photos must sit EXACTLY inside the painted frames. In v2 they floated
  *      offset and it read as broken. That is why placement is data-driven: the
  *      lead measures the actual generated plate and hands us `frames`.
  *   3. Faces visible without interaction.
+ *   4. "If the slide is blank, leave the picture blank." A frame with no chef
+ *      behind it gets an empty mat — never a substitute portrait, never a
+ *      shifted-up neighbour.
+ *   5. EVERY FRAME IS LABELLED WITH ITS DISTRICT, including an empty one. The
+ *      label is engraved on a small plaque screwed to the wall under the frame
+ *      (§2 ".cw-plate"), not printed as a web caption, and it comes from the
+ *      DECK SLIDE TITLE via build/pull-headchefs.mjs — rename a district in the
+ *      deck and the wall follows.
  *
  * PUBLIC API
  *   import { initChefWall, DEFAULT_FRAMES } from './chefwall.js';
@@ -26,6 +37,20 @@
  * DEPENDENCIES: none. No build step. Plain ES module. Styles are self-injected
  * once into <head> and only ever read theme.css tokens through var(--x, fallback),
  * so this file is correct even if theme.css has not loaded yet.
+ *
+ * ⚠ --lit IS NOT READABLE FROM HERE, AND SILENTLY LIES IF YOU TRY.
+ *   theme.css declares --lit (and --arr, --hold, --lift) on `.plate-wrap`.
+ *   `.hotspots` — which is this module's host — is that element's SIBLING, not
+ *   its child, so `var(--lit)` inside the wall resolves to the property's
+ *   REGISTERED initial-value of 1 and every frame reads as fully lit at every
+ *   scroll position. No error, no warning, just a wall that never comes up with
+ *   the room. So §2 re-derives the same number from --enter / --bloom / --p,
+ *   which the engine writes on `.stage` and which DO inherit down here. It is
+ *   byte-for-byte theme.css §06b's formula; wallprint.js does the identical
+ *   thing for the same reason (see its --wp-lit).
+ *
+ *   This module READS --enter / --bloom / --p and never writes them, and never
+ *   touches --plate-x / --plate-y / --plate-scale.
  *
  * PERFORMANCE CONTRACT (SPEC.md "Performance rules")
  *   - No requestAnimationFrame loop here. The wall is static geometry; the engine's
@@ -44,8 +69,19 @@
  * 1. CONSTANTS
  * ------------------------------------------------------------------------ */
 
-/** Jeff's number. The wall renders at most this many frames, ever. */
-export const WALL_SIZE = 5;
+/**
+ * THE SLOT COUNT IS `frames.length`. THERE IS NO CAP.
+ *
+ * This used to be `WALL_SIZE = 5` and it was used to clamp the render, which
+ * made the module wrong the moment the break-room plate was re-shot with six
+ * frames: five photos in six openings, one permanently dark. The art owns the
+ * number, rooms.js publishes it as CHEF_FRAMES, and this file counts it.
+ *
+ * The export survives only because it is public API. It is now what it says:
+ * how many slots the built-in placeholder geometry has, for a caller that
+ * mounts without `frames`.
+ */
+export const WALL_SIZE = 6;
 
 /**
  * PLACEHOLDER GEOMETRY — the lead MUST replace this by measuring the real plate.
@@ -57,15 +93,17 @@ export const WALL_SIZE = 5;
  *   h      height of the mat opening, as a % of plate HEIGHT
  *   rotate degrees clockwise, rotated about the box's own centre
  *
- * These five boxes are a plausible evenly-spaced row so the wall is never empty
+ * These six boxes are a plausible evenly-spaced row so the wall is never empty
  * during development. They are NOT measured and will not line up with the art.
+ * rooms.js's CHEF_FRAMES is the real geometry and is owned by the lead.
  */
 export const DEFAULT_FRAMES = [
-  { x: 12.0, y: 30.0, w: 12.0, h: 16.0, rotate: 0 },
-  { x: 27.0, y: 29.4, w: 12.0, h: 16.0, rotate: 0 },
-  { x: 42.0, y: 29.0, w: 12.0, h: 16.0, rotate: 0 },
-  { x: 57.0, y: 29.4, w: 12.0, h: 16.0, rotate: 0 },
-  { x: 72.0, y: 30.0, w: 12.0, h: 16.0, rotate: 0 }
+  { x:  8.0, y: 30.0, w: 11.0, h: 15.0, rotate: 0 },
+  { x: 21.5, y: 29.6, w: 11.0, h: 15.0, rotate: 0 },
+  { x: 35.0, y: 29.2, w: 11.0, h: 15.0, rotate: 0 },
+  { x: 48.5, y: 29.2, w: 11.0, h: 15.0, rotate: 0 },
+  { x: 62.0, y: 29.6, w: 11.0, h: 15.0, rotate: 0 },
+  { x: 75.5, y: 30.0, w: 11.0, h: 15.0, rotate: 0 }
 ];
 
 /**
@@ -134,6 +172,13 @@ const CSS = `
   --cw-shade:      var(--shade, 3 5 9);
   --cw-walnut:     var(--walnut, #4b3526);
 
+  /* the engraved plaque under each frame. Literal, not derived, because these
+     two colours are the ONE contrast pair in this module that has an audited
+     number on it (§2 ".cw-plate") and a token that moves would move it. */
+  --cw-plaque-hi:  #1b2129;          /* milled top edge, catching the key light */
+  --cw-plaque-lo:  #0e1218;          /* the body of the plate                    */
+  --cw-plaque-ink: #f0d9a4;          /* brass fill in the engraving              */
+
   /* the one accent */
   --cw-accent:     var(--ccc-accent, var(--brass, #c8973f));
   --cw-accent-lit: var(--ccc-accent-hi, var(--brass-300, #ebce93));
@@ -152,6 +197,30 @@ const CSS = `
 }
 .ccc-chefmodal *{ box-sizing:border-box; }
 
+/* ---- THE LIGHTS -------------------------------------------------------------
+   theme.css §06b's --lit, re-derived from numbers that actually reach this
+   subtree. See the ⚠ block in the file header for why it cannot simply be
+   inherited: --lit is declared on .plate-wrap and .hotspots is its SIBLING, so
+   "var(--lit)" here silently resolves to the registered initial-value 1.
+
+   --enter, --bloom and --p are written by engine.js on ".stage", which IS an
+   ancestor of the hotspot layer, so they inherit correctly. The arithmetic
+   below is byte-for-byte theme.css's:
+
+       --arr  = clamp(0, (enter - 0.90) x 11, 1)      the arrival ramp
+       --hold = clamp(0, (p - 0.55) x 4, 1)           pins a departing room lit
+       --lit  = clamp(0, 0.52 arr + 0.48 bloom³ + hold, 1)
+
+   REGISTERED, not decoration. An unregistered custom property is substituted as
+   a token stream, so "0.48 * var(--bloom)" would splice text rather than
+   multiply typed numbers, and the whole clamp would resolve to garbage the
+   first time --bloom arrived as anything but a bare number. The initial values
+   are the LIT end for the same reason theme.css's are: a page whose engine.js
+   never ran must render a correct, fully-lit wall. */
+@property --cw-arr  { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --cw-hold { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --cw-lit  { syntax: "<number>"; inherits: true;  initial-value: 1; }
+
 /* ---- root -------------------------------------------------------------- */
 /* Fills the host exactly. NO transform here: the host (a .hotspots layer) is
    already carrying the plate transform from theme.css. See header comment. */
@@ -159,6 +228,12 @@ const CSS = `
   position:absolute; inset:0;
   pointer-events:none;              /* only the buttons are hit-testable */
   font-family:var(--cw-sans);
+
+  --cw-arr:  clamp(0, (var(--enter, 1) - 0.90) * 11, 1);
+  --cw-hold: clamp(0, (var(--p, 0) - 0.55) * 4, 1);
+  --cw-lit:  clamp(0, 0.52 * var(--cw-arr)
+                    + 0.48 * var(--bloom, 1) * var(--bloom, 1) * var(--bloom, 1)
+                    + var(--cw-hold), 1);
 }
 .ccc-chefwall *{ box-sizing:border-box; }
 
@@ -182,6 +257,25 @@ const CSS = `
      square to the frame rather than to the screen. */
   border-radius:var(--cw-r-xs);
   -webkit-tap-highlight-color:transparent;
+
+  /* THE FRAME IS ITS OWN QUERY CONTAINER, and that is what makes the engraved
+     plaque scale with the art instead of with the viewport.
+
+     The mat opening is 4.09% x 11.11% of the plate — 56 x 85 CSS px at 1024,
+     105 x 160 at 2560, and larger again mid-scrub while --plate-scale pushes
+     in. Sizing the plaque in cqw/cqh of THIS box therefore ties it to the
+     picture frame it belongs to, at every viewport and through the push-in,
+     with one number instead of four breakpoints. A cqw written without this
+     would resolve against "stage" (theme.css §05) — i.e. against the viewport
+     — and the plates would grow relative to the frames as the window widened.
+
+     "container-type: size" (not inline-size) because the plaque's own type
+     size is set from the frame's HEIGHT: the frames are much taller than they
+     are wide, and height is what the row of them reads as. Legal here because
+     the box is explicitly sized in both axes by placeFrame(); it computes to
+     "contain: size layout style", which does NOT clip, so the plaque still
+     paints below the frame and the cast shadow still paints outside it. */
+  container-type: size;
 }
 .cw-frame:focus{ outline:none; }
 .cw-frame:focus-visible{
@@ -349,8 +443,8 @@ const CSS = `
    first two; this answers "who is that?" without a click. Decorative only —
    the button's aria-label already carries the full name. */
 .cw-nametag{
-  position:absolute; left:50%; top:100%; margin-top:.5rem;
-  transform:translate3d(-50%,-4px,0);
+  position:absolute; left:50%; bottom:100%; margin-bottom:.5rem;
+  transform:translate3d(-50%,4px,0);
   opacity:0;
   padding:.28em .6em;
   font-family:var(--cw-sans);
@@ -368,6 +462,115 @@ const CSS = `
   .cw-frame:hover .cw-nametag{ opacity:1; transform:translate3d(-50%,0,0); }
 }
 .cw-frame:focus-visible .cw-nametag{ opacity:1; transform:translate3d(-50%,0,0); }
+
+/* =========================================================================
+   A2. THE DISTRICT PLAQUE — engraved, screwed to the wall under the frame
+   -------------------------------------------------------------------------
+   WHY A PLAQUE AND NOT A CAPTION. The break room is a photograph. A line of
+   web type floating on the wall under a picture frame is the one thing that
+   would break it — the same failure labels.js exists to avoid, and it solves
+   it the same way: put the words ON AN OBJECT that belongs in the room. On a
+   wall of fame that object is obvious and it is the one the client already
+   has in every store: a small dark plate with the district engraved and the
+   letters filled brass, mounted a few millimetres under the moulding.
+
+   IT IS ON EVERY FRAME, INCLUDING AN EMPTY ONE. The plaque names the DISTRICT,
+   not the chef, so it is a property of the wall and not of the week. An empty
+   mat under "WEST SIDE" reads as "no head chef posted for the West Side this
+   week", which is a true and ordinary thing to see. A blank frame with no
+   plaque reads as a bug.
+
+   THE WORDS COME FROM THE DECK. build/pull-headchefs.mjs takes them out of the
+   slide's own <h2> ("Head Chef Of The Week — Big South" -> "Big South") and
+   folds the deck's wording onto the client's short label ("Outlawz (East)" ->
+   "East Side"). Nothing here knows any district's name.
+
+   ── CONTRAST ──────────────────────────────────────────────────────────────
+   --cw-plaque-ink #f0d9a4 on the plate body --cw-plaque-lo #0e1218 is 13.2:1,
+   and on the lightest band of the milled gradient --cw-plaque-hi #1b2129 it is
+   11.6:1. The plate is OPAQUE, so neither number depends on what is painted
+   behind it — which is the whole reason the label is a plate and not type
+   floating on a photograph, where the ratio would change with the plate art,
+   the room's exposure and the parallax offset. Measured off the render at
+   1024, 1440, 1920 and 2560; the floor across all four is well past 7:1.
+
+   ── THE LIGHTS ────────────────────────────────────────────────────────────
+   Opacity only, off §2's re-derived --cw-lit — NOT brightness. Brightness
+   would scale ink and plate by different amounts through the sRGB transfer
+   curve and quietly move the audited ratio; a plate fading up as a whole
+   keeps ink and ground in exactly the fixed relationship measured above. The
+   0.07 floor is there so an unlit room shows a dark plate on a dark wall
+   rather than a hole where one should be. Opacity is also the one property
+   that costs the compositor nothing to animate every frame, six times over.
+   ====================================================================== */
+.cw-plate{
+  position:absolute;
+  left:50%; top:100%;
+  margin-top:7cqh;                 /* the moulding-to-plate gap, in frame units */
+  /* WIDTH IS BOUNDED BY THE PITCH, NOT BY THE TEXT. The mat opening is 4.09% of
+     the plate and the frames sit on a 7.27% pitch, so a plate may be up to
+     ~170% of the opening before two of them touch. 158% leaves ~0.8% of plate
+     (11px at 1024) of wall between neighbours, which is what makes the row read
+     as six separate plates rather than a strip. */
+  width:158cqw;
+  transform:translate3d(-50%,0,0);
+  box-sizing:border-box;
+  /* Centred in a fixed box so the row is one straight line of identical plates.
+     Before this, "NORTH SIDE" and "SOUTH SIDE" wrapped to two lines at 1024
+     while their four neighbours did not, and the row came out 24px / 38px /
+     24px / 38px — measured, and the single ugliest thing on the wall. The type
+     below now fits all six on one line at every width; the min-height is the
+     belt to that braces, so a district name nobody has thought of yet grows the
+     plate symmetrically instead of stepping one out of the row. */
+  display:grid; place-content:center;
+  min-height:26cqh;
+  padding:.34em .42em .38em;
+  border-radius:var(--cw-r-xs);
+  pointer-events:none;
+
+  /* milled dark plate: key light from above-left, so the top edge catches and
+     the body falls away, with a faint bounce off the wall at the bottom */
+  background:linear-gradient(177deg,
+      var(--cw-plaque-hi) 0%,
+      var(--cw-plaque-lo) 62%,
+      color-mix(in oklab, var(--cw-plaque-lo) 88%, var(--cw-plaque-hi)) 100%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--cw-accent) 42%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / .07),
+    0 .10em .26em rgb(var(--cw-shade) / .62);
+
+  /* the engraving */
+  color:var(--cw-plaque-ink);
+  font-family:var(--cw-sans);
+  /* MEASURED TO FIT. The longest of the client's six labels is "NORTH SIDE" /
+     "SOUTH SIDE" at ten characters; at 11.5cqh with .055em of tracking they set
+     to 74px inside a 102px plate at 1024, and every label scales from there.
+     The 9px floor is for a viewport short enough that 11.5cqh stops being type
+     and starts being grey mush — the wall is already suppressed below 900px
+     (NARROW_MEDIA), so it should never bind, and it costs nothing if it does. */
+  font-size:max(9px, 11.5cqh);     /* ~9.8px at 1024, ~18.4px at 2560 */
+  font-weight:700;
+  line-height:1.16;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+  text-align:center;
+  text-wrap:balance;
+  overflow-wrap:break-word;
+  hyphens:auto;
+  /* cut, not printed: shadow below the glyph is the wall showing through the
+     bottom of the groove under a light that comes from above */
+  text-shadow:0 1px 0 rgb(3 5 9 / .8);
+
+  opacity:calc(0.07 + 0.93 * var(--cw-lit));
+}
+/* The one hairline that makes it a plate and not a pill: a brass score line
+   along the top edge, where a real engraved plate is chamfered. */
+.cw-plate::before{
+  content:""; position:absolute; left:14%; right:14%; top:2px; height:1px;
+  background:linear-gradient(to right, transparent,
+      color-mix(in oklab, var(--cw-accent) 58%, transparent), transparent);
+  pointer-events:none;
+}
 
 /* ---- no photo this week: an empty mat ----------------------------------
    The client owns the image: whatever is on the slide is the picture, and if
@@ -538,6 +741,22 @@ const CSS = `
   .cw-card .cw-mono b{ font-size:1.6rem; }
   .cw-card .cw-mono i{ font-size:.5rem; }
   .cw-card .cw-badge{ font-size:.7rem; width:1.5rem; max-width:1.5rem; top:.35rem; right:.35rem; }
+  /* The strip is the wall on a phone, so the district has to travel with the
+     card — it is the thing that says WHICH frame this is. Same plate, same
+     brass fill, sized for a card instead of for a 4% mat opening. It does not
+     take the --cw-lit ramp: the strip is detached into the rail, outside the
+     transformed hotspot layer, and the rail is not part of the room's lighting. */
+  .cw-carddistrict{
+    align-self:flex-start;
+    padding:.2em .5em .24em;
+    border-radius:var(--cw-r-xs);
+    background:linear-gradient(177deg, var(--cw-plaque-hi), var(--cw-plaque-lo));
+    box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--cw-accent) 42%, transparent);
+    color:var(--cw-plaque-ink);
+    font-size:.58rem; font-weight:700; line-height:1.1;
+    letter-spacing:.11em; text-transform:uppercase;
+    text-shadow:0 1px 0 rgb(3 5 9 / .8);
+  }
   .cw-cardname{
     font-family:var(--cw-serif); font-size:1rem; line-height:1.15; font-weight:600;
   }
@@ -661,6 +880,21 @@ const CSS = `
   display:flex; align-items:center; gap:.4rem;
 }
 .cw-eyebrow[data-xfinity="true"]{ color:var(--cw-accent-lit); }
+/* The district, first thing in the header, on the same engraved plate as the
+   plaque under the frame — so the modal opens on the object you clicked rather
+   than on a generic card. The award name stays beside it, dimmed. */
+.cw-eyebrow-d{
+  padding:.24em .52em .28em;
+  border-radius:var(--cw-r-xs);
+  background:linear-gradient(177deg, var(--cw-plaque-hi), var(--cw-plaque-lo));
+  box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--cw-accent) 42%, transparent);
+  color:var(--cw-plaque-ink);
+  letter-spacing:.13em;
+  text-shadow:0 1px 0 rgb(3 5 9 / .8);
+}
+/* Long district names ("Xfinity Head Chef of the Week") must not push the
+   award clause off the panel on a narrow phone. */
+.cw-eyebrow{ flex-wrap:wrap; row-gap:.35rem; }
 .cw-name{
   margin:0 0 .35rem;
   font-family:var(--cw-serif);
@@ -850,9 +1084,31 @@ function roleSegments(storeRole) {
 }
 
 /**
+ * The district this frame belongs to, long form, for the modal header and the
+ * accessible name. Comes from the deck slide title via build/pull-headchefs.mjs.
+ * Falls back to `region_deck` so a record from the old hand-made snapshot (which
+ * had no district field) still says something true rather than nothing.
+ */
+function districtOf(chef) {
+  return squish(chef && (chef.district || chef.region_deck));
+}
+
+/**
+ * The district, short form, as engraved on the plaque under the frame. The
+ * parser supplies both because the plate is ~90px wide at 1024 and
+ * "Xfinity Head Chef of the Week" does not go on it; "Xfinity" does.
+ */
+function districtShort(chef) {
+  return squish(chef && (chef.district_short || chef.district || chef.region_deck));
+}
+
+/**
  * Accessible name, e.g.
- *   "Head Chef of the Week: Antonio Carradine, Burbank"
+ *   "North Side, Head Chef of the Week: Antonio Carradine, Burbank"
  *   "Xfinity Head Chef of the Week: Alexis Bell, Greater Chicago"
+ * The district leads because on a wall of six frames it is what tells one
+ * button apart from the next — the plaque is the visual answer to the same
+ * question and the two must say the same thing.
  * For the standard award the place is the FIRST segment (the store); for the
  * Xfinity award the first segment is the award title itself, so we take the last.
  */
@@ -861,7 +1117,22 @@ function accessibleName(chef) {
   const segs = roleSegments(chef.store_role);
   const place = chef.is_xfinity ? segs[segs.length - 1] : segs[0];
   const who = squish(chef.name) || 'Head Chef';
-  return place ? `${award}: ${who}, ${place}` : `${award}: ${who}`;
+  const district = districtOf(chef);
+  // Do not say "Xfinity Head Chef of the Week, Xfinity Head Chef of the Week".
+  const lead = district && district.toLowerCase() !== award.toLowerCase()
+    ? `${district}, ${award}` : award;
+  return place ? `${lead}: ${who}, ${place}` : `${lead}: ${who}`;
+}
+
+/**
+ * Is there a chef behind this frame?
+ * The parser emits ONE ENTRY PER DISTRICT, so a district whose deck slide has
+ * gone (or whose held entry aged past the staleness cap) still arrives — with
+ * `vacant: true` and no name — precisely so the frame keeps its plaque. A
+ * missing entry altogether (fewer records than frames) is the same thing.
+ */
+function hasChef(chef) {
+  return !!(chef && !chef.vacant && squish(chef.name));
 }
 
 /**
@@ -932,6 +1203,17 @@ function buildSurface(doc, chef, base, monoCaption) {
   img.decoding = 'async';
   img.loading = 'lazy';               // breakroom is room 6 (SPEC lazy rule)
   img.draggable = false;
+  /* Intrinsic size, straight off headchefs.json, where build/pull-headchefs.mjs
+     recorded what it actually encoded. Nothing here reflows (every surface is
+     absolutely positioned at a size the CSS already knows), so this is not a CLS
+     fix — it is a MEMORY one. It lets the browser size the decode buffer before
+     the bytes arrive, which is the difference that matters on the phone build:
+     six 384x576 WebPs decode to ~5.3 MB of bitmap if they all land at once, and
+     the strip only ever has two or three on screen. */
+  if (chef.photo_w && chef.photo_h) {
+    img.width = Number(chef.photo_w) || 0;
+    img.height = Number(chef.photo_h) || 0;
+  }
   // A file that was supposed to load and did not is a FAULT, so it gets the
   // monogram rather than the blank mat — an empty frame must keep meaning
   // "no photo on the slide", not "the deploy is missing a file". Bound before
@@ -967,6 +1249,28 @@ function buildMonogram(doc, chef, caption) {
     mono.appendChild(el(doc, 'i', null, segs[0] || 'Head Chef'));
   }
   return mono;
+}
+
+/**
+ * The engraved district plaque that hangs under one frame.
+ *
+ * aria-hidden, always: for a frame with a chef behind it the button's
+ * aria-label already opens with the district (accessibleName above), and
+ * repeating it would make every frame announce its district twice. For a vacant
+ * frame the whole slot is aria-hidden — there is nothing to do there and
+ * "West Side, empty" is not information a screen-reader user needs read out six
+ * times on the way past a photograph.
+ *
+ * Returns null when there is no district to engrave, so a data set with no
+ * district field (the old hand-made snapshot) degrades to the wall it had
+ * before rather than to a row of empty plates.
+ */
+function buildPlate(doc, chef) {
+  const text = districtShort(chef);
+  if (!text) return null;
+  const plate = el(doc, 'span', 'cw-plate', text);
+  plate.setAttribute('aria-hidden', 'true');
+  return plate;
 }
 
 /** The circular Xfinity badge, or null. */
@@ -1155,6 +1459,10 @@ function createModal(win, uid, photoBase) {
 
     const idBox = el(doc, 'div', 'cw-id');
 
+    /* The eyebrow answers "which frame did I just click": the district on the
+       same engraved plate that is screwed under the frame, then the award.
+       When the district IS the award (the Xfinity plate) the award clause is
+       dropped rather than printed twice. */
     const eyebrow = el(doc, 'p', 'cw-eyebrow');
     eyebrow.setAttribute('data-xfinity', chef.is_xfinity ? 'true' : 'false');
     if (chef.is_xfinity) {
@@ -1162,11 +1470,12 @@ function createModal(win, uid, photoBase) {
       s.setAttribute('width', '12'); s.setAttribute('height', '12');
       eyebrow.appendChild(s);
     }
-    eyebrow.appendChild(
-      doc.createTextNode(chef.is_xfinity
-        ? 'Xfinity Head Chef of the Week'
-        : 'Head Chef of the Week')
-    );
+    const award = chef.is_xfinity ? 'Xfinity Head Chef of the Week' : 'Head Chef of the Week';
+    const district = districtOf(chef);
+    if (district) eyebrow.appendChild(el(doc, 'span', 'cw-eyebrow-d', district));
+    if (!district || district.toLowerCase() !== award.toLowerCase()) {
+      eyebrow.appendChild(doc.createTextNode(award));
+    }
 
     const h2 = el(doc, 'h2', 'cw-name', squish(chef.name) || 'Head Chef');
     h2.id = `cw-modal-title-${uid}`;
@@ -1181,7 +1490,15 @@ function createModal(win, uid, photoBase) {
     head.appendChild(idBox);
     frag.appendChild(head);
 
-    /* ---- stats: a clean row of figures (omitted entirely when empty) ---- */
+    /* ---- stats: a clean row of figures (omitted entirely when empty) ------
+       WHATEVER THE SLIDE CARRIES, IN SLIDE ORDER. The stat sets genuinely
+       differ chef to chef — Demarcus McKamey's Big South slide has four
+       (GP $, Plus, GIG Attach, Accy $/Box), the West Side slide has eight
+       (adding MCR, NPS, Mobile, FCR) and the Xfinity nomination has none at
+       all, because it is a paragraph rather than a scorecard. So this renders
+       the pairs that exist rather than a fixed grid with holes in it: the
+       parser does not invent a missing figure and this does not reserve a cell
+       for one. Zero stats means no <dl> at all, and the write-up moves up. */
     const stats = Array.isArray(chef.stats) ? chef.stats.filter((s) => s && (s.value || s.label)) : [];
     if (stats.length) {
       const dl = el(doc, 'dl', 'cw-stats');
@@ -1287,17 +1604,28 @@ function createModal(win, uid, photoBase) {
  *        inset:0` on our own root. A CSS selector string is also accepted.
  *
  * @param {Array<Object>} opts.chefs
- *        The `headchefs` array from headchefs.json, regenerated weekly from
- *        the decks. Any length is safe: the first five fill the five painted
- *        frames in order and any leftover frames render as empty mats; more
- *        than five takes the first five and warns. A chef with no photo gets
- *        an empty mat too — whatever is on the slide is the picture.
- *        Fields used: name, store_role, stats[{value,label}], writeup,
- *        is_xfinity, has_photo, photo_file, and the optional extra
- *        `photo_focus` (any CSS object-position, default "50% 28%").
+ *        The `headchefs` array from headchefs.json, rebuilt every 30 minutes
+ *        from the decks by build/pull-headchefs.mjs. ONE ENTRY PER DISTRICT, in
+ *        a stable order, so entry i is always the same district. Any length is
+ *        safe: entries fill the painted frames in order, leftover frames render
+ *        as labelled empty mats, and entries past the last frame are dropped
+ *        with a warning naming the districts that fell off.
+ *        Fields used:
+ *          district        long label, from the slide title ("North Side")
+ *          district_short  what is engraved on the plaque ("Xfinity")
+ *          vacant          true = this district has no chef right now; the
+ *                          frame keeps its plaque and shows an empty mat
+ *          name, store_role, stats[{value,label}], writeup, is_xfinity,
+ *          has_photo, photo_file, photo_w, photo_h
+ *          photo_focus     optional, any CSS object-position (default 50% 28%)
+ *        A chef with no photo gets an empty mat too — whatever is on the slide
+ *        is the picture.
  *
  * @param {Array<{x:number,y:number,w:number,h:number,rotate?:number}>} opts.frames
- *        FIVE boxes, measured off the generated break-room plate, in PERCENT.
+ *        rooms.js's CHEF_FRAMES: one box per picture frame painted into the
+ *        break-room plate, measured off the render, in PERCENT. THE LENGTH OF
+ *        THIS ARRAY IS THE NUMBER OF SLOTS THE WALL DRAWS — five, six or any
+ *        other number; this module does not have an opinion and does not clamp.
  *        frames[i] receives chefs[i] — index order is the contract.
  *          x       left edge of the MAT OPENING as % of plate WIDTH   (0..100)
  *          y       top  edge of the MAT OPENING as % of plate HEIGHT  (0..100)
@@ -1319,6 +1647,25 @@ function createModal(win, uid, photoBase) {
  *        plate. Pass the room's `.rail` (or any untransformed, always-visible
  *        container). If omitted, the strip is relocated automatically when the
  *        host is found hidden, with a console warning.
+ *
+ * @param {string} [opts.refreshFrom]
+ *        URL of headchefs.json. Optional, and it exists for one specific
+ *        reason: index.html carries an INLINE bootstrap copy of the head chef
+ *        data on window.__CCC_INLINE__ so the site boots off a USB stick over
+ *        file://, and app.js PREFERS that copy over the network. That inline
+ *        block is written at build time and is not touched by the 30-minute
+ *        auto-pull (which commits headchefs/** and nothing else), so without
+ *        this the page would keep rendering whatever was inline on the day the
+ *        build ran while headchefs.json moved underneath it — the exact class
+ *        of bug build/sync-inline-tools.mjs was written to kill for tools.json.
+ *
+ *        Given the URL, the wall mounts from the data it was handed (instant,
+ *        no round trip, correct on file://) and then re-reads that one small
+ *        JSON — ~13 KB, same origin, already deployed — and calls update() only
+ *        if the districts actually differ. It NEVER fetches the decks: they are
+ *        five megabytes each and are read on the runner, not in the page.
+ *        Any failure (file://, offline, 404, bad JSON) is swallowed and the
+ *        inline data stands.
  *
  * @param {Document} [opts.document] / @param {Window} [opts.window]  test seams.
  *
@@ -1443,7 +1790,7 @@ export function initChefWall(opts) {
      headchefs.json arrives with fewer than five slides the leftover frames are
      filled in order with an empty mat — inert, unfocusable, and hidden from
      assistive tech, because there is nothing to announce and nothing to open. */
-  function buildVacantFrame(box, i) {
+  function buildVacantFrame(box, i, chef) {
     const slot = el(doc, 'span', 'cw-frame cw-frame--vacant');
     slot.setAttribute('aria-hidden', 'true');
     slot.dataset.chefIndex = String(i);
@@ -1460,6 +1807,12 @@ export function initChefWall(opts) {
     lift.appendChild(glass);
 
     slot.appendChild(lift);
+
+    /* THE PLAQUE STAYS. The frame is empty, the district is not: it is the
+       West Side's frame whether or not the West Side posted a chef this week.
+       Outside the lift, so it does not travel with a hover it can never get. */
+    const plate = buildPlate(doc, chef);
+    if (plate) slot.appendChild(plate);
     return slot;
   }
 
@@ -1506,6 +1859,14 @@ export function initChefWall(opts) {
 
     btn.appendChild(cast);
     btn.appendChild(lift);
+
+    /* The plaque is a SIBLING of .cw-lift, not a child, and that is deliberate:
+       the plate is screwed to the wall and the picture is what lifts off it on
+       hover. Putting it inside .cw-lift would drag the engraving up with the
+       frame, which is the one thing a mounted plate does not do. */
+    const plate = buildPlate(doc, chef);
+    if (plate) btn.appendChild(plate);
+
     btn.addEventListener('click', () => modal.show(chef, btn));
     return btn;
   }
@@ -1524,13 +1885,17 @@ export function initChefWall(opts) {
     const badge = buildBadge(doc, chef);
     if (badge) { badge.setAttribute('aria-hidden', 'true'); art.appendChild(badge); }
 
+    const dist = el(doc, 'span', 'cw-carddistrict', districtShort(chef));
     const name = el(doc, 'span', 'cw-cardname', squish(chef.name));
     const role = el(doc, 'span', 'cw-cardrole', roleSegments(chef.store_role).join(' • '));
-    // aria-label already carries the full name; hide the visual text duplicates.
+    // aria-label already carries the district and the full name; hide the
+    // visual text duplicates so the card is announced once, not three times.
+    dist.setAttribute('aria-hidden', 'true');
     name.setAttribute('aria-hidden', 'true');
     role.setAttribute('aria-hidden', 'true');
 
     btn.appendChild(art);
+    if (dist.textContent) btn.appendChild(dist);
     btn.appendChild(name);
     if (role.textContent) btn.appendChild(role);
     btn.addEventListener('click', () => modal.show(chef, btn));
@@ -1543,35 +1908,45 @@ export function initChefWall(opts) {
   /**
    * Render the wall.
    *
-   * THE SLOT COUNT COMES FROM THE ART, NOT THE DATA. There are five frames
-   * painted into the photograph, so we always lay out `frames.length` (capped
-   * at WALL_SIZE) slots and fill them in order:
+   * THE SLOT COUNT COMES FROM THE ART, AND ONLY FROM THE ART.
+   * `frames.length` is the number of picture frames painted into the
+   * photograph — five on the plate this shipped against, six on the re-shot
+   * one — and it is rendered verbatim. There is no cap and no expected number
+   * anywhere in this function: land a seven-entry CHEF_FRAMES and you get seven
+   * slots. That is the whole reason WALL_SIZE stopped being a clamp.
    *
-   *   slot i has a chef  -> a real button
-   *   slot i has no chef -> an empty mat, inert and aria-hidden
+   *   slot i has a chef   -> a real button, plus its engraved district plaque
+   *   slot i has no chef  -> an empty mat, inert and aria-hidden, and the SAME
+   *                          plaque, because the district owns the frame and
+   *                          the week only owns the picture
    *
-   * headchefs.json is regenerated weekly from the Win the Weekend decks, so
-   * three slides one week and seven the next are both normal. Three fills
-   * three frames and leaves two blank; seven fills five and drops the rest.
+   * headchefs.json is rebuilt every 30 minutes from the Win the Weekend decks
+   * (build/pull-headchefs.mjs), which emits ONE ENTRY PER DISTRICT in a stable
+   * order — a district with no slide this week arrives as `vacant: true` rather
+   * than being omitted, so slot i keeps meaning the same district week to week
+   * and nobody's photograph slides one frame to the left because someone else's
+   * deck was mid-edit. Records past the last frame are dropped with a warning;
+   * frames past the last record are blank, in place.
    */
   function build(nextChefs, nextFrames) {
     chefs = (Array.isArray(nextChefs) ? nextChefs : []).filter(Boolean);
     frames = Array.isArray(nextFrames) && nextFrames.length ? nextFrames : DEFAULT_FRAMES;
 
-    // More slides than frames is the only genuinely lossy case: say what was
-    // dropped. Fewer is routine and silent — that is what the blanks are for.
-    if (chefs.length > WALL_SIZE && win.console) {
+    const slots = frames.length;
+
+    // More districts than frames is the only genuinely lossy case: say which
+    // ones fell off the end, by district, because that is what the client will
+    // notice ("where is the West Side?"). Fewer is routine and silent — that is
+    // what the blank mats are for.
+    if (chefs.length > slots && win.console) {
       win.console.warn(
-        `[chefwall] ${chefs.length} head chefs in the data; the room has ${WALL_SIZE} painted ` +
-        `frames. Showing the first ${WALL_SIZE}: ` +
-        chefs.slice(0, WALL_SIZE).map((c) => squish(c && c.name)).join(', ') + '.'
+        `[chefwall] ${chefs.length} districts in the data; the room has ${slots} painted ` +
+        `frames. Dropping: ` +
+        chefs.slice(slots).map((c) => districtShort(c) || squish(c && c.name) || '?').join(', ') +
+        '. Add frames to rooms.js CHEF_FRAMES, or districts to headchefs.json.'
       );
     }
-    if (frames.length < WALL_SIZE && win.console) {
-      win.console.warn(`[chefwall] only ${frames.length} frame boxes supplied; expected ${WALL_SIZE}.`);
-    }
 
-    const slots = Math.min(frames.length, WALL_SIZE);
     const wallFrag = doc.createDocumentFragment();
     const stripFrag = doc.createDocumentFragment();
     // Indexed BY SLOT, so buttons[i] always lines up with chefs[i]. A vacant
@@ -1589,10 +1964,12 @@ export function initChefWall(opts) {
         rotate: Number(raw.rotate) || 0
       };
 
-      // No slide for this frame -> a blank mat, and no card in the strip
-      // (a card with no name and no write-up would just be a dead tile).
-      if (!chef) {
-        try { wallFrag.appendChild(buildVacantFrame(box, i)); } catch (_) {}
+      // No chef behind this frame -> a labelled blank mat, and no card in the
+      // strip (a card with no name and no write-up would just be a dead tile).
+      // `chef` may be absent entirely, or present-but-vacant carrying only the
+      // district — the plaque is built from whichever we have.
+      if (!hasChef(chef)) {
+        try { wallFrag.appendChild(buildVacantFrame(box, i, chef || {})); } catch (_) {}
         buttons[i] = null;
         continue;
       }
@@ -1606,7 +1983,7 @@ export function initChefWall(opts) {
         // A malformed record must never take the room down: fall back to the
         // blank mat so the wall still reads as five frames.
         if (win.console) win.console.warn('[chefwall] slot', i, 'failed; left blank.', err);
-        try { wallFrag.appendChild(buildVacantFrame(box, i)); } catch (_) {}
+        try { wallFrag.appendChild(buildVacantFrame(box, i, chef || {})); } catch (_) {}
         buttons[i] = null;
       }
     }
@@ -1616,6 +1993,30 @@ export function initChefWall(opts) {
   }
 
   build(o.chefs, o.frames);
+
+  /* -- follow the file, not the build ---------------------------------------
+     See the `refreshFrom` docs above. Deliberately fired AFTER the first build
+     so nothing waits on it, and deliberately silent on every failure path. */
+  if (o.refreshFrom && typeof win.fetch === 'function') {
+    const signature = (list) => (Array.isArray(list) ? list : []).map((c) => [
+      districtShort(c), squish(c && c.name), squish(c && c.store_role),
+      squish(c && c.writeup), (c && c.photo_file) || '', !!(c && c.vacant)
+    ].join('\u0001')).join('\u0002');
+
+    win.fetch(o.refreshFrom, { cache: 'no-cache', credentials: 'omit' })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((docJson) => {
+        const next = docJson && Array.isArray(docJson.headchefs) ? docJson.headchefs : null;
+        if (!next || !next.length) return;
+        if (signature(next) === signature(chefs)) return;   // no churn, no reflow
+        build(next, frames);
+        if (win.console && win.console.info) {
+          win.console.info('[chefwall] refreshed from ' + o.refreshFrom +
+            ' (generated ' + (docJson.generated_at || 'unknown') + ').');
+        }
+      })
+      .catch(() => { /* file://, offline, 404 — the inline data stands */ });
+  }
 
   /* -- controller ---------------------------------------------------------- */
   return {
@@ -1633,7 +2034,7 @@ export function initChefWall(opts) {
     /** Programmatically open chef i's slide (used by deep links / the rail). */
     open(i) {
       const chef = chefs[i];
-      if (!chef) return;
+      if (!hasChef(chef)) return;      // an empty frame has nothing to open
       modal.show(chef, buttons[i] || null);
     },
 

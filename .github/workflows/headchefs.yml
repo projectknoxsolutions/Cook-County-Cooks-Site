@@ -1,0 +1,183 @@
+# =============================================================================
+# Cook County Cooks — Head Chef of the Week auto-pull
+# -----------------------------------------------------------------------------
+# Re-reads the two Win-The-Weekend decks, rebuilds headchefs/headchefs.json and
+# the photographs in headchefs/photos/, and commits ONLY when the wall actually
+# changed. This is the mechanism the client asked for: he edits his deck, the
+# break-room wall follows, and nobody has to remember to do anything.
+#
+# WHY A SCHEDULED JOB AND NOT A FETCH IN THE PAGE
+#   The two decks are 4.97 MB and 5.63 MB of single-file HTML with the photos
+#   inlined as base64. Reading them in the browser would put ten megabytes on
+#   every visitor, on a build that is currently being cut back to fit an iPhone's
+#   memory. So they are read here and the visitor downloads ~13 KB of JSON and
+#   ~80 KB of already-resized WebP.
+#
+# EVERY 30 MINUTES, AT :09 AND :39
+#   Not :00/:30. GitHub's scheduler queues heavily on the hour and the half hour,
+#   and a cron at those minutes routinely lands 10-20 minutes late. An offset
+#   costs nothing and keeps the cadence honest. GitHub does not guarantee
+#   scheduled runs at all under load, which is exactly why the parser holds
+#   last-seen for 14 days rather than trusting any single run.
+#
+# NO EMPTY COMMITS
+#   The parser rewrites nothing unless the content a VISITOR could see changed
+#   (`generated_at` and the per-run clocks move every run and are excluded from
+#   that comparison), and this job then commits only if `git status` on
+#   headchefs/ is non-empty. A quiet week produces zero commits.
+#
+# IT DOES NOT FIGHT THE DEPLOY
+#   Only `headchefs/` is ever staged — never index.html, never assets/, never the
+#   fingerprinted copies. build/fingerprint.mjs deliberately does not hash
+#   headchefs/photos/*, so this pipeline and that one do not have to know about
+#   each other. A concurrent push is handled by rebase-and-retry rather than a
+#   force push.
+# =============================================================================
+
+name: Head chefs
+
+on:
+  schedule:
+    # every 30 minutes, offset off the hour — see the note above
+    - cron: '9,39 * * * *'
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: 'Log the per-slide extraction'
+        type: boolean
+        default: false
+
+# Least privilege at the top: the default for every job in this file is
+# read-only. The one job that needs to write asks for it explicitly below.
+permissions:
+  contents: read
+
+# One run at a time. Two overlapping runs would both rebase onto each other and
+# one would lose. `cancel-in-progress: false` because a run that is already
+# committing must be allowed to finish.
+concurrency:
+  group: headchefs-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    name: Re-read the decks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # The ONLY elevated scope in the workflow, and the smallest one that can
+    # commit: no packages, no actions, no id-token, no pull-requests, no issues.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          # Shallow is fine: this job only ever adds one commit on top of HEAD.
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ImageMagick is preinstalled on the ubuntu-* runner images and is the
+      # only external tool the parser uses (photo resize + WebP encode). This
+      # step is a stated precondition, not an install: if it ever disappears
+      # from the image the job fails HERE with a one-line reason instead of
+      # halfway through an encode.
+      - name: Check the image encoder
+        run: |
+          convert -version | head -1
+          convert -list format | grep -qi '^ *WEBP' \
+            || { echo "::error::ImageMagick has no WebP delegate on this runner."; exit 1; }
+
+      - name: Pull the head chefs
+        id: pull
+        run: |
+          node build/pull-headchefs.mjs ${{ inputs.verbose && '--verbose' || '' }}
+
+      # The parser leaves the tree untouched when nothing changed, so this is a
+      # plain question about the working tree — and it is scoped to headchefs/
+      # so a stray change anywhere else can never be swept into this commit.
+      - name: Anything to commit?
+        id: diff
+        run: |
+          if [ -n "$(git status --porcelain -- headchefs)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git status --short -- headchefs
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The decks have not changed the wall. Nothing to commit."
+          fi
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          SUMMARY: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name  'ccc-headchefs-bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # headchefs/ ONLY. -A picks up deleted photos for dropped districts.
+          git add -A -- headchefs
+
+          # Re-check after staging: `git add` on an unchanged tree stages nothing
+          # and `git commit` would then fail rather than no-op.
+          if git diff --cached --quiet; then
+            echo "Nothing staged after all; skipping."
+            exit 0
+          fi
+
+          NAMES=$(node -e '
+            const d = require("./headchefs/headchefs.json");
+            const on = d.headchefs.filter(c => c.name)
+              .map(c => `${c.district_short}: ${c.name}`).join(", ");
+            process.stdout.write(on || "no head chefs on file");
+          ')
+          git commit -m "headchefs: follow the decks" -m "$NAMES"
+
+          # A deploy or another agent may have pushed while we were fetching five
+          # megabytes of deck. Rebase onto them and retry; never force.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected; rebasing onto origin (attempt $attempt)"
+            git fetch --depth=20 origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}"
+          done
+          echo "::error::could not push headchefs after 3 attempts"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Head chef pull"
+            echo ""
+            if [ -f headchefs/headchefs.json ]; then
+              node -e '
+                const d = require("./headchefs/headchefs.json");
+                console.log("| District | Chef | Deck | Last confirmed | Held |");
+                console.log("|---|---|---|---|---|");
+                for (const c of d.headchefs) {
+                  console.log("| " + [
+                    c.district_short || c.district,
+                    c.name || "_(empty frame)_",
+                    c.region_deck || "—",
+                    c.last_confirmed ? c.last_confirmed.slice(0, 16).replace("T", " ") : "—",
+                    c.days_since_confirmed ? c.days_since_confirmed + "d" : "now"
+                  ].join(" | ") + " |");
+                }
+              '
+            else
+              echo "_headchefs.json is missing._"
+            fi
+            echo ""
+            echo "Committed: \`${{ steps.diff.outputs.changed }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

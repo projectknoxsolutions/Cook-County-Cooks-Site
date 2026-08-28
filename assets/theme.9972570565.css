@@ -1428,7 +1428,7 @@ a { color: inherit; text-decoration: none; }
 .room[data-room="dining"]    .plate-wrap { --dark-1400: url("../plates/dining-dark@1400.26ad1671ff.webp");    --dark-1800: url("../plates/dining-dark@1800.9e938d4da8.webp");    --dark-2400: url("../plates/dining-dark.10eb73b9fe.webp"); }
 .room[data-room="prep"]      .plate-wrap { --dark-1400: url("../plates/prep-dark@1400.30d6eb89e9.webp");      --dark-1800: url("../plates/prep-dark@1800.9fb38c4d15.webp");      --dark-2400: url("../plates/prep-dark.8904ff1186.webp"); }
 .room[data-room="office"]    .plate-wrap { --dark-1400: url("../plates/office-dark@1400.abb0c14ca5.webp");    --dark-1800: url("../plates/office-dark@1800.9a31726811.webp");    --dark-2400: url("../plates/office-dark.2765baa283.webp"); }
-.room[data-room="breakroom"] .plate-wrap { --dark-1400: url("../plates/breakroom-dark@1400.0933c08038.webp"); --dark-1800: url("../plates/breakroom-dark@1800.58cf39025b.webp"); --dark-2400: url("../plates/breakroom-dark.fec2378009.webp"); }
+.room[data-room="breakroom"] .plate-wrap { --dark-1400: url("../plates/breakroom-dark@1400.39951c7d3d.webp"); --dark-1800: url("../plates/breakroom-dark@1800.2009b22015.webp"); --dark-2400: url("../plates/breakroom-dark.88e3942c67.webp"); }
 .room[data-room="freezer"]   .plate-wrap { --dark-1400: url("../plates/freezer-dark@1400.14f5990544.webp");   --dark-1800: url("../plates/freezer-dark@1800.4fcf3c2ca6.webp");   --dark-2400: url("../plates/freezer-dark.e3b8eb8f75.webp"); }
 
 /* TIER 1 — the 1400 cut. The floor, and what a short or low-DPR window gets. */
@@ -1670,6 +1670,113 @@ a { color: inherit; text-decoration: none; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   06e · THE CURTAIN  ·  the phone, and what it is allowed to paint
+   ═══════════════════════════════════════════════════════════════════════════
+   ADDED 2026-08-28, second pass. The first pass took the phone's decoded image
+   bytes from 155.9 MB to 35.9 MB (§06b's TIER 0, app.js's PLATE_SIZES,
+   screens.js's MAX_LIVE_FRAMES_PHONE) and the client's iPhone still went blue
+   and unresponsive mid-scroll. It said so in its own report: compositor
+   backing stores were the one thing it had not measured.
+
+   THEY WERE THE WHOLE STORY. Measured on a 393x852 DPR-3 profile, off
+   Chromium's own layer tree rather than off the DOM:
+
+       composited layers ............................. 163  (123 drawing)
+       backing store, clipped to the viewport ........ 120 MB → 262 MB peak
+       the same at ±1 viewport of tile coverage ...... 221 MB → 436 MB peak
+       decoded images (the thing already fixed) ...... 25 MB → 37 MB
+
+   Compositing was never under `will-change`'s control. engine.js caps
+   will-change at six elements and that cap holds — measured peak 6 at every
+   scroll position on every profile. It is simply not what promotes this page.
+   These do, and all of them are unconditional:
+
+       .plate-wrap  translate3d(…)  +  backface-visibility: hidden   (§06)
+       .hotspots    translate3d(…)                                   (§06)
+       .stage       translate3d(0, -1 * --pin-lead, 0)               (§05)
+       .stage::before / ::after   an infinite transform animation    (§06c)
+       .rail        promoted by overlap over the composited plate    (§08)
+
+   So every room carried a full layer stack for the whole session. And because
+   §05 pins each stage a --pin-lead EARLY and releases it a --pin-lead LATE,
+   THREE of those stacks sit on the same viewport rectangle at once at every
+   scroll position — the layers are not spread down the document where a
+   compositor could ignore them, they are piled on the screen. Three rooms of
+   plate + glow + vignette + rail + stage matte + screens glass, at 9 device
+   pixels per CSS pixel, is the ~250 MB peak above, on a phone whose whole tab
+   budget is around 200 MB. WebKit reaps the tab; the ground goes blue.
+
+   ── WHAT THIS SECTION DOES ───────────────────────────────────────────────
+   Nothing paints unless somebody can see it. engine.js's updateResidency()
+   marks every room that is NOT painting — not live, or live with --enter at 0,
+   which is the same number as the stage's own opacity — and this hides it.
+
+   `visibility: hidden` is inherited and it removes the whole subtree from the
+   paint tree, so ONE declaration retires, per dormant room: the plate layer,
+   the glow, the vignette, the hotspot layer, the rail, the stage matte, the
+   two atmosphere layers, every screen's glass and scanlines, and the walk-in's
+   entire door scene. It also stops the browser holding that room's plate
+   decoded, which is the half of §06b's TIER 0 measurement that never came back
+   down — eight plates went resident and stayed resident because, with every
+   stage pinned to the viewport, every plate was technically on screen.
+
+   Measured resident set across the whole runway: 2-3 rooms, never more.
+
+   ── WHY `visibility` AND NOT `content-visibility: hidden` ────────────────
+   content-visibility skips LAYOUT too, and two things on this page read the
+   layout of rooms they are not standing in:
+     · engine.js caches roomRect.top / stageRect.height per room and re-derives
+       liveness from that cache when rAF is not running;
+     · screens.js rations its live iframes by getBoundingClientRect() on the
+       panels INSIDE these stages — under content-visibility those rects
+       collapse to zero and the nearest-board-wins rationing picks the wrong
+       board, silently.
+   visibility:hidden changes no rect anywhere. All of the memory was in paint
+   and compositing; none of it was in layout. Take the part that is free.
+
+   ── AND WHY IT IS SAFE ───────────────────────────────────────────────────
+   · A hidden room is a room whose opacity is already 0. There is no scroll
+     position at which this hides a pixel that was being drawn — --enter and
+     the stage's opacity are the same number, and the promoted pair is held
+     resident unconditionally whatever --enter says.
+   · Nothing may be hidden while it is clickable. It cannot be: a dormant room
+     is a room --cut has already taken the affordances away from (§05), whose
+     .hotspot and .rail-chips are at `clip-path: inset(50%)` and therefore
+     neither painted NOR hit-tested. The curtain closes strictly inside a
+     window that was already dead. Verified by hit-testing the centre of every
+     hotspot, chip and screen in every room at nine scroll offsets: identical
+     before and after, on all six profiles.
+   · The class is written on every breakpoint and consulted only here, so an
+     iPad and a desktop get an inert attribute and byte-identical rendering.
+   · No JS, no class, no curtain: the page renders exactly as it did.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 500px), (max-width: 1000px) and (max-height: 500px) {
+  .room.is-dormant .stage { visibility: hidden; }
+
+  /* The stage's own matte, which is a full-viewport backing store to hold one
+     colour. §05 gives every .stage `background: var(--ink-950)` so a plate that
+     has not decoded yet fades up out of darkness rather than out of white. That
+     is one flat fill, and it costs a 393x852 layer with drawsContent — 11.5 MB
+     at DPR 3, times the three stages that are pinned on the viewport at once.
+
+     On a phone it is buying nothing. `body` is already painted `var(--bg)` with
+     the warm pool over it (§03), background-attachment: fixed, so the ground
+     behind a stage is dark whether the stage paints one or not; the plate's
+     cover box is always at least the size of the stage and always scaled up by
+     --overscan-k, so there is no scroll position at which a decoded plate fails
+     to cover this; and the only frame the matte was ever visible in — a room
+     whose plate has not decoded — now shows the room BEHIND it instead of a
+     black rectangle, which is better, not worse. Measured: .stage drops out of
+     the drawing set entirely, -34.5 MB of clipped backing store.
+
+     THE HERO KEEPS ITS MATTE. It is the LCP element, it is the one plate that
+     is genuinely being waited for, and there is no room behind it — see the
+     `.hero .stage` rule in §08. */
+  .room .stage { background: none; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
    06d · PER-ROOM ART DIRECTION
    ═══════════════════════════════════════════════════════════════════════════
    The crop, and what the air in each room is doing. app.js writes --focus-x /
@@ -1711,6 +1818,18 @@ a { color: inherit; text-decoration: none; }
    that subject off to the right on every iPad in landscape. Back to centre,
    and --overscan-k returns to the default with it. */
 .room[data-room="office"] { --art-x: .5; }
+
+/* THE BREAK ROOM'S VERTICAL ANCHOR — why the television kept getting clipped.
+   The client, twice: "the TV is still cut off at the top... the header of the
+   website covers the tv." It was never the panel: the plate is cover-cropped,
+   and at --art-y .5 the crop is centred, so on a wide window the top of the
+   plate goes out of frame and the fixed 64px ticket rail eats what is left.
+   The television's glass starts at plate-y 13.28. Anchoring the crop toward
+   the top of the plate hands those percent back — 0.18 keeps the floor and rug
+   in shot (the title and chips live down there) while clearing the rail at
+   every aspect this room is seen at. Verified, not guessed: see the check in
+   the deploy notes. */
+.room[data-room="breakroom"] { --art-y: .18; }
 
 /* Every room that wants air or a wandering filament turns the pseudo-elements
    on and then says what it is. A room absent from this table generates
@@ -2578,18 +2697,31 @@ a { color: inherit; text-decoration: none; }
 
 @property --bracket { syntax: "<length-percentage>"; inherits: true; initial-value: 13px; }
 
-/* ── THE ONE ROOM THAT KEEPS THE v3 ORDER ─────────────────────────────────
-   The z ladder puts this layer above .rail so that a mounted screen is not
-   painted through .rail::before's wash (read the note there). The Break Room
-   has no mounted screen — chefwall.js's strip is detached into the rail at
-   init and the frames on this layer are photographs, not glass — so it gains
-   nothing from the swap, and it loses something real: its title sits over the
-   locker bank, and the `training-*` hotspot brackets came up through
-   "Break Room" as gold hairlines across the glyphs. SPEC-v4: "Break Room is
-   finished. Do not touch its composition." So it keeps the order it was
-   composed under. This is a per-room custom property on a closer ancestor
-   than :root, so it wins without a specificity fight. */
-.room[data-room="breakroom"] { --z-hotspot: 10; }
+/* ── THE BREAK ROOM'S EXCEPTION, RETIRED 2026-08-28 ───────────────────────
+   This room used to keep the v3 order (`--z-hotspot: 10`, i.e. the hotspot
+   layer BELOW .rail) on the grounds that it "has no mounted screen", so it
+   gained nothing from being above .rail::before's wash, and that its title sat
+   over the locker bank with the `training-*` brackets showing through the
+   "Break Room" glyphs as gold hairlines.
+
+   Every clause of that is now false:
+     · It HAS a mounted screen — the Daily Sales Report television — and under
+       the old order it was painted through the wash, exactly the failure the
+       note at §08a describes for the Pass tablets.
+     · The chef wall is on this layer too, and the wash capped it hard. Probing
+       a pure-white/pure-black pair inside .hotspots measured a CEILING of
+       2.94:1 at the left frame and 9.20:1 at the right — no colour choice can
+       reach 7:1 through that. Hiding .rail::before alone took the same probe
+       to 21:1. The photographs suffered the same way: the leftmost chef
+       rendered at ~35% of the wall's brightness, the rightmost at ~70%.
+     · The title no longer sits over the lockers. v8 removed the per-room
+       description and dropped the title below the frame row (55.7–71.0px of
+       clearance, measured across the runway), so there is nothing left for a
+       bracket to cross.
+
+   SPEC-v4's "Break Room is finished, do not touch its composition" was written
+   about a five-frame room with no television. The room has since been re-shot
+   twice at the client's request. The exception outlived its reasons. */
 
 .hotspots {
   z-index: var(--z-hotspot);
@@ -4621,6 +4753,50 @@ dialog#c3-menu[open],
     transition-duration: 1ms !important;
     transition-delay: 0ms !important;
   }
+}
+
+/* ── THE PHONE'S GLASS, WHICH IS THE OTHER PER-FRAME SURFACE (§06e) ───────
+   A backdrop-filter is not a paint, it is a READBACK: the compositor copies
+   what is behind the element into a scratch surface, blurs it, and composites
+   the result — every frame the backdrop moves. #ticket-rail is fixed over a
+   photograph that moves on literally every frame of every scrub, so it re-read
+   its backdrop for the whole session AND forced the content beneath it onto a
+   surface of its own to be read FROM.
+
+   §17's narrow band already drops this on .chip for layout reasons. The phone
+   drops the remaining five and pays for the lost separation in opacity — the
+   same trade, and very nearly the same numbers, as the reduced-transparency
+   block immediately below, which has been shipping since v3. Every one of these
+   gets MORE opaque, not less, so the contrast budget only improves.
+
+   IT LIVES HERE, AT THE FOOT OF THE FILE, AND NOT IN §06e WHERE IT BELONGS
+   COMPOSITIONALLY. Every component it names is declared later in this file than
+   §06e is, at the same specificity, so an override written up there loses the
+   cascade and does nothing — which is exactly what the first draft of it did.
+   Keep it below the last declaration of all five.
+
+   The condition is the phone band, identical to §06b's TIER 0 and §06e's, and
+   deliberately not §17's narrow band: an iPad Pro portrait matches that one and
+   the glass on an iPad is fine. */
+@media (max-width: 500px), (max-width: 1000px) and (max-height: 500px) {
+  #ticket-rail, #c3-menu, #c3-button, .hotspot-label, .keypad-scrim {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  #ticket-rail   { background: linear-gradient(to bottom,
+                     color-mix(in oklab, var(--ink-950) 96%, transparent) 0%,
+                     color-mix(in oklab, var(--ink-950) 88%, transparent) 62%,
+                     color-mix(in oklab, var(--ink-950) 62%, transparent) 100%); }
+  #c3-menu       { background: var(--ink-900); }
+  #c3-button     { background: linear-gradient(180deg,
+                     color-mix(in oklab, var(--slate) 96%, transparent),
+                     var(--ink-900)); }
+  .hotspot-label { background: color-mix(in oklab, var(--ink-900) 96%, transparent); }
+  .keypad-scrim  { background:
+                     radial-gradient(90% 70% at 50% 40%,
+                       color-mix(in oklab, var(--ice-800) 62%, transparent) 0%,
+                       transparent 70%),
+                     rgb(6 11 16 / .96); }
 }
 
 /* Transparency preference — drop the glass, keep the contrast */

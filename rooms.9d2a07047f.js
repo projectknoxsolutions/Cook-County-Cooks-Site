@@ -157,43 +157,47 @@ export const HOTSPOTS = {
   ],
   breakroom: [
     /* THE DAILY SALES REPORT, ON THE BREAK-ROOM WALL.
-       The client: "above the head chef of the week photos, I would like to have
-       another tv mounted on the wall that scrolls through the daily sales report
-       (all slides)." The plate was re-shot with that television added above the
-       row of five frames — everything else in the room held its position, which
-       is why the chef frames below are almost unchanged.
-       Glass traced at x 40.54→59.83, y 11.12→30.60; inset ~0.5% to sit inside
-       the bezel. Unlike the host stand's frozen promo card, this one runs the
-       whole deck.
+       The plate was re-shot (2026-08-28) for two client asks at once: SIX chef
+       frames instead of five, and "move the TV down to cover the gold plate
+       above the Head Chef of the week... the header of the website covers the
+       tv, so that's why I want to move it down."  Both are in the art now: the
+       brass plaque is gone, the television hangs lower and is 24% wider, and
+       the frame row grew to six.
 
-       MODE 'report', NOT 'live' — the geometry above is traced off the plate
-       and is correct; an iframe of the deck at this size is not. The Daily
-       Sales Report is a fixed 1920x1080 canvas that scales ITSELF by
-       min(iw/1920, ih/1080), so inside a frame its type comes out at
-       panelWidth/1920 of its authored size whatever virtual viewport it is
-       handed — and this panel measures 297 CSS px of glass at a 1440 viewport,
-       which puts the deck's store names at 4.3-6.5px. (The lever that fixed
-       the two Dining boards — a narrower virtual viewport — does nothing here:
-       those decks size their type in vw, this one does not.) Reaching a 12px
-       floor would need a television ~75% of the plate wide, and even a re-shot
-       45% one only buys 7.2px. So screens.js renders the same numbers from the
-       same three files natively, sized in percent of this panel. See the
-       MODE: report block in assets/screens.js §3 for the full measurement. */
-    { slug:'daily-sales', kind:'screen', mode:'report',
-      x:41.0, y:11.6, w:18.4, h:18.6, label:'Daily Sales Report' },
+       Glass traced by connected component at four thresholds (14/16/18/20 all
+       agree, fill 0.99 — a clean rectangle):
+         x 39.92 -> 62.71,  y 13.28 -> 35.90     (was 40.54 -> 59.83, 11.12 -> 30.60)
+       Inset ~0.4% so the mount sits inside the bezel.
+
+       Mode is `live`, not `report`: the client saw the native board and chose
+       the real deck — "the slides are altered to match the aesthetic of the
+       restaurant, but these can just stay the same as they appear on the actual
+       slides. I'm good with that."  The Daily Sales Report is a fixed 1920x1080
+       canvas, so it fits this 16:9-ish panel without the fluid-deck height
+       problem the Dining boards have. */
+    { slug:'daily-sales', kind:'screen', mode:'live',
+      x:40.3, y:13.6, w:22.0, h:22.0, label:'Daily Sales Report' },
 
     { kind:'chefs' },
 
-    /* The locker bank runs x 17.5 → 30.5 (the navy wall's blue-dominance takes
-       over at 31.0). Seams at 17.2 / 21.5 / 25.1 / 28.6 give four doors, the
-       last of them partly occluded — theme.css's minimum-target expansion keeps
-       it tappable. Widths follow the art rather than a uniform guess. */
-    { slug:'training-xfinity',      kind:'tool', x:18.0, y:42.0, w:3.2, h:29.0, label:'Xfinity Product Mastery' },
-    { slug:'training-straight-line',kind:'tool', x:22.0, y:42.0, w:2.9, h:29.0, label:'Sales Process 101' },
-    { slug:'training-tsheet',       kind:'tool', x:25.6, y:42.0, w:2.8, h:29.0, label:'The Plus-First Playbook' },
-    { slug:'training-pos',          kind:'tool', x:28.9, y:42.0, w:1.6, h:29.0, label:'Celestial Point of Sale' },
+    /* The locker bank is four doors, seams read off a 6x crop of the new plate.
+       It runs x 17.4 -> 30.4 and the sofa occludes it below y 68.
 
-    { slug:'fox-run',               kind:'tool', x:89.5, y:30.0, w:10.5, h:60.0, label:'C³ FOX RUN', edge:'right' },
+       HEIGHT IS 22, NOT 26, AND THE FOUR PERCENT IS NOT SPARE. The Break Room
+       used to keep the v3 z-order with its hotspot layer BELOW .rail; §09 has
+       the full story of why that was retired (the wash was capping the chef
+       wall at 2.94:1 and painting through the new television). The cost of
+       retiring it is that these brackets now paint ABOVE the rail card, and on
+       a SHORT window they reached down into the chip rows — measured across the
+       whole runway at five sizes, only 1512x751 clashed and it needed 3.29% of
+       plate height. 22 gives it 4%. The doors still run y 42 -> 64 against art
+       that is unoccluded to 68, so nothing was lost but the overlap. */
+    { slug:'training-xfinity',      kind:'tool', x:18.2, y:42.0, w:3.1, h:22.0, label:'Xfinity Product Mastery' },
+    { slug:'training-straight-line',kind:'tool', x:21.6, y:42.0, w:3.3, h:22.0, label:'Sales Process 101' },
+    { slug:'training-tsheet',       kind:'tool', x:25.1, y:42.0, w:3.3, h:22.0, label:'The Plus-First Playbook' },
+    { slug:'training-pos',          kind:'tool', x:28.5, y:42.0, w:1.9, h:22.0, label:'Celestial Point of Sale' },
+
+    { slug:'fox-run',               kind:'tool', x:89.5, y:30.0, w:10.5, h:62.0, label:'C\u00b3 FOX RUN', edge:'right' },
   ],
   freezer: [
     { kind:'lock', x:34.3, y:47.0, w:2.6, h:8.0, label:'Manager access' },
@@ -223,7 +227,7 @@ export const HOTSPOTS = {
        ⚠ NO slug AND NO label, ON PURPOSE, AND DO NOT ADD THEM.
        This tool lives behind the walk-in's lock, which means it is not in the
        deployed tree at all — it is AES-256-GCM ciphertext in
-       data/freezer.sealed.1331199a61.json (see build/seal-freezer.mjs and the gate note
+       data/freezer.sealed.90fd42acaa.json (see build/seal-freezer.mjs and the gate note
        in app.js §2). Writing its slug, its name or its URL here would put in
        plaintext exactly the three strings the seal exists to remove, and
        build/seal-freezer.mjs's own leak check would fail the next build.
@@ -238,14 +242,25 @@ export const HOTSPOTS = {
   ],
 };
 
-/* The five picture-frame mat openings on the break-room wall, measured off the
-   render.  chefwall.js drops chefs[i] into frames[i] — order is the contract. */
+/* The SIX picture-frame mat openings on the break-room wall (the plate was
+   re-shot 2026-08-28 to add the sixth), measured off the render rather than
+   estimated: each frame's centre row and column was profiled, and the mat
+   opening is the flat 153-grey plateau between the white border strips —
+   x 33.71/40.90/48.10/55.29/62.49/69.68, pitch 7.194, every one 3.92 x 10.97
+   and all six sharing y 41.98. Frames 1-5 were read directly; frame 6 sits
+   next to the espresso machine's highlight so its profile is contaminated —
+   it is placed on the measured pitch and confirmed by sampling its interior
+   (flat, std ~1.0, i.e. a real empty mat).
+   chefwall.js drops chefs[i] into frames[i] — order is the contract, and that
+   order is the district order in headchefs.json: Big South, West Side,
+   East Side, North Side, South Side, Xfinity. */
 export const CHEF_FRAMES = [
-  { x:33.53, y:41.88, w:4.09, h:11.11, rotate:0 },
-  { x:40.80, y:41.88, w:4.09, h:11.11, rotate:0 },
-  { x:48.07, y:41.88, w:4.09, h:11.11, rotate:0 },
-  { x:55.34, y:41.88, w:4.09, h:11.11, rotate:0 },
-  { x:62.61, y:41.88, w:4.09, h:11.11, rotate:0 },
+  { x:33.71, y:41.98, w:3.92, h:10.97, rotate:0 },
+  { x:40.90, y:41.98, w:3.92, h:10.97, rotate:0 },
+  { x:48.10, y:41.98, w:3.92, h:10.97, rotate:0 },
+  { x:55.29, y:41.98, w:3.92, h:10.97, rotate:0 },
+  { x:62.49, y:41.98, w:3.92, h:10.97, rotate:0 },
+  { x:69.68, y:41.98, w:3.92, h:10.97, rotate:0 },
 ];
 
 

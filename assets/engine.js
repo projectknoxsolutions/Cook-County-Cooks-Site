@@ -239,6 +239,11 @@ const state = {
   promoA: -1,
   promoB: -1,
 
+  // Residency — bitmask of the rooms currently allowed to paint. -1 means "not
+  // yet computed", which is never a valid mask, so the first frame always
+  // writes. See updateResidency().
+  residentMask: -1,
+
   // scrollToRoom tween
   tween: null,          // { from, to, start, dur, resolve, cancelled }
 
@@ -431,6 +436,7 @@ function serviceFrame(now, dt, snap, resolve, fromFallback) {
   if (resolve) resolveComposite(scrollY);
   flushWrites();
   updatePromotions(scrollY);
+  updateResidency();
   updateActiveRoom(scrollY);
   return true;
 }
@@ -902,6 +908,119 @@ function updatePromotions(scrollY) {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * RESIDENCY — "the curtain".  Which rooms are allowed to PAINT at all.
+ *
+ * THE DEFECT THIS EXISTS TO KILL, MEASURED 2026-08-28 at 393x852 DPR 3.
+ *
+ * updatePromotions() above caps `will-change` at six elements, and that cap is
+ * real and it works — measured peak 6, every profile, every scroll position.
+ * It is also almost beside the point, because will-change was never what was
+ * compositing this page. Every room carries, from theme.css and not from here:
+ *
+ *     .plate-wrap   translate3d(...) + backface-visibility: hidden
+ *     .hotspots     translate3d(...)
+ *     .stage        translate3d(0, -1 * --pin-lead, 0)
+ *     .stage::before / ::after   an infinite transform/opacity animation
+ *     .rail         promoted by Overlap over the composited plate
+ *
+ * A 3D transform is an unconditional promotion. So the page ran with ALL EIGHT
+ * rooms' layer stacks alive for the whole session — Chromium's own layer tree,
+ * same profile: 163 composited layers, 123 of them drawing content.
+ *
+ * And they are not spread down the document, which is the part that made this
+ * fatal rather than merely wasteful. Every .stage is sticky and pinned a full
+ * --pin-lead EARLY (see theme.css §05), so THREE stages sit on the same
+ * viewport rectangle at once at every scroll position, each with its own plate,
+ * glow, vignette, rail and screens. Charging every drawing layer only the part
+ * of it that intersects the viewport, at 4 bytes a device pixel:
+ *
+ *     backing store, viewport-clipped, DPR 3 ....... 120 MB → 262 MB peak
+ *     the same at ±1 viewport of tile coverage ..... 221 MB → 436 MB peak
+ *
+ * on a phone whose whole tab budget is around 200 MB. That is the blue screen.
+ *
+ * THE FIX IS TO STOP PAINTING ROOMS NOBODY IS LOOKING AT. A room paints iff it
+ * is live (the observer's one-viewport band) AND its --enter is above zero —
+ * --enter IS the stage's opacity, so "enter is 0" and "contributes no pixel"
+ * are the same statement. Everything else gets `visibility: hidden` from
+ * theme.css §06e, which takes its whole subtree out of the paint tree: no
+ * layer, no backing store, no decoded plate held resident, no atmosphere
+ * animation being composited, no screens glass. Measured resident set across
+ * the full runway: 2-3 rooms, never more.
+ *
+ * WHY `visibility` AND NOT `content-visibility`. visibility:hidden does not
+ * touch layout. Every rect on the page stays exactly what it was, which
+ * matters twice: the engine's own geometry cache (roomRect.top, stageRect
+ * height) is unaffected, and screens.js rations its live iframes by
+ * getBoundingClientRect() on panels inside these stages — under
+ * content-visibility those rects collapse to zero and the rationing silently
+ * picks the wrong board. The saving here is paint and compositing, which is
+ * where all of the memory was; layout was never the problem.
+ *
+ * THE PROMOTED PAIR IS ALWAYS RESIDENT, whatever --enter says. It is the same
+ * two rooms updatePromotions() just chose, so the two sets can never disagree
+ * about which room is on screen, and a room can never be promoted and hidden
+ * at the same time — which would be a layer allocated to paint nothing.
+ *
+ * THIS FUNCTION WRITES A CLASS AND NOTHING ELSE, ON EVERY BREAKPOINT. The
+ * class does nothing at all until theme.css §06e's phone query matches: iPads
+ * and desktops get an inert attribute and byte-identical rendering, which is
+ * the requirement. Gating it in JS instead would mean a phone that rotates
+ * across the band has to re-derive residency from a media listener; a class
+ * that is always correct and only sometimes consulted cannot get that wrong.
+ *
+ * Cost: one bitmask compare per frame, and a DOM write only when the resident
+ * set changes — a handful of times per full-page scroll, the same shape as
+ * updatePromotions(). Eight rooms fit in a Uint8, so the compare is one int.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/* The --enter below which a stage contributes no pixel at all. theme.css §05
+ * resolves the stage's opacity as `clamp(0, (--enter - 0.22) * 1.43, 1)`, so a
+ * room at --enter 0.22 or below is ALREADY fully transparent — hiding it cannot
+ * remove anything anybody can see. The margin below that constant is deliberate
+ * slack for the day somebody re-solves the dissolve ramp: if this number drifts
+ * under the CSS one the curtain closes early and nothing happens, and if the CSS
+ * one drops below this the promoted pair still holds two rooms open. Measured
+ * effect of raising it from 0 to 0.20: the resident set is 2 rooms rather than 3
+ * at five of the nine sampled scroll positions, for no visible difference at any
+ * of them. Keep it BELOW theme.css's 0.22. */
+const PAINT_FLOOR = 0.20;
+
+function updateResidency() {
+  const rooms = state.rooms;
+  const V = state.V;
+  const live = state.liveFlags;
+
+  let mask = 0;
+  for (let i = 0; i < rooms.length && i < 31; i++) {
+    const v = i * V_STRIDE;
+    // Promoted rooms are resident by definition; otherwise: live, and painting.
+    const on = (i === state.promoA || i === state.promoB) ||
+               (live[i] === 1 && (V[v + V_ENTER] > PAINT_FLOOR ||
+                                  V[v + V_ENTER_T] > PAINT_FLOOR));
+    if (on) mask |= (1 << i);
+  }
+
+  if (mask === state.residentMask) return;   // steady state: no writes
+  state.residentMask = mask;
+
+  for (let i = 0; i < rooms.length && i < 31; i++) {
+    // classList.toggle with an explicit second argument is idempotent, so this
+    // only dirties style for the rooms that actually flipped.
+    rooms[i].el.classList.toggle('is-dormant', (mask & (1 << i)) === 0);
+  }
+}
+
+/** Draw every curtain back. Used by reduced motion (where the loop never runs,
+ *  so residency would never be recomputed) and by teardown. */
+function clearResidency() {
+  state.residentMask = -1;
+  for (const r of state.rooms) {
+    try { r.el.classList.remove('is-dormant'); } catch (_) { /* noop */ }
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Active-room tracking → onRoomChange.
  * Pure arithmetic over cached geometry; the top menu gets its highlight for free.
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -973,6 +1092,11 @@ function applyReducedMotion() {
     state.W[w + 4] = 1;
     state.W[w + 5] = 1;
   }
+
+  // Reduced motion means the loop never runs, so updateResidency() would never
+  // be called again to lift a curtain. Every room is static, correct and
+  // visible; none of them may be hidden.
+  clearResidency();
 
   // The menu still needs to know where we are.
   updateActiveRoom(window.scrollY || 0);
@@ -1441,6 +1565,7 @@ export function initEngine(root) {
   state.activeIndex = -1;
   state.promoA = -1;
   state.promoB = -1;
+  state.residentMask = -1;
   state.lastScrollY = -1;
   state.dirty = true;
 
@@ -1549,6 +1674,9 @@ export function destroyEngine() {
   for (const r of state.rooms) {
     try { setRoomPromotion(r, false); } catch (_) { /* noop */ }
   }
+  // Leaving `is-dormant` behind on a torn-down page would hide six rooms for
+  // whatever mounts next.
+  clearResidency();
   state.rooms = [];
   state.byName.clear();
   state.byId.clear();
@@ -1557,6 +1685,7 @@ export function destroyEngine() {
   state.activeIndex = -1;
   state.promoA = -1;
   state.promoB = -1;
+  state.residentMask = -1;
   state.dissolveInFlight = false;
 }
 

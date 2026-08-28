@@ -73,7 +73,7 @@
  * -------------------------------------------------------------------------- */
 
 /** The two public, CORS-open data files behind the Host Stand and Back Office. */
-import { freshUrl } from './overlay.4af204bca5.js';   // shared fresh-load cache buster
+import { freshUrl } from './overlay.4f3d508582.js';   // shared fresh-load cache buster
 
 export const PROMO_CARD_URL =
   'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/promo-card.jpg';
@@ -384,7 +384,7 @@ function getTool(slug) {
  * 3 · Stylesheet
  *
  * Injected once, prefixed `ccc-scr`, every colour and face read through a
- * `var(--ccc-…, fallback)` so assets/theme.c2165c70e6.css owns the look. Nothing here
+ * `var(--ccc-…, fallback)` so assets/theme.9972570565.css owns the look. Nothing here
  * animates anything but transform / opacity / filter.
  * -------------------------------------------------------------------------- */
 
@@ -1440,6 +1440,76 @@ const STYLES = `
   .ccc-scr__frame,
   .ccc-scr__hit,
   .ccc-scr-feed__dots span { transition: none; }
+}
+
+/* ══ the phone, and the two layers a screen does not need there ═══════════
+   ADDED 2026-08-28. Measured off Chromium's layer tree at 393x852 DPR 3, with
+   theme.css §06e's curtain already drawn, six screen panels on the viewport:
+
+     .ccc-scr__scan::after ... 6 composited layers, 21.2 MB of backing store
+     .ccc-scr__glass ......... 6 composited layers,  9.9 MB
+
+   __scan::after is the slow refresh bar. It is an INFINITE transform animation,
+   which is an unconditional promotion — the layer exists and is backed for the
+   whole session whether the sweep is visible or not, and it is inset -60% so
+   the layer is 2.2x the height of the panel it decorates. On a 349px-wide phone
+   panel the sweep it buys is roughly one perceptible highlight crossing a
+   thumbnail every 7.5 seconds. The scanline texture on __scan itself — the
+   thing that actually reads as a screen — is a static background and stays.
+
+   __glass carries a transform of translateZ(0), which promotes it to hold a flat
+   two-stop gradient and a filter that only moves when a board powers on. The
+   promotion is worth having on an iPad, where the panels are large, warped onto
+   a wall plane and composited against a moving photograph. In the phone band
+   they are small, axis-aligned and in a static band under the plate.
+
+   The reduced-motion block above already switches the sweep off by exactly this
+   route, and has since v3; this is the same concession spent on a different
+   constraint. THE CONDITION IS THE PHONE BAND (PHONE_MEDIA), not the narrow
+   band — an iPad Pro portrait matches the narrow band and must not be touched
+   here. Keep it identical to PHONE_MEDIA, theme.css §06b TIER 0 and §06e. */
+@media (max-width: 500px), (max-width: 1000px) and (max-height: 500px) {
+  .ccc-scr__scan::after { display: none; }
+  .ccc-scr__glass { transform: none; }
+
+  /* AND THE BAND OF A ROOM THAT DOES NOT OWN THE PAGE.
+     .ccc-scr-layer's opacity is var(--cut), which theme.css §05 resolves to
+     EXACTLY 0 for every room that is not the one the visitor is standing in —
+     and --live-cut is the binary form of the same number, registered with
+     initial-value 1 so this query cannot match a page without theme.css. The
+     band is therefore already invisible AND already un-hittable (--cut-clip
+     puts its buttons at inset(50%)) in the state this hides it in; all that is
+     left to remove is the compositor layer, which an opacity of 0 does not.
+     Measured: 5.7 MB of backing store per band, two bands resident at the
+     worst scroll position on a phone.
+
+     .stage is the style container (theme.css §05 names it), and this layer is
+     its child, so the query resolves against the room this band belongs to. */
+  @container style(--live-cut: 0) {
+    .ccc-scr-layer { visibility: hidden; }
+  }
+
+  /* AND THE SLIDE CAROUSELS, WHICH WERE PROMOTING THE WHOLE DECK.
+     Both rotators stack every slide absolutely and cross-fade one to the next,
+     and both give the resting state a translate3d(0, .4em, 0). A 3D transform is
+     an unconditional promotion, so EVERY slide in the rotation carried a
+     composited layer with a backing store for the whole session, not just the
+     one on screen. Measured at 393x852 DPR 3, the Break Room board mid-scroll:
+     NINE .ccc-scr-rpt__slide layers at 349x236, 25.4 MB of backing store, to
+     show one card. It was the second largest item on the page at its worst
+     scroll position, behind the plates themselves.
+
+     The 2D form of the same offset renders identically and promotes nothing.
+     The cross-fade is unaffected: a transform/opacity TRANSITION is composited
+     while it runs whether or not the resting value was 3D, so the incoming and
+     outgoing slide are promoted for the 0.55s they are moving and then let go —
+     which is what the promotion was worth in the first place. Layer count for a
+     nine-card rotation: 9 always, to at most 2 while a card is turning.
+
+     The .is-current rule above needs no change: a transform of none is not a
+     3D transform and was never promoting anything. */
+  .ccc-scr-rpt__slide  { transform: translate(0, .4em); }
+  .ccc-scr-feed__slide { transform: translate(0, .45em); }
 }
 
 /* ══ forced colours ══════════════════════════════════════════════════════ */
@@ -3438,7 +3508,7 @@ function reconcile() {
   // 2. Live iframes are rationed, nearest-to-the-viewport first.
   const live = all.filter((r) => r.mode === 'live');
   for (const rec of live) {
-    if (!rec.wantsMount && rec.active) { rec.active = false; rec.api.deactivate(rec); }
+    if (!liveWanted(rec) && rec.active) { rec.active = false; rec.api.deactivate(rec); }
   }
 
   const mid = window.innerHeight / 2;
@@ -3465,7 +3535,7 @@ function reconcile() {
     running = running.filter((r) => r !== worst);
   }
 
-  const waiting = live.filter((r) => r.wantsMount && !r.active)
+  const waiting = live.filter((r) => liveWanted(r) && !r.active)
     .map((r) => ({ rec: r, d: dist(r) }))
     .sort((a, b) => a.d - b.d);
 
@@ -3493,6 +3563,61 @@ function reconcile() {
   for (const rec of live) {
     if (rec.wantsMount && !rec.active && rec.api && rec.api.hold) rec.api.hold(rec);
   }
+}
+
+/* ── WHEN A PHONE IS ALLOWED TO HOLD A LIVE DOCUMENT ──────────────────────
+ * MAX_LIVE_FRAMES_PHONE caps live iframes at one. It does not say for how
+ * long, and on this page that turned out to be "essentially always": the lazy
+ * gate above is an IntersectionObserver with rootMargin 150%, and the panel it
+ * observes lives inside a STICKY stage that theme.css §05 pins to the viewport
+ * a full --pin-lead early and releases a --pin-lead late. A pinned panel's rect
+ * sits at the top of the viewport and stops moving, so the observer keeps
+ * reporting it as intersecting for the whole of its room's runway and a
+ * viewport and a half either side of that. Measured at 393x852: the Dining
+ * boards were mounted from scrollY 591 to 7092 out of 8230 — a whole extra
+ * document, laid out in a 1703x960 virtual viewport, carried through five rooms
+ * that do not contain it. (The Win-the-Weekend deck is 5.6 MB of HTML.)
+ *
+ * theme.css §06e's curtain already knows exactly when a room is not being
+ * looked at, and engine.js publishes it as one class. So on a phone a live
+ * iframe additionally requires its own room to be resident. Nothing changes
+ * anywhere else: `is-dormant` is only ever set by engine.js, it is set on every
+ * breakpoint, and this is the only place outside theme.css §06e that reads it.
+ *
+ * ON AN iPAD AND A DESKTOP THIS FUNCTION IS `rec.wantsMount`, EXACTLY AS
+ * BEFORE. isPhone cannot match an iPad — see PHONE_MEDIA — and a panel with no
+ * room element (a standalone mount) is never gated.
+ *
+ * WHAT THE UNBUDGETED BOARD SHOWS IS UNCHANGED: hold() below still gives it the
+ * branded holding card, still names the board, and the button over the glass is
+ * still live, so "every screen readable and clickable the whole time its room
+ * is on screen" holds — the room this defers is a room that is not on screen.
+ */
+function liveWanted(rec) {
+  if (!rec.wantsMount) return false;
+  if (!isPhone || !rec.roomEl) return true;
+  return !rec.roomEl.classList.contains('is-dormant');
+}
+
+/* liveWanted() reads a class that nothing in this module writes, so nothing in
+ * this module would ever notice it change: reconcile() runs on observer
+ * callbacks and media changes, and a curtain lifting is neither. Without this
+ * watch a board would go dark when its room went dormant and never come back.
+ *
+ * One MutationObserver for the whole page, attributeFilter'd to `class`, on the
+ * handful of .room elements that actually contain a live panel. engine.js
+ * touches those classes a few times per full-page scroll (updateResidency()
+ * early-outs on an unchanged bitmask), so this fires about as often as the room
+ * label in the top bar changes. reconcile() is idempotent. */
+let residencyObs = null;
+const residencyWatched = new WeakSet();
+
+function watchResidency(roomEl) {
+  if (!roomEl || residencyWatched.has(roomEl)) return;
+  if (typeof MutationObserver !== 'function') return;
+  if (!residencyObs) residencyObs = new MutationObserver(() => reconcile());
+  residencyWatched.add(roomEl);
+  residencyObs.observe(roomEl, { attributes: true, attributeFilter: ['class'] });
 }
 
 /** Pull url/title off the registry once it exists. */
@@ -3588,6 +3713,10 @@ export function mountScreen(cfg = {}) {
     planeW: 0, planeH: 0,
     narrow: null,
     band: null,
+    // The .room this panel lives in, cached at registration. reconcile() reads
+    // its `is-dormant` class to decide whether a live iframe is allowed — see
+    // liveWanted(). Null for a panel mounted outside a room.
+    roomEl: roomOf(host).room,
     active: false,
     wantsMount: false,
     destroyed: false,
@@ -3615,6 +3744,10 @@ export function mountScreen(cfg = {}) {
   /* --- lazy gate -----------------------------------------------------------
      A screen comes to life about one and a half viewports out. Anything
      further away is not worth an iframe or a fetch on an iPad. */
+  // Only `live` panels are rationed by residency, so only their rooms are
+  // watched — see liveWanted() and watchResidency().
+  if (mode === 'live') watchResidency(rec.roomEl);
+
   if ('IntersectionObserver' in window) {
     rec.io = new IntersectionObserver((entries) => {
       for (const entry of entries) rec.wantsMount = entry.isIntersecting;
@@ -3726,7 +3859,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* =============================================================================
- * CLASS HOOKS — the contract with assets/theme.c2165c70e6.css
+ * CLASS HOOKS — the contract with assets/theme.9972570565.css
  * -----------------------------------------------------------------------------
  * Structure (one per screen):
  *   .ccc-scr[data-screen-panel="<slug>"]      the panel

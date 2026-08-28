@@ -1679,6 +1679,13 @@ async function boot() {
       host: wallHost,
       chefs: raw.headchefs.headchefs || [],
       frames: CHEF_FRAMES,
+      // The inline bootstrap in index.html is a BUILD-TIME snapshot, and the
+      // 30-minute head-chef auto-pull commits headchefs/** only — so without
+      // this the page renders the snapshot for ever while headchefs.json moves
+      // underneath it. chefwall.js mounts from the inline data first and then
+      // re-reads this one ~13 KB file; it never fetches the decks. See the
+      // `refreshFrom` docs in chefwall.js.
+      refreshFrom: 'headchefs/headchefs.json',
       // Below 900px theme.css hides .hotspots outright, so the wall's narrow
       // fallback strip has to live somewhere untransformed and still visible:
       // the break room's own rail. This is exactly the case chefwall.js's

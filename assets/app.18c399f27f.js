@@ -36,17 +36,17 @@
  * Plain ES module. No build step, no npm, no framework, no external JS.
  * ========================================================================== */
 
-import { initEngine, scrollToRoom, onRoomChange } from './engine.bf3009e5e2.js';
-import { initOverlay, openTool } from './overlay.4af204bca5.js';
-import { mountRoomScreens } from './screens.6455361beb.js';
-import { initChefWall } from './chefwall.3c6129e091.js';
-import { initLabels } from './labels.c26d13eaea.js';
-import { buildWallPrint, revealWallPrints } from './wallprint.3e5e6275d7.js';
+import { initEngine, scrollToRoom, onRoomChange } from './engine.3ee0075857.js';
+import { initOverlay, openTool } from './overlay.4f3d508582.js';
+import { mountRoomScreens } from './screens.4d7d1556d4.js';
+import { initChefWall } from './chefwall.6de4c1578f.js';
+import { initLabels } from './labels.99d32d74c4.js';
+import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
 import { initFreezer } from './freezer.35040b26ef.js';
 import {
   loadEnvelope, unseal, restore, remember, cryptoAvailable
-} from './coldstore.4c31cefcc6.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.ed8e720284.js';
+} from './coldstore.3fa6668b36.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.9d2a07047f.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ async function loadData() {
 
   // Fallback for a served deployment where the inline block was removed.
   const [tools, headchefs] = await Promise.all([
-    fetch('data/tools.c5456eaa40.json').then((r) => r.json()),
+    fetch('data/tools.ac8a24642f.json').then((r) => r.json()),
     fetch('headchefs/headchefs.json').then((r) => r.json())
   ]);
   return { tools, headchefs };
@@ -618,7 +618,7 @@ const PLATES = {
   dining:       { src: 'plates/dining.e833a21953.webp',       srcset: 'plates/dining@1400.940873ea4c.webp 1400w, plates/dining@1800.f2e000e730.webp 1800w, plates/dining.e833a21953.webp 2400w' },
   prep:         { src: 'plates/prep.e1ff2fd61f.webp',         srcset: 'plates/prep@1400.71a1c3421a.webp 1400w, plates/prep@1800.914c0511c4.webp 1800w, plates/prep.e1ff2fd61f.webp 2400w' },
   office:       { src: 'plates/office.4e4c6d7172.webp',       srcset: 'plates/office@1400.ac0e7111c5.webp 1400w, plates/office@1800.7c45276712.webp 1800w, plates/office.4e4c6d7172.webp 2400w' },
-  breakroom:    { src: 'plates/breakroom.a8710561ee.webp',    srcset: 'plates/breakroom@1400.a870d34ef6.webp 1400w, plates/breakroom@1800.c025f7610c.webp 1800w, plates/breakroom.a8710561ee.webp 2400w' },
+  breakroom:    { src: 'plates/breakroom.57d227f685.webp',    srcset: 'plates/breakroom@1400.ef37dc6807.webp 1400w, plates/breakroom@1800.b68af49648.webp 1800w, plates/breakroom.57d227f685.webp 2400w' },
   freezer:      { src: 'plates/freezer.01697f04b3.webp',      srcset: 'plates/freezer@1400.bc3f759e61.webp 1400w, plates/freezer@1800.950d506378.webp 1800w, plates/freezer.01697f04b3.webp 2400w' },
   'freezer-door': { src: 'plates/freezer-door.833492497b.webp', srcset: 'plates/freezer-door@1400.2c18d7f0b7.webp 1400w, plates/freezer-door@1800.5d976c9501.webp 1800w, plates/freezer-door.833492497b.webp 2400w' }
 };
@@ -1679,6 +1679,13 @@ async function boot() {
       host: wallHost,
       chefs: raw.headchefs.headchefs || [],
       frames: CHEF_FRAMES,
+      // The inline bootstrap in index.html is a BUILD-TIME snapshot, and the
+      // 30-minute head-chef auto-pull commits headchefs/** only — so without
+      // this the page renders the snapshot for ever while headchefs.json moves
+      // underneath it. chefwall.js mounts from the inline data first and then
+      // re-reads this one ~13 KB file; it never fetches the decks. See the
+      // `refreshFrom` docs in chefwall.js.
+      refreshFrom: 'headchefs/headchefs.json',
       // Below 900px theme.css hides .hotspots outright, so the wall's narrow
       // fallback strip has to live somewhere untransformed and still visible:
       // the break room's own rail. This is exactly the case chefwall.js's
