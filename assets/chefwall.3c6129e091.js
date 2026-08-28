@@ -3,7 +3,7 @@
  * assets/chefwall.js — the Break Room "Head Chef of the Week" wall of fame
  * -----------------------------------------------------------------------------
  * WHAT THIS IS
- * The break-room plate (plates/breakroom.5f1c5beafd.webp) is a photograph of a real room.
+ * The break-room plate (plates/breakroom.a8710561ee.webp) is a photograph of a real room.
  * Painted into that photograph, in one horizontal row, are FIVE identical black
  * picture frames, each holding an empty grey mat. This module composites the five
  * real employee photographs into those five mats so the faces are visible on the

@@ -1448,6 +1448,50 @@ a { color: inherit; text-decoration: none; }
   .room .plate-wrap { --plate-dark: var(--dark-2400, none); }
 }
 
+/* ── TIER 0 — THE PHONE, WHICH GETS NO SECOND PHOTOGRAPH AT ALL ───────────
+   ADDED 2026-08-28. The client's iPhone was dying mid-scroll — blue ground,
+   every layer above it gone, then unresponsive, which is WebKit reaping the
+   web content process under memory pressure and not a thrown exception. The
+   iPads and the desktops it works on have several times the per-tab budget.
+
+   MEASURED at 390x844 DPR 3, reading each layer's RESOURCE dimensions and
+   charging 4 bytes a pixel (a decoded bitmap costs its pixel count, whatever
+   the WebP weighs), resident at the bottom of the runway:
+
+       eight lit plates, 2400x1340 .................. 98.2 MB
+       EIGHT DARK TWINS, 1800x1005 (tier 2 above) ... 55.2 MB
+       the chef wall .................................. 2.6 MB
+                                                       ------
+                                                      156 MB
+
+   on a budget of roughly 200 MB, before the compositor's own backing stores
+   and before screens.js's live iframes. This section's own gates do work — the
+   `content: none` fallback, the --dark-gate clip, the style-query fetch gate —
+   but they are all about not painting and not fetching EARLY. None of them
+   RELEASES a dark plate once a room has been visited: `style(--dark-gate: 0)
+   and style(--p: 0)` needs --p back at zero, and a room you have scrolled PAST
+   sits at --p 1 for the rest of the session. Measured: 1 dark background at the
+   hero, 8 by the walk-in, and never fewer again.
+
+   So on a phone the second photograph does not exist. `--plate-dark-on: none`
+   makes `content` compute to none, which is this section's own documented way
+   of costing exactly nothing: no box, no per-frame opacity, no clip-path, no
+   request. The room still comes up out of the dark — §06's grade carries the
+   whole "lights turn on" ramp off --lit and does not read this layer — it just
+   does it with one photograph instead of two. That is what the art was for
+   before the dark plates landed on 2026-08-27, and it is a straight trade of a
+   phone-only luxury for a phone that does not die.
+
+   THE CONDITION IS THE PHONE AND ONLY THE PHONE. Not §17's `(max-width: 900px),
+   (max-aspect-ratio: 8/7)` takeover and not tier 3's `(min-width: 901px)` cap:
+   both of those also catch an iPad — iPad Pro portrait by aspect, iPad mini
+   portrait at 744px by width — and iPads are the device this cross-fade was
+   built for and the device that works today. Nothing in this block may reach
+   one. It is the same pair app.js's PLATE_SIZES uses; keep them in step. */
+@media (max-width: 500px), (max-width: 1000px) and (max-height: 500px) {
+  .room .plate-wrap { --plate-dark-on: none; --plate-dark: none; }
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    06c · ATMOSPHERE  ·  the detail you find on the third visit
@@ -2661,7 +2705,18 @@ a { color: inherit; text-decoration: none; }
   position: absolute;
   inset-block-start: calc(100% + 10px);
   inset-inline-start: 0;
-  max-inline-size: 34ch;
+  /* THE CAP THAT USED TO TRUNCATE TOOL NAMES.
+     34ch sounds generous and is not: `ch` is the advance of "0", while these
+     labels are uppercase with `--track-caps` on top, so a 33-character name
+     measured 341px against a 249px cap and ellipsised nineteen characters in.
+     (The name in question is one of the sealed freezer tools, so it is not
+     written here — see build/seal-freezer.mjs.) The label exists so an employee
+     knows exactly what they are about to click, which a truncated name defeats
+     — this is the same failure labels.js hit when it sized ink to 100% of a
+     sheet and printed "PRINT OU". So: a cap in the units the text is actually
+     set in, and wrapping instead of an ellipsis. Two lines is the practical
+     ceiling for every name in tools.json plus the sealed twelve. */
+  max-inline-size: min(30em, 42cqw);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-xs);
   color: var(--fg);
@@ -2669,9 +2724,9 @@ a { color: inherit; text-decoration: none; }
   box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   backdrop-filter: blur(14px) saturate(1.4);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-wrap: balance;
 
   font-family: var(--font-text);
   font-size: var(--t--2);

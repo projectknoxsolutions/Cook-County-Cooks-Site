@@ -10,6 +10,16 @@
      'screen' -> a screen surface owned by assets/screens.js
      'chefs'  -> the head chef wall (owned by chefwall.js)
      'lock'   -> the freezer keypad
+     'print'  -> a sheet of paper drawn onto the wall by assets/wallprint.js.
+                 It becomes an ordinary .hotspot button with the printed page
+                 rendered inside it, so it clicks, focuses and gates exactly
+                 like a 'tool'. `rotate` (degrees) tilts the paper on the wall;
+                 the button itself stays axis-aligned.
+                 It names its tool with `slug` (a tool that ships in plaintext)
+                 OR with `object` (a tool that does not — see the note on the
+                 walk-in's sheet below). With `object` the hotspot resolves at
+                 RUNTIME against whatever tools exist by then, and builds
+                 nothing at all until one does.
    `quad` (TL, TR, BR, BL in plate %) is supplied where the object sits on a
    wall at an angle, so the mounted screen is warped to the screen's plane
    instead of floating in front of it.
@@ -20,6 +30,9 @@
      'image'  the daily promo card straight from the Daily Sales Report repo.
      'feed'   the detractor-streak board, one district per slide.
      'live'   a real iframe of the tool, rendered wide and scaled down.
+     'report' the Daily Sales Report's numbers, composed natively and cycled.
+              For a screen too small to iframe the deck legibly — see the note
+              on the break-room television below.
    ========================================================================== */
 
 export const ROOM_ORDER = ['pass','host','dining','prep','office','breakroom','freezer'];
@@ -38,12 +51,26 @@ export const HOTSPOTS = {
        They render TITLE CARDS, not live pages: 14.8% of frame width still
        cannot show a readable web page, and the client's ask is that people can
        see what to click. */
+    /* THE THREE TABLETS ON THE PASS.
+       These were plain x/y/w/h boxes, which is why the panels overlapped their
+       own bezels: the tablets are tilted back on their stands, so each screen
+       is a TRAPEZOID, not a rectangle — the bottom edge is wider than the top
+       and shifted outward from the frame's centre. Corners below are traced off
+       the glass on plates/pass.96df41e5e3.webp (luminance < 30 on the 2400x1340 file):
+         left    top 21.25→36.29   bottom 18.42→34.71   (bottom 1.9% wider)
+         centre  top 42.71→57.21   bottom 42.25→57.96   (bottom 1.2% wider)
+         right   top 62.88→77.75   bottom 64.12→80.54   (bottom 1.5% wider)
+       With a quad, screens.js warps the panel onto the screen's own plane and
+       it lands inside the bezel instead of across it. */
     { slug:'quote-6th-gen',  kind:'screen', mode:'title',
-      x:20.9, y:57.3, w:14.8, h:16.6, label:'6th Gen Quote Sheet' },
+      x:18.42, y:57.24, w:17.91, h:16.64, label:'6th Gen Quote Sheet',
+      quad:[[21.25,57.31],[36.29,57.39],[34.71,73.66],[18.42,73.66]] },
     { slug:'quote-upgrade',  kind:'screen', mode:'title',
-      x:43.0, y:57.3, w:14.9, h:16.6, label:'Upgrade Quote Sheet' },
+      x:42.00, y:57.24, w:16.00, h:16.64, label:'Upgrade Quote Sheet',
+      quad:[[42.71,57.24],[57.21,57.24],[57.96,73.06],[42.25,73.66]] },
     { slug:'quote-internet', kind:'screen', mode:'title',
-      x:63.9, y:57.3, w:14.5, h:16.6, label:'Internet Quote Sheet' },
+      x:62.75, y:57.24, w:17.79, h:16.57, label:'Internet Quote Sheet',
+      quad:[[62.88,57.31],[77.75,57.31],[80.54,73.58],[64.12,72.91]] },
     { slug:'tsheet-submissions', kind:'tool', x:76.0, y:76.0, w:14.5, h: 8.0, label:'T-Sheet Submissions', edge:'right bottom' },
   ],
   host: [
@@ -52,8 +79,6 @@ export const HOTSPOTS = {
     { slug:'daily-sales', kind:'screen', mode:'image', x:47.0, y:5.6, w:37.0, h:53.0,
       label:'Daily Sales Report', name:'Daily Promo Card',
       quad:[[47.6,21.4],[82.0,11.2],[82.0,57.8],[47.3,55.8]] },
-    { slug:'discount-close',        kind:'tool', x:26.0, y:55.5, w: 7.5, h:13.0, label:'The Mobile Discount Close' },
-    { slug:'commission-payouts',    kind:'tool', x:44.0, y:61.0, w: 6.5, h:14.0, label:'Commission Payouts 2026' },
     { slug:'yesterdays-conversion', kind:'tool', x:14.0, y:68.0, w:24.0, h:14.0, label:"Yesterday's Conversion", edge:'bottom' },
   ],
   dining: [
@@ -106,35 +131,111 @@ export const HOTSPOTS = {
     /* The right-hand brick wall was re-measured against the same new plate.
        Its objects are larger and closer than in the previous composition,
        which is what keeps their printed labels legible — see labels.js. */
+    /* The commission payout sheet, printed off and taped to the empty navy wall
+       to the LEFT of the monitor — the client asked for it to read as a page
+       someone actually ran off and stuck up. It is drawn rather than
+       photographed: a real printed page is what the tool IS, so rendering it
+       gives us live type at any size, and it keeps us from re-shooting a room
+       whose square-on monitor took four attempts to get right. Sits above the
+       bottom-left rail card with clear air between them. */
+    { slug:'commission-payouts', kind:'print', x:11.5, y:24.0, w:15.5, h:22.0,
+      label:'Commission Payouts 2026', rotate:-1.4 },
+
     { slug:'printouts',        kind:'tool', x:78.1, y:35.0, w:7.9, h:17.2, label:'Print Outs', edge:'right' },
     { slug:'exception-report', kind:'tool', x:85.6, y:36.8, w:4.4, h:20.0, label:'Exception Report', edge:'right' },
     { slug:'fall-off',         kind:'tool', x:91.5, y:34.4, w:6.0, h:24.2, label:'Fall-Off Summary', edge:'right' },
   ],
   breakroom: [
+    /* THE DAILY SALES REPORT, ON THE BREAK-ROOM WALL.
+       The client: "above the head chef of the week photos, I would like to have
+       another tv mounted on the wall that scrolls through the daily sales report
+       (all slides)." The plate was re-shot with that television added above the
+       row of five frames — everything else in the room held its position, which
+       is why the chef frames below are almost unchanged.
+       Glass traced at x 40.54→59.83, y 11.12→30.60; inset ~0.5% to sit inside
+       the bezel. Unlike the host stand's frozen promo card, this one runs the
+       whole deck.
+
+       MODE 'report', NOT 'live' — the geometry above is traced off the plate
+       and is correct; an iframe of the deck at this size is not. The Daily
+       Sales Report is a fixed 1920x1080 canvas that scales ITSELF by
+       min(iw/1920, ih/1080), so inside a frame its type comes out at
+       panelWidth/1920 of its authored size whatever virtual viewport it is
+       handed — and this panel measures 297 CSS px of glass at a 1440 viewport,
+       which puts the deck's store names at 4.3-6.5px. (The lever that fixed
+       the two Dining boards — a narrower virtual viewport — does nothing here:
+       those decks size their type in vw, this one does not.) Reaching a 12px
+       floor would need a television ~75% of the plate wide, and even a re-shot
+       45% one only buys 7.2px. So screens.js renders the same numbers from the
+       same three files natively, sized in percent of this panel. See the
+       MODE: report block in assets/screens.js §3 for the full measurement. */
+    { slug:'daily-sales', kind:'screen', mode:'report',
+      x:41.0, y:11.6, w:18.4, h:18.6, label:'Daily Sales Report' },
+
     { kind:'chefs' },
-    { slug:'training-xfinity',      kind:'tool', x:19.3, y:40.5, w:3.9, h:31.0, label:'Xfinity Product Mastery' },
-    { slug:'training-straight-line',kind:'tool', x:23.4, y:40.5, w:3.9, h:31.0, label:'Sales Process 101' },
-    { slug:'training-tsheet',       kind:'tool', x:27.5, y:40.5, w:3.9, h:31.0, label:'The Plus-First Playbook' },
-    /* The locker bank has FOUR doors, not three — seams traced at plate-x
-       17.1 / 21.5 / 25.2 / 28.5 / 32.9. The fourth was empty until the client
-       asked for one more training piece, so it gets the same inset and width
-       as its neighbours rather than a box invented to fit. */
-    { slug:'training-pos',          kind:'tool', x:29.4, y:40.5, w:3.9, h:31.0, label:'Celestial Point of Sale' },
-    { slug:'fox-run',               kind:'tool', x:88.0, y:33.0, w:12.0, h:60.0, label:'C³ FOX RUN', edge:'right' },
+
+    /* The locker bank runs x 17.5 → 30.5 (the navy wall's blue-dominance takes
+       over at 31.0). Seams at 17.2 / 21.5 / 25.1 / 28.6 give four doors, the
+       last of them partly occluded — theme.css's minimum-target expansion keeps
+       it tappable. Widths follow the art rather than a uniform guess. */
+    { slug:'training-xfinity',      kind:'tool', x:18.0, y:42.0, w:3.2, h:29.0, label:'Xfinity Product Mastery' },
+    { slug:'training-straight-line',kind:'tool', x:22.0, y:42.0, w:2.9, h:29.0, label:'Sales Process 101' },
+    { slug:'training-tsheet',       kind:'tool', x:25.6, y:42.0, w:2.8, h:29.0, label:'The Plus-First Playbook' },
+    { slug:'training-pos',          kind:'tool', x:28.9, y:42.0, w:1.6, h:29.0, label:'Celestial Point of Sale' },
+
+    { slug:'fox-run',               kind:'tool', x:89.5, y:30.0, w:10.5, h:60.0, label:'C³ FOX RUN', edge:'right' },
   ],
   freezer: [
     { kind:'lock', x:34.3, y:47.0, w:2.6, h:8.0, label:'Manager access' },
+
+    /* THE NOTE ON THE BACK WALL OF THE WALK-IN.
+       The client: "I want to post this as if it's a note hanging in the
+       freezer."  So: one sheet, printed off and stuck to the steel with a
+       magnet — the same drawn-paper object the Back Office uses, in the
+       opposite orientation and in this room's own light.
+
+       MEASURED off plates/freezer.01697f04b3.webp (2400x1340). The back wall is clear
+       brushed steel from plate-x 55 -> 71 and plate-y 30 -> 72, with faint
+       panel seams near y 44 and y 58 and a vertical seam near x 68. The box
+       below is centred on that panel and clears every seam but the last by a
+       wide margin. 11.2% x 26.0% of the plate's cover box is 269 x 348 plate
+       px, i.e. 0.773:1 — US Letter PORTRAIT is 8.5/11 = 0.773:1, an exact
+       match, so the sheet fills its box with no letterboxing. (The Back
+       Office sheet is the other way up: 1.262:1, landscape.)
+
+       LIGHT. The room's only practical is the ceiling fixture at plate-x ~60,
+       plate-y 5-15 — above the sheet and very slightly to its left, since the
+       sheet's centre is plate-x 63.0. So wallprint.js throws this contact
+       shadow DOWN and slightly RIGHT, and keeps it tighter and harder than
+       the Back Office sheet's: the fixture is close and the wall is specular
+       steel, not matte navy paint.
+
+       ⚠ NO slug AND NO label, ON PURPOSE, AND DO NOT ADD THEM.
+       This tool lives behind the walk-in's lock, which means it is not in the
+       deployed tree at all — it is AES-256-GCM ciphertext in
+       data/freezer.sealed.52a8feb1c0.json (see build/seal-freezer.mjs and the gate note
+       in app.js §2). Writing its slug, its name or its URL here would put in
+       plaintext exactly the three strings the seal exists to remove, and
+       build/seal-freezer.mjs's own leak check would fail the next build.
+
+       `object` is how the sheet finds its tool instead: wallprint.js matches
+       this string against the `object` field of the tools that EXIST at the
+       moment it builds, which — for a sealed tool — is only ever after a
+       correct code has decrypted them. While the walk-in is shut there is no
+       match, so nothing is built: no button, no paper, no accessible name.
+       That is also the gate. See wallprint.js §7. */
+    { kind:'print', object:'note', x:57.4, y:36.0, w:11.2, h:26.0, rotate:1.1 },
   ],
 };
 
 /* The five picture-frame mat openings on the break-room wall, measured off the
    render.  chefwall.js drops chefs[i] into frames[i] — order is the contract. */
 export const CHEF_FRAMES = [
-  { x:33.53, y:41.72, w:4.09, h:11.11, rotate:0 },
-  { x:40.80, y:41.72, w:4.09, h:11.11, rotate:0 },
-  { x:48.07, y:41.72, w:4.09, h:11.11, rotate:0 },
-  { x:55.34, y:41.72, w:4.09, h:11.11, rotate:0 },
-  { x:62.61, y:41.72, w:4.09, h:11.11, rotate:0 },
+  { x:33.53, y:41.88, w:4.09, h:11.11, rotate:0 },
+  { x:40.80, y:41.88, w:4.09, h:11.11, rotate:0 },
+  { x:48.07, y:41.88, w:4.09, h:11.11, rotate:0 },
+  { x:55.34, y:41.88, w:4.09, h:11.11, rotate:0 },
+  { x:62.61, y:41.88, w:4.09, h:11.11, rotate:0 },
 ];
 
 

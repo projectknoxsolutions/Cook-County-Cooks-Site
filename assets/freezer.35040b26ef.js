@@ -948,7 +948,29 @@ export function initFreezer(opts = {}) {
   const hingeL  = String(g.hinge || 'left').toLowerCase() !== 'right';
   const plate   = g.plate || 'plates/freezer-door.833492497b.webp';
   const srcset  = g.srcset || '';
+  /* app.js owns this string (PLATE_SIZES) and hands it over, so the door and
+     the room plate behind it can never resolve to different candidates. The
+     literal is only the fallback for a caller that passes nothing. */
+  const sizes   = opts.sizes || '(min-aspect-ratio: 2400/1340) 110vw, 197vh';
   const interior = opts.interior || 'plates/freezer.01697f04b3.webp';
+  /* The interior's candidate list, handed over by app.js from PLATES.freezer so
+     the aperture resolves to the SAME cut the room plate behind it will take
+     when revealFreezerInterior() swaps it in. Without it the aperture pinned the
+     raw 2400 file — 12.3 MB of bitmap on a phone that takes the 1400 cut for
+     everything else, i.e. the interior resident twice, once at each size. */
+  const interiorSrcset = opts.interiorSrcset || '';
+
+  /** Point an <img> at the interior, at whatever cut this viewport wants.
+   *  sizes before srcset before src: all three land in the same task, so the
+   *  first and only selection the browser runs is the correct one. */
+  function pointAtInterior(img) {
+    if (!img || img.getAttribute('src')) return;
+    if (interiorSrcset) {
+      img.setAttribute('sizes', sizes);
+      img.setAttribute('srcset', interiorSrcset);
+    }
+    img.setAttribute('src', interior);
+  }
 
   /* Cold air falls out of the bottom of the aperture and rolls outward. */
   const vapour = box(g.vapour, {
@@ -1039,8 +1061,9 @@ export function initFreezer(opts = {}) {
       src: plate,
       srcset: srcset || null,
       // identical to the room plates (app.js buildPlate) so the browser picks
-      // the same candidate for the jamb and the leaf and fetches it once
-      sizes: srcset ? '(min-aspect-ratio: 2400/1340) 110vw, 197vh' : null,
+      // the same candidate for the jamb and the leaf and fetches it once —
+      // handed over as opts.sizes so there is exactly one copy of the string.
+      sizes: srcset ? sizes : null,
       alt: '',
       decoding: 'async',
       loading: 'lazy',
@@ -1096,7 +1119,7 @@ export function initFreezer(opts = {}) {
     ]);
 
     // Rebuilt after an unlock (api.reset()): there is nothing left to hide.
-    if (isUnlocked() && apImg) apImg.src = interior;
+    if (isUnlocked()) pointAtInterior(apImg);
 
     frz    = el('div', { class: 'frz', style: styleVars() }, [scene]);
     ground = el('div', { class: 'frz-ground', 'aria-hidden': 'true', style: styleVars() });
@@ -1194,7 +1217,7 @@ export function initFreezer(opts = {}) {
     setState('opening');
     // The code was accepted, so the room is allowed to load now. That leaves the
     // APERTURE beat (+460ms) and the THROUGH dissolve (+1900ms) to decode it in.
-    if (apImg && !apImg.getAttribute('src')) apImg.src = interior;
+    pointAtInterior(apImg);
     frz.classList.add('is-accepted');
     // The keypad's LED goes green and stays on screen for the beat — but the
     // button is done. `disabled` blurs it and takes it out of the tab order in
@@ -1387,8 +1410,24 @@ export function initFreezer(opts = {}) {
      boxes floating over the photograph. Probe first; if it does not decode,
      this module does nothing at all and the freezer behaves as it did in v3:
      the keypad hotspot on the interior plate, the gated chips, the same lock. */
+  /* THE ART PROBE, WHICH USED TO COST A WHOLE SECOND COPY OF THE DOOR.
+     It only ever answers one question — "is plates/freezer-door.833492497b.webp there?" —
+     and it answered it by setting `src` alone, i.e. by fetching and DECODING
+     the full 2400x1340 cut on every device, including the phone whose jamb and
+     leaf then take the 1400 cut. Measured at 390x844 DPR 3: 12.3 MB of bitmap
+     for an <img> that is never in the document, on top of the 4.2 MB the door
+     itself costs — the single largest item left on the phone after the plates
+     were cut, and one nobody can see.
+
+     Giving it the door's own `sizes` and `srcset` makes it warm the SAME URL
+     the jamb and the leaf will ask for, so the decode is shared instead of
+     duplicated and the probe costs nothing at all. It still answers the same
+     question the same way: a candidate that 404s fires `error`, and `build()`
+     is still gated on `load`. sizes/srcset before src, so the first selection
+     is already the right one. */
   const probe = new Image();
   probe.decoding = 'async';
+  if (srcset) { probe.sizes = sizes; probe.srcset = srcset; }
   probe.addEventListener('load', () => {
     artOk = true;
     if (destroyed || isUnlocked()) return;

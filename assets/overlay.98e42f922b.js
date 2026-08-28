@@ -164,7 +164,7 @@ function getTool(slug) {
 /* -----------------------------------------------------------------------------
  * 2. Stylesheet
  *    Injected once. Everything is prefixed `ccc-` and every colour is a
- *    custom property with a fallback, so assets/theme.f4c9abadeb.css (Agent D) can
+ *    custom property with a fallback, so assets/theme.8b1bffe6fc.css (Agent D) can
  *    retheme the viewer without touching this file.
  * -------------------------------------------------------------------------- */
 
@@ -1055,10 +1055,10 @@ function onDocumentKeydown(ev) {
  * Boot the tool viewer.
  *
  * @param {object}  [options]
- * @param {Array}   [options.tools]     tools array (as in data/tools.46eb63be76.json). If
+ * @param {Array}   [options.tools]     tools array (as in data/tools.c5456eaa40.json). If
  *                                      omitted we look at window.CCC_TOOLS /
  *                                      window.CCC?.tools, then fetch toolsUrl.
- * @param {string}  [options.toolsUrl]  default 'data/tools.46eb63be76.json'
+ * @param {string}  [options.toolsUrl]  default 'data/tools.c5456eaa40.json'
  * @param {boolean} [options.deepLink]  honour #/tool/<slug> on load (default true)
  *
  * @param {(slug:string, tool:object) => boolean} [options.canOpen]
@@ -1090,7 +1090,7 @@ function onDocumentKeydown(ev) {
 export function initOverlay(options = {}) {
   const {
     tools = null,
-    toolsUrl = 'data/tools.46eb63be76.json',
+    toolsUrl = 'data/tools.c5456eaa40.json',
     deepLink = true,
     canOpen = null,
     onRefused = null

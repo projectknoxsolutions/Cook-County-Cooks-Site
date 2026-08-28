@@ -9,7 +9,7 @@
  * overlay.js's delegated handler opens the tool — which means the freezer gate,
  * the deep-link router and the focus-return all keep working untouched.
  *
- * FOUR MODES. A screen declares one with `data-screen-mode`:
+ * FIVE MODES. A screen declares one with `data-screen-mode`:
  *
  *   title  the three Pass tablets. Too small to render a web page at any zoom,
  *          so they render the ONE thing that matters — the tool's name, set in
@@ -31,6 +31,14 @@
  *          rendered at a virtual desktop width and scaled down — but at 960px,
  *          not 1280px, because the decks size their type in vw and a narrower
  *          virtual viewport makes the content itself come out ~33% larger.
+ *
+ *   report the Break Room television. The Daily Sales Report's own numbers,
+ *          composed natively for a 297px screen and cycled like a TV. It
+ *          exists because that panel CANNOT iframe the deck: the deck is a
+ *          fixed 1920x1080 canvas that scales itself, so its type lands at
+ *          panelWidth/1920 whatever viewport it is handed — 4.3px store names
+ *          on an 18.4%-of-plate television. See the MODE: report block in §3
+ *          for the whole measurement.
  *
  * NARROW VIEWPORTS. Below `(max-width: 900px), (max-aspect-ratio: 8/7)` a 16:9
  * plate cover-cropped into a 3:4 viewport throws away a third of the frame, and
@@ -54,7 +62,7 @@
  *   mountRoomScreens(root, opt) -> handle[]
  *   registerTools(tools)        -> void         (url/label lookup)
  *   refreshScreens()            -> void         (re-measure everything)
- *   SCREEN_MODES, NARROW_MEDIA, PROMO_CARD_URL, STREAKS_URL
+ *   SCREEN_MODES, NARROW_MEDIA, PROMO_CARD_URL, STREAKS_URL, EXCEL_URL
  * ========================================================================== */
 
 /* -----------------------------------------------------------------------------
@@ -62,25 +70,99 @@
  * -------------------------------------------------------------------------- */
 
 /** The two public, CORS-open data files behind the Host Stand and Back Office. */
-import { freshUrl } from './overlay.d050392ab2.js';   // shared fresh-load cache buster
+import { freshUrl } from './overlay.98e42f922b.js';   // shared fresh-load cache buster
 
 export const PROMO_CARD_URL =
   'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/promo-card.jpg';
 export const STREAKS_URL =
   'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/nps-detractor-streaks.json';
+/** The third one, and the heavy one: the workbook every number in the deck is
+ *  computed from. Read ONLY by `report`, and only once a report panel arms. */
+export const EXCEL_URL =
+  'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/Sales%20Report.xlsx';
 
 /** Ten-minute buckets — exactly what the source app does. */
 const BUCKET_MS = 600000;
 
-/** Virtual desktop width a `live` iframe renders at before it is scaled down.
- *  NOT 1280. The decks set type in vw against a 1400px content column, so a
- *  narrower virtual viewport makes the rendered text relatively bigger. 960
- *  clears the deck's own 900px "compact" breakpoint with room to spare. */
+/** Floor for the virtual desktop WIDTH a `live` iframe renders at before it is
+ *  scaled down. rooms.js may raise it per panel with `width`; nothing lowers
+ *  it. In practice LIVE_MIN_VIRTUAL_H below is what decides, because the decks
+ *  are height-bound, not width-bound. */
 const LIVE_RENDER_WIDTH = 960;
 
+/** ⚠ THE NUMBER THE DINING BOARDS WERE GETTING WRONG.
+ *
+ *  A `live` panel renders its deck into a virtual viewport and scales that
+ *  uniformly into the glass. The virtual viewport has always taken the PANEL'S
+ *  OWN ASPECT — width `renderWidth`, height `renderWidth / aspect` — so the
+ *  scaled frame covers the glass exactly, corner to corner, with no bars and
+ *  no crop. That part was never the bug and is unchanged.
+ *
+ *  The bug was the SIZE of that viewport. Both Win-the-Weekend decks are
+ *  FLUID, not fixed-canvas: `.s{min-height:100vh; display:flex; overflow-y:
+ *  auto}`, one slide shown at a time by their own 7-second timer, laid out
+ *  against whatever viewport they are handed and clipped by the body when the
+ *  content does not fit. At the old 960 x 541 virtual viewport ten of Chicago's
+ *  seventeen slides and ten of Big South's eighteen ran off the bottom of the
+ *  glass — a Top-5 board showing four rows and half of the fifth, which is
+ *  exactly the "the slides don't line up completely" the client reported.
+ *
+ *  Because the decks are fluid, the fix is not a scale factor and not the
+ *  panel's aspect (both boards are already 1.775, within 0.2% of 16:9 and of
+ *  each other). It is the virtual viewport's HEIGHT. Measured slide by slide,
+ *  driving each deck with its own sh() and taking the deepest laid-out edge:
+ *
+ *      virtual height   Chicago (17)     Big South (18)
+ *      541  (old)       10 clipped       10 clipped   worst -917px
+ *      721               1 clipped        2 clipped   worst -737px
+ *      811               1 clipped        1 clipped   worst -99px
+ *      902               0 clipped        1 clipped   worst -8px
+ *      930               0 clipped        0 clipped
+ *      960               0 clipped        0 clipped
+ *
+ *  The cliff between 721 and 902 is the decks' own flex-wrap: their District
+ *  Ranker and Top-10 boards wrap into fewer rows as the viewport grows. 960
+ *  is the first round number clear of BOTH decks' worst slide with ~5% of
+ *  headroom, which matters because the slides are data-driven and a row added
+ *  tomorrow must not put the boards back where they started.
+ *
+ *  It is a HEIGHT, and the width is derived from it and the panel's own
+ *  measured aspect — so both dining boards and the break-room television get
+ *  the same treatment from the same number rather than three hand-tuned
+ *  widths, and a re-measured panel in rooms.js re-derives instead of drifting.
+ *
+ *  The cost is honest and worth stating: a taller virtual viewport is a
+ *  smaller scale factor, so the deck's own type lands smaller on the glass
+ *  than it did at 960 wide. It is smaller and WHOLE instead of larger and cut
+ *  in half, which is the trade the client asked for in the same sentence.
+ *
+ *  The Daily Sales Report is indifferent to this number: it is a fixed
+ *  1920x1080 canvas that scales itself with `Math.min(innerWidth/1920,
+ *  innerHeight/1080)`, so its size on the glass is panelWidth/1920 whatever we
+ *  hand it. It still wants the panel's aspect, or it letterboxes itself. */
+const LIVE_MIN_VIRTUAL_H = 960;
+
 /** Hard ceiling on simultaneous `live` iframes. iPads are real. Cheap modes
- *  (title / image / feed) are not counted — they cost a few DOM nodes. */
+ *  (title / image / feed) are not counted — they cost a few DOM nodes.
+ *
+ *  ONE ON A PHONE, TWO EVERYWHERE ELSE (2026-08-28). A `live` panel is a whole
+ *  extra document: fit() lays each one out in a 1703x960 CSS virtual viewport
+ *  and scales it down to the 346x195 band panel, so two of them are two full
+ *  sub-documents with their own DOM, style, layout and timers. Measured on a
+ *  390x844 DPR-3 profile, both of the Dining room's boards were mounted and
+ *  live from scrollY 591 to 7092 — essentially the entire runway, because there
+ *  are only two live candidates on the page and a budget of two, so nothing
+ *  ever evicted either one. That is two documents' worth of memory carried
+ *  through every room on the device that was running out of it.
+ *
+ *  One is not a dead rectangle: reconcile() hands the unbudgeted board its
+ *  branded holding card ("Tap to open this board full screen"), which is the
+ *  same card every mode already falls back to and is still the client's
+ *  requirement that the screen show what it is and stay clickable. §17's
+ *  "the screens are exempt, do not fold them back in" note is about iPads, and
+ *  iPads are untouched: PHONE_MEDIA cannot match one. */
 const MAX_LIVE_FRAMES = 2;
+const MAX_LIVE_FRAMES_PHONE = 1;
 
 /** How long one district holds the Back Office board. Slow on purpose. */
 const FEED_SLIDE_MS = 9000;
@@ -100,6 +182,24 @@ const FEED_RETRY_MS = 20 * 1000;
 const FEED_TIMEOUT_MS = 10 * 1000;
 const IMAGE_TIMEOUT_MS = 10 * 1000;
 
+/** The workbook's own deadline, and the library's. Both are longer than the
+ *  feeds' 10s for the same reason: the streak JSON is 16KB, `Sales Report.xlsx`
+ *  is ~1.1MB and SheetJS is ~900KB, and a store's wifi is a store's wifi. They
+ *  are still HARD deadlines — an unanswered request has to reach the retry
+ *  clock rather than hang, which is the whole lesson of FEED_TIMEOUT_MS. */
+const BOOK_TIMEOUT_MS = 25 * 1000;
+const SHEETJS_TIMEOUT_MS = 15 * 1000;
+
+/** How long one card holds the break-room television. The source app runs 15s
+ *  a slide on a 1920px wall; this board carries a quarter of the content per
+ *  card, so it moves faster — but still slower than the eye, because nobody
+ *  reads a break-room TV on purpose. */
+const REPORT_SLIDE_MS = 10 * 1000;
+
+/** The source app's CONFIG.PROMO_EVERY_N, and its rule: a promo card every N
+ *  slides, and the rotation always ends on one. */
+const PROMO_EVERY_N = 4;
+
 /** How often an on-screen panel that has never had data tries again, and how
  *  many times before it settles for the holding card. */
 const RETRY_EVERY_MS = 20 * 1000;
@@ -108,6 +208,19 @@ const RETRY_LIMIT = 5;
 /** The same two conditions theme.css uses for its portrait takeover. Exported
  *  so the layout owner can key off one string instead of a second copy. */
 export const NARROW_MEDIA = '(max-width: 900px), (max-aspect-ratio: 8 / 7)';
+
+/** THE PHONE, AND ONLY THE PHONE — the same pair app.js's PLATE_SIZES and
+ *  theme.css §06b's tier 0 use, kept identical on purpose.
+ *
+ *    (max-width: 500px)                            every iPhone in portrait
+ *    (max-width: 1000px) and (max-height: 500px)   every iPhone in landscape
+ *
+ *  Deliberately NOT NARROW_MEDIA: that one catches iPad Pro portrait by aspect
+ *  and iPad mini portrait by width, and the iPads are the device this module's
+ *  live boards were budgeted for and the device that works today. Anything
+ *  gated on THIS constant is a phone-only concession. */
+export const PHONE_MEDIA =
+  '(max-width: 500px), (max-width: 1000px) and (max-height: 500px)';
 
 /** Default mode per slug, used when the host carries no `data-screen-mode`. */
 export const SCREEN_MODES = {
@@ -119,7 +232,7 @@ export const SCREEN_MODES = {
   'wtw-big-south':  'live'
 };
 
-const MODES = new Set(['title', 'image', 'feed', 'live']);
+const MODES = new Set(['title', 'image', 'feed', 'live', 'report']);
 
 /** Aspect ratios (as plain numbers) the panels take in the narrow band. */
 /** Aspect ratios (as plain numbers) the panels take in the narrow band.
@@ -128,7 +241,11 @@ const MODES = new Set(['title', 'image', 'feed', 'live']);
  *  of it unused, while the board's own rows were the thing running out of space.
  *  `image` stays the promo card's own 2000x1429 — `object-fit: contain` means
  *  any other number just letterboxes it. */
-const NARROW_AR = { title: 4, image: 2000 / 1429, feed: 6 / 5, live: 16 / 9 };
+/*  `report` takes 4/3 rather than the feed's 6/5: its cards are ROWS, and a
+ *  row's width is what decides whether a store name ellipsises, so the band
+ *  spends its height budget on width instead. At a 390px viewport that gives a
+ *  346x260 panel — 6 rows to the card, the widest this board ever gets. */
+const NARROW_AR = { title: 4, image: 2000 / 1429, feed: 6 / 5, live: 16 / 9, report: 4 / 3 };
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -210,7 +327,7 @@ function getTool(slug) {
  * 3 · Stylesheet
  *
  * Injected once, prefixed `ccc-scr`, every colour and face read through a
- * `var(--ccc-…, fallback)` so assets/theme.f4c9abadeb.css owns the look. Nothing here
+ * `var(--ccc-…, fallback)` so assets/theme.8b1bffe6fc.css owns the look. Nothing here
  * animates anything but transform / opacity / filter.
  * -------------------------------------------------------------------------- */
 
@@ -368,55 +485,66 @@ const STYLES = `
   clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* ══ MODE: title ═════════════════════════════════════════════════════════
-   A LIT DISPLAY, NOT A LABEL.
+/* ══ MODE: title — THE PASS TERMINALS ═══════════════════════════════════
+   A POINT-OF-SALE TERMINAL, NOT A NAME PLATE.
 
-   The client, on the three Pass tablets: "I want the screens in the pass to be
-   lit up so we can see the things to click on the screen." He was describing
-   exactly what was wrong. The card was near-black glass (#10161f -> #070a10)
-   with the tool's name ghosted onto it — which is precisely what a switched
-   OFF tablet looks like. The Pass plate is a warm, brightly lit kitchen, so
-   three black rectangles across its lower third read as three DEAD screens
-   rather than as the three most clickable objects in the building. The whole
-   reason the title cards exist ("so that my employees will know exactly what
-   to click") was being defeated by the way they were lit.
+   The client, on the three Pass tablets: "the graphics for the screens that we
+   created to overlay the screen looks kind of weak. I want the screens to light
+   up and look like an actual POS system in the restaurant, just with our links
+   as something we can click on the page."
 
-   A SCREEN THAT IS ON IS A LIGHT SOURCE. Three things make that read, and the
-   old card had none of them:
+   The card he was looking at was a name set on a lifted slate rectangle. It was
+   lit — that part was solved earlier and is kept — but a lit rectangle with a
+   word on it is a SIGN. Nobody has ever walked past a till and seen a sign. The
+   difference between a sign and a terminal is not decoration, it is three
+   structural things, and this layout is those three things and nothing else:
 
-     1 · THE PANEL IS LIFTED. The glass is a cool slate that sits ABOVE the
-         warm room around it instead of below it. It is capped, not maximised:
-         the brightest pixel any glyph can land on is held near relative
-         luminance 0.075, so the name still clears 7:1 against its own panel.
-         That cap is why the backlight radial is .06 and not .13, why the sheen
-         is a third of what a mounted TV gets (see .ccc-scr--title overrides
-         below), and why this gradient tops out at #364258 rather than the
-         #46566f that looked better in isolation and measured 5.3:1.
-     2 · IT EMITS. A lit panel throws light onto what is around it. The halo is
-         much stronger here than on a mounted screen and it is biased DOWNWARD,
-         onto the counter the tablet stands on. Spill is the single strongest
-         "this is on" cue available to a still photograph.
-     3 · IT IS COOL AGAINST A WARM ROOM. Every other light in the Pass is
-         tungsten — heat lamps, filament bulbs, a cove wash. A daylight-white
-         panel cannot be read as a reflection of any of them.
+     1 · CHROME. A running application owns a strip of its own screen before it
+         shows you anything: which station you are standing at, and whether it
+         is talking to the back office. That is the header rail — station id on
+         the left, a live pip and ONLINE on the right, hairline underneath. It
+         is the single strongest "this is one screen of something bigger" cue
+         available, and it costs 11% of the glass.
+     2 · ONE SUBJECT. A POS shows exactly one thing at a time and shows it big:
+         the order, the item, the tender. Here that is the tool's name, still
+         set in the site's display face and still auto-fitted to whatever the
+         glass gives it after the chrome is paid for. It remains the accessible
+         name and the thing you can read across the kitchen.
+     3 · A PRIMARY ACTION, PRESENTED AS A KEY. Every POS puts its commit action
+         in the same place — a filled, unmissable key across the foot of the
+         screen. That is the brass key: bone-on-brass, a chevron at its end,
+         sized past 44px wherever the glass allows. It is what turns "a screen
+         with a name on it" into "a screen you are meant to press".
 
-   WHAT KEEPS IT INSIDE THE PHOTOGRAPH. The bezel rim, the sheen and the
-   scanlines all stay: they are what welds a rectangle into a plate, and
-   without them a lifted panel is a glowing sticker. They are RE-WEIGHTED for a
-   lit screen rather than removed — the bezel's inner vignette no longer eats
-   the panel's own light, the sheen is cut because a bright screen shows much
-   less of the room in it, and a warm bounce runs along the foot of the glass
-   where the steel counter throws light back up at it.
+   WHAT IT IS NOT. It is not a second design language. Every colour is the site's
+   own — brass for the key and the pip, bone for the type, the same cool slate
+   the lit panel already used. There is no second typeface: display for the
+   subject, the UI face in small caps for the chrome, which is exactly how the
+   rest of the site sets a label. Nothing here is a screenshot of somebody
+   else's POS.
 
-   The treatment is on the MODE, not on the Pass, so any 'title' panel gets it
-   — including the narrow-viewport band, where the same card is a full-width
-   strip and the same reasoning applies. */
+   WHAT KEEPS IT INSIDE THE PHOTOGRAPH. Unchanged, and deliberately so: the
+   bezel rim, the sheen, the scanlines, the downward spill onto the counter and
+   the CRT power-on all still ride --scr-on. They are what welds a rectangle
+   into a plate. The panel is still CAPPED — the brightest pixel any glyph can
+   land on is held near relative luminance 0.075 — because the name has to clear
+   7:1 against its own panel. That cap is why the backlight radial is .06, why
+   the key sits in the bottom row where no glyph of the name can reach it, and
+   why the slate tops out at #364258 rather than the #46566f that looks better
+   in isolation and measures 5.3:1.
+
+   The treatment is on the MODE, not on the Pass, so any 'title' panel gets it —
+   including the narrow-viewport band, where the same terminal is re-laid as a
+   full-width strip: chrome across the top, subject and key side by side. */
 .ccc-scr-title {
   position: absolute; inset: 0;
-  display: grid; align-content: center; justify-items: start;
-  gap: .34em;
-  padding: 6% 7%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 4% 0;
+  padding: 4.5% 5.5%;
   text-align: start;
+  /* the chrome unit: JS solves it from the glass, everything small is an em */
+  --pos-u: var(--scr-pos-fs, 9px);
   background:
     /* the backlight. Held low and pushed above the type: this is the one layer
        that can put a bright pixel under a glyph, so it is the one layer the
@@ -429,6 +557,57 @@ const STYLES = `
       transparent 32%),
     /* the panel */
     linear-gradient(158deg, #3d4a64 0%, #313e58 46%, #232c3e 100%);
+}
+
+/* ── 1 · the chrome rail ─────────────────────────────────────────────────── */
+.ccc-scr-title__bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1em;
+  min-inline-size: 0;
+  font-family: var(--ccc-font-ui, system-ui, sans-serif);
+  font-size: var(--pos-u);
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: #cfd8e6;
+  padding-block-end: .62em;
+  border-block-end: 1px solid color-mix(in oklab, var(--ccc-accent, #c8973f) 40%, transparent);
+  /* the rail is chrome: it fades in a touch behind the subject so the name
+     stays the first thing read at distance */
+  opacity: calc(0.55 + 0.45 * var(--scr-on));
+}
+.ccc-scr-title__term {
+  min-inline-size: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ccc-scr-title__stat {
+  display: flex; align-items: center; gap: .55em;
+  flex: 0 0 auto;
+  color: var(--ccc-accent-hi, #ebce93);
+  white-space: nowrap;
+}
+/* the connection light. Opacity only — the perf contract allows no other
+   property to animate, and a pulsing dot is the cheapest "this is running"
+   signal a still photograph can carry. */
+.ccc-scr-title__pip {
+  inline-size: .62em; block-size: .62em;
+  border-radius: 50%;
+  background: var(--ccc-accent-hi, #ebce93);
+  box-shadow: 0 0 .5em color-mix(in oklab, var(--ccc-accent-hi, #ebce93) 70%, transparent);
+  animation: ccc-scr-pip 3.4s ease-in-out infinite;
+}
+@keyframes ccc-scr-pip {
+  0%, 62%, 100% { opacity: 1; }
+  76%           { opacity: .28; }
+}
+
+/* ── 2 · the subject ─────────────────────────────────────────────────────── */
+.ccc-scr-title__body {
+  display: grid; align-content: center; justify-items: start;
+  gap: .34em;
+  min-block-size: 0;
+  overflow: hidden;
 }
 .ccc-scr-title__name {
   margin: 0;
@@ -449,23 +628,59 @@ const STYLES = `
     0 0 15px color-mix(in oklab, currentColor 34%, transparent),
     0 1px 2px rgba(0,0,0,.55);
 }
-.ccc-scr-title__rule {
-  inline-size: 46%; block-size: 2px; border: 0; margin: 0;
-  background: linear-gradient(90deg,
-    var(--ccc-accent-hi, #ebce93),
-    color-mix(in oklab, var(--ccc-accent, #c8973f) 14%, transparent));
-  box-shadow: 0 0 10px color-mix(in oklab, var(--ccc-accent, #c8973f) 42%, transparent);
-  opacity: calc(0.35 + 0.65 * var(--scr-on));
+
+/* ── 3 · the primary key ─────────────────────────────────────────────────── */
+.ccc-scr-title__key {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .8em;
+  padding: .70em .9em .66em;
+  border-radius: calc(var(--pos-u) * 0.34);
+  background: linear-gradient(180deg,
+    var(--ccc-accent-hi, #ebce93) 0%,
+    var(--ccc-accent, #c8973f) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.55),
+    inset 0 0 0 1px color-mix(in oklab, var(--ccc-accent-hi, #ebce93) 70%, transparent),
+    0 2px 0 color-mix(in oklab, #000 42%, transparent);
+  /* it comes up with the terminal rather than being painted on a dead screen */
+  opacity: calc(0.18 + 0.82 * var(--scr-on));
 }
 .ccc-scr-title__cta {
   margin: 0;
   font-family: var(--ccc-font-ui, system-ui, sans-serif);
-  font-size: max(9px, calc(var(--scr-title-fs, 20px) * 0.40));
-  font-weight: 600;
-  letter-spacing: .165em;
+  font-size: calc(var(--pos-u) * 1.06);
+  font-weight: 800;
+  letter-spacing: .155em;
   text-transform: uppercase;
-  color: var(--ccc-accent-hi, #ebce93);
-  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+  line-height: 1;
+  /* ink on brass — the highest-contrast pair the site owns */
+  color: var(--ccc-accent-ink, #05070a);
+  min-inline-size: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ccc-scr-title__chev {
+  flex: 0 0 auto;
+  font-family: var(--ccc-font-ui, system-ui, sans-serif);
+  font-size: calc(var(--pos-u) * 1.85);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ccc-accent-ink, #05070a);
+  opacity: .82;
+}
+
+/* The hovered / focused terminal presses its own key, the way a real one lights
+   the button under your finger. It has to be :has() on the panel: the key
+   lives inside .ccc-scr__glass, which comes BEFORE the button in the DOM, so no
+   sibling combinator can reach it. Where :has() is missing the key simply does
+   not press — the panel's own :hover / :focus-visible states are untouched and
+   the focus ring is unaffected. Transform + filter only, per the perf contract. */
+.ccc-scr-title__key {
+  transition: filter .22s var(--ccc-ov-ease, cubic-bezier(.22,.61,.36,1)),
+              transform .22s var(--ccc-ov-ease, cubic-bezier(.22,.61,.36,1));
+}
+.ccc-scr--title:has(.ccc-scr__hit:is(:hover, :focus-visible)) .ccc-scr-title__key {
+  filter: brightness(1.09);
+  transform: translate3d(0, 1px, 0);
 }
 
 /* ── the panel chrome, re-weighted for a screen that is ON ────────────────
@@ -513,16 +728,36 @@ const STYLES = `
     inset 0 1px 0 rgba(226,240,255,.20);
 }
 
-/* the four-strip variant the narrow band uses: name left, cue right */
+/* ── the narrow band: the same terminal, re-laid as a strip ──────────────── */
 .ccc-scr--narrow.ccc-scr--title .ccc-scr-title {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   align-items: center;
-  justify-items: start;
-  gap: 0 1em;
-  padding: 4% 5%;
+  gap: 3% 4%;
+  padding: 4% 4.5%;
 }
-.ccc-scr--narrow.ccc-scr--title .ccc-scr-title__rule { display: none; }
-.ccc-scr--narrow.ccc-scr--title .ccc-scr-title__cta { justify-self: end; text-align: end; }
+.ccc-scr--narrow.ccc-scr--title .ccc-scr-title {
+  /* THE COUNTER BOUNCE COMES OFF IN THE BAND. On a tablet standing on the
+     Pass it is the strongest "this screen is on, in this room" cue there is —
+     the steel throws warm light back up at the bottom of the glass. In the
+     narrow band there is no counter, the strip is a fifth of the height, and
+     that same gradient therefore reaches much further up the panel: measured
+     at 390x844 it put a brass wash under the name and took its contrast from
+     7.9:1 to 5.9:1. Nothing else about the terminal changes. */
+  background:
+    radial-gradient(104% 84% at 18% 6%,
+      rgba(226,240,255,.06), rgba(226,240,255,0) 72%),
+    linear-gradient(158deg, #3d4a64 0%, #313e58 46%, #232c3e 100%);
+}
+.ccc-scr--narrow.ccc-scr--title .ccc-scr-title__bar { grid-column: 1 / -1; }
+.ccc-scr--narrow.ccc-scr--title .ccc-scr-title__body { align-content: center; }
+.ccc-scr--narrow.ccc-scr--title .ccc-scr-title__key {
+  /* the strip is short; the key becomes a right-hand pill, still past 44px */
+  align-self: center;
+  min-block-size: 44px;
+  padding-inline: 1.05em;
+}
+
 
 /* ══ MODE: image ═════════════════════════════════════════════════════════ */
 .ccc-scr-art { position: absolute; inset: 0; overflow: hidden; }
@@ -719,6 +954,296 @@ const STYLES = `
   transform: scale(1.35);
 }
 
+/* ══ MODE: report — THE BREAK-ROOM TELEVISION ════════════════════════════
+   THE DAILY SALES REPORT, COMPOSED. NOT IFRAMED.
+
+   The client: "above the head chef of the week photos, I would like to have
+   another tv mounted on the wall that scrolls through the daily sales report
+   (all slides)… I want the tv to be the correct size and the scrolling
+   information to be the correct size."
+
+   ⚠ WHY THIS MODE EXISTS — the arithmetic that killed 'live' on this wall.
+
+   The break-room television is 18.4% of the plate's width (rooms.js, traced
+   off the glass and not to be moved). Measured on the shipped page, the
+   panel's LAYOUT box comes out
+
+       1024 viewport   253 x 143 CSS px
+       1440            297 x 167
+       1920            356 x 201
+       2560            475 x 268
+
+   (the ON-SCREEN box is ~1.10x each of those again, because .hotspots carries
+   --plate-scale * --overscan-k; the layout box is the smaller, safer number
+   and is the one every figure in this block is quoted against).
+
+   The Daily Sales Report is a FIXED 1920x1080 canvas that scales ITSELF by
+   Math.min(innerWidth/1920, innerHeight/1080). Inside an iframe its type
+   therefore lands at panelWidth/1920 of its authored size WHATEVER virtual
+   viewport we hand it — the lever that rescued the two Dining boards (a
+   NARROWER virtual viewport, because those decks size their type in vw) does
+   nothing at all here. At 297px of glass the factor is 0.155: the deck's
+   28-42px store names arrive at 4.3-6.5 CSS px and its 16px table rows at
+   2.5. Putting a 12px floor under the deck's smallest type needs a
+   television ~75% of the plate wide. Re-shooting the room does not rescue it
+   either — at 45% of plate width the store names still only reach 7.2px.
+
+   So this panel stops being a PICTURE of the deck and becomes the deck's
+   DATA, composed for a 297px screen: the same lever 'feed' already pulls for
+   the Back Office, reading the same three files the deck reads.
+
+   THE TYPE SCALE, AND WHY IT IS A CONTAINER QUERY.
+   Every size on this board is a multiple of ONE unit:
+
+       --rpt-u: max(11.2px, 3.8cqw)
+
+   3.8% of the panel's own width, floored at 11.2px. The percentage is what
+   makes the board hold its proportions from 253px of glass to 475px and into
+   the narrow band with one set of numbers instead of four; the floor is what
+   stops the 1024 viewport — the only width where this panel falls below
+   295px — from taking the smallest label under the readability line.
+   Measured computed font-size, smallest text anywhere on the board:
+
+       1024  11.20px        1920  13.53px
+       1440  11.29px        2560  18.05px
+
+   and every card's primary subject (store name, rank, headline number) is
+   1.62em of the unit — 18.1 / 18.3 / 21.9 / 29.2px. Nothing on the glass is
+   smaller than the unit itself, so the unit IS the floor.
+
+   The first --rpt-u declaration is the fallback for an engine with no
+   container queries: --scr-w is the plane's measured width, which §8 writes
+   on every layout anyway, so the board comes out the same size either way.
+
+   HOW MANY ROWS is the one thing a percentage cannot decide, because it
+   depends on the panel's height IN UNITS — and at 1024 the floored unit
+   makes the box relatively shorter (12.8 units tall against 14.8 everywhere
+   else). JS solves it in reportRows(), exactly as makeFeed() solves its
+   column count from the measured glass.
+
+   WHAT IT IS NOT. It is not the Back Office board. The office runs
+   district-by-district "days since last detractor" over every store; this is
+   the SALES cut — profit-goal tracking, yesterday's conversion, national
+   standings — and where it touches the streak feed at all it takes a
+   different slice of it (one market-wide leaderboard, top N only). */
+.ccc-scr-rpt {
+  position: absolute; inset: 0;
+  /* THE QUERY CONTAINER IS THE PANEL — and the unit is declared one level IN.
+     A container query unit resolves against the nearest ANCESTOR container, so
+     '3.8cqw' written here would have measured the next container out (in
+     practice the viewport: 54.7px at a 1440 window, measured). --rpt-u is
+     therefore declared on __stage, which is inside this box. */
+  container-type: size;
+  container-name: ccc-rpt;
+  background:
+    radial-gradient(128% 92% at 84% 2%,
+      color-mix(in oklab, var(--ccc-accent, #c8973f) 14%, transparent), transparent 56%),
+    linear-gradient(163deg, #0d1219 0%, #05080d 60%, #0a0e15 100%);
+}
+.ccc-scr-rpt__stage {
+  position: absolute; inset: 0;
+
+  /* fallback first (no container queries), preferred second */
+  --rpt-u: max(11.2px, calc(var(--scr-w, 300) * 0.038px));
+  --rpt-u: max(11.2px, 3.8cqw);
+
+  font-size: var(--rpt-u);
+  line-height: 1.06;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.ccc-scr-rpt__slide {
+  position: absolute; inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  /* THE SAME minmax(0,1fr) LESSON, one level up and load-bearing twice over.
+     Without an explicit column the slide gets ONE implicit column of 'auto',
+     whose minimum is max-content — so the header rail's nowrap kicker sized
+     the whole card and every row inherited that width: measured, the streak
+     card laid out 418px wide inside 326px of glass and its store names never
+     reached their own ellipsis. Pinning the column to the card is what makes
+     'overflow:hidden; text-overflow:ellipsis' mean anything below. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: .42em;
+  padding: .72em .8em .5em;
+  min-block-size: 0;
+  opacity: 0;
+  transform: translate3d(0, .4em, 0);
+  transition: opacity .55s var(--ccc-ov-ease, cubic-bezier(.22,.61,.36,1)),
+              transform .55s var(--ccc-ov-ease, cubic-bezier(.22,.61,.36,1));
+  pointer-events: none;              /* the hit button above owns every tap */
+}
+.ccc-scr-rpt__slide.is-current { opacity: 1; transform: none; }
+/* the promo card is a photograph: it goes edge to edge, no chrome, no padding */
+.ccc-scr-rpt__slide.is-art { padding: 0; grid-template-rows: minmax(0, 1fr); }
+
+/* ── the header rail ─────────────────────────────────────────────────────── */
+.ccc-scr-rpt__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: .8em;
+  padding-block-end: .34em;
+  border-block-end: 1px solid color-mix(in oklab, var(--ccc-accent, #c8973f) 34%, transparent);
+}
+.ccc-scr-rpt__kick {
+  min-inline-size: 0;
+  font-size: 1.15em; font-weight: 700;
+  letter-spacing: .085em; text-transform: uppercase;
+  color: var(--ccc-accent-hi, #ebce93);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ccc-scr-rpt__meta {
+  flex: 0 0 auto;
+  font-size: 1em; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: #8f877c;
+  white-space: nowrap;
+}
+
+/* ── the body ────────────────────────────────────────────────────────────── */
+.ccc-scr-rpt__body {
+  display: grid;
+  /* minmax(0,1fr), for the same reason the feed's grid carries it one block
+     up: a bare implicit column is 'auto', whose MINIMUM is max-content — so a
+     long store name refuses to shrink, the row stops honouring its own
+     overflow:hidden and the card lays out 389px wide inside 297px of glass
+     (measured, streak card, 1440). This pins the column to the card. */
+  grid-template-columns: minmax(0, 1fr);
+  /* CENTRED, not top-aligned. Balanced pagination means a set's pages are
+     often one row short of full (9 regions over a 4-row card is 3+3+3), and a
+     three-row card hard against the header rule with an empty row of space
+     under it reads as a card that failed to finish loading. Centred, it reads
+     as a card with three things on it. A full card is unaffected. */
+  align-content: center;
+  gap: .34em;
+  min-block-size: 0;
+  overflow: hidden;                 /* a row too many is clipped, never scrolls */
+}
+
+/* ── a data row: the goal meter is the row's own ground ──────────────────── */
+.ccc-scr-rpt__row {
+  position: relative;
+  display: flex; align-items: baseline;
+  gap: .5em;
+  padding: .22em .45em;
+  border-radius: 3px;
+  background: rgba(255,255,255,.045);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+  min-inline-size: 0;
+  overflow: hidden;
+}
+/* The meter is BEHIND the type rather than a bar under it. At this size a 2px
+   bar plus its own row of leading costs a whole extra store on the card, and
+   a filled ground reads further across a break room than a hairline does. */
+.ccc-scr-rpt__fill {
+  position: absolute; inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(var(--fill, 0));
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--ccc-accent, #c8973f) 40%, transparent),
+    color-mix(in oklab, var(--ccc-accent, #c8973f) 14%, transparent));
+  pointer-events: none;
+}
+.ccc-scr-rpt__row > :not(.ccc-scr-rpt__fill) { position: relative; z-index: 1; }
+
+.ccc-scr-rpt__rank {
+  flex: 0 0 auto;
+  font-size: 1.62em; font-weight: 700;
+  letter-spacing: -.02em;
+  color: #b9b1a4;
+}
+.ccc-scr-rpt__row.is-podium .ccc-scr-rpt__rank { color: var(--ccc-accent-hi, #ebce93); }
+.ccc-scr-rpt__name {
+  flex: 1 1 auto; min-inline-size: 0;
+  font-size: 1.62em; font-weight: 600;
+  letter-spacing: .004em;
+  color: #f7f3ec;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ccc-scr-rpt__sub {
+  flex: 0 0 auto;
+  font-size: 1.24em; font-weight: 600;
+  color: #a49b8e;
+  white-space: nowrap;
+}
+.ccc-scr-rpt__val {
+  flex: 0 0 auto;
+  font-size: 1.62em; font-weight: 700;
+  letter-spacing: -.02em;
+  color: #f0e8da;
+  white-space: nowrap;
+}
+.ccc-scr-rpt__row.is-hit  .ccc-scr-rpt__val { color: var(--ccc-accent-hi, #ebce93); }
+.ccc-scr-rpt__row.is-miss .ccc-scr-rpt__val { color: #c98f6f; }
+/* the market/district total, in the deck's own idiom */
+.ccc-scr-rpt__row.is-total {
+  background: rgba(255,255,255,.10);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ccc-accent, #c8973f) 44%, transparent);
+}
+.ccc-scr-rpt__row.is-total .ccc-scr-rpt__name {
+  font-size: 1.24em; letter-spacing: .12em; text-transform: uppercase; color: #cfc6b7;
+}
+.ccc-scr-rpt__row.is-mine .ccc-scr-rpt__name { color: var(--ccc-accent-hi, #ebce93); }
+
+/* ── the hero card ───────────────────────────────────────────────────────── */
+.ccc-scr-rpt__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see the slide, above */
+  align-content: center; justify-items: start;
+  gap: .12em;
+  min-block-size: 0;
+}
+.ccc-scr-rpt__num {
+  font-family: var(--ccc-font-display, "Bodoni Moda", Didot, serif);
+  font-weight: 600;
+  font-size: 3.1em;
+  line-height: .92;
+  letter-spacing: -.03em;
+  color: #f7f3ec;
+}
+.ccc-scr-rpt__cap {
+  font-size: 1em; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+  color: #8f877c;
+}
+.ccc-scr-rpt__line {
+  max-inline-size: 100%;
+  font-size: 1.24em; font-weight: 600;
+  color: #ded6c9;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── the promo card, borrowed whole from 'image' ─────────────────────────── */
+.ccc-scr-rpt__slide.is-art .ccc-scr-art { position: absolute; inset: 0; }
+
+/* ── the slide clock ─────────────────────────────────────────────────────
+   The Back Office board can afford a row of dots because it has five slides.
+   This one has fourteen or more, and fourteen dots at 11px is a grey smear —
+   so the "it is still running" cue is a 2px hairline that empties over one
+   slide. It costs two pixels of a 167px-tall panel and it is the single thing
+   that says TELEVISION rather than POSTER. */
+.ccc-scr-rpt__tick {
+  position: absolute; inset-inline: 0; inset-block-end: 0;
+  block-size: 2px;
+  overflow: hidden;
+  background: rgba(255,255,255,.10);
+  z-index: 2;
+}
+.ccc-scr-rpt__tick i {
+  position: absolute; inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--ccc-accent, #c8973f) 70%, transparent),
+    var(--ccc-accent-hi, #ebce93));
+}
+.ccc-scr-rpt__slide.is-current .ccc-scr-rpt__tick i {
+  animation: ccc-rpt-tick var(--rpt-slide, 10s) linear forwards;
+}
+@keyframes ccc-rpt-tick {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
 /* ══ the calm holding card — every mode's failure state ══════════════════ */
 .ccc-scr-holding {
   position: absolute; inset: 0;
@@ -838,12 +1363,22 @@ const STYLES = `
 @media (prefers-reduced-motion: reduce) {
   .ccc-scr__scan::after { animation: none; opacity: 0; }
   .ccc-scr__crt { display: none; }
+  /* the terminal's connection light holds lit rather than blinking */
+  .ccc-scr-title__pip { animation: none; opacity: 1; }
+  .ccc-scr-title__key { transition: none; }
   /* No power-on ramp, and no scroll-driven fade on the band — theme.css §18
      pins .hotspots to opacity 1 for exactly this reason and the band is that
      layer's narrow-viewport counterpart. */
   .ccc-scr { --scr-on: 1; }
   .ccc-scr-layer { opacity: 1; }
   .ccc-scr-feed__slide { transition: none; transform: none; }
+  /* The break-room board keeps advancing — a TV that stops is a broken TV —
+     but it stops MOVING: no cross-fade and no emptying slide clock. Exactly
+     what the feed does one line above. */
+  .ccc-scr-rpt__slide { transition: none; transform: none; }
+  .ccc-scr-rpt__slide.is-current .ccc-scr-rpt__tick i {
+    animation: none; transform: scaleX(1);
+  }
   .ccc-scr__frame,
   .ccc-scr__hit,
   .ccc-scr-feed__dots span { transition: none; }
@@ -1104,6 +1639,405 @@ function groupByDistrict(data) {
 }
 
 /* -----------------------------------------------------------------------------
+ * 5b · The sales workbook — one fetch and one parse, shared by every report
+ *      screen
+ *
+ * The Daily Sales Report is driven from `data/Sales Report.xlsx` in its own
+ * repo, parsed client-side with SheetJS. The break-room television renders the
+ * same numbers natively (see the MODE: report block in §3 for why it cannot
+ * iframe them), so it reads the same workbook with the same parser shapes and
+ * the same vocabulary — this is meant to be the same product on a smaller
+ * screen, not a lookalike.
+ *
+ * THE COSTS, STATED HONESTLY. This is the only thing on the site that pulls a
+ * ~900KB library and a ~1.1MB workbook. Both are therefore paid ONLY when a
+ * `report` panel actually arms — i.e. when the Break Room is within one and a
+ * half viewports — never at boot, never for any other mode, and never twice:
+ * the library is one <script> guarded by an id, and the workbook is one fetch
+ * memoised for the same ten minutes the source app refreshes on.
+ *
+ * THE DISCIPLINE IS §5's, DELIBERATELY COPIED. Every rule that block exists to
+ * enforce applies here for the same reasons:
+ *   · a real deadline on the fetch, because `fetch()` has none of its own and a
+ *     socket that opens and hangs is a screen that never fail-softs;
+ *   · a SUCCESS is memoised for the TTL, a FAILURE only for FEED_RETRY_MS —
+ *     long enough to stop a stampede, far too short to settle what the board
+ *     shows for the rest of the session;
+ *   · on failure resolve LAST GOOD DATA when there is any, and `null` only
+ *     when there has never been anything.
+ * -------------------------------------------------------------------------- */
+
+/** The market this site belongs to. The workbook is the whole company; every
+ *  row whose RSD is not this one belongs to somebody else's break room. The
+ *  source app spells it `RSD_NAME: 'Jeffrey Bilbrey'` and tests it with
+ *  `String(rsd).includes('Bilbrey')` — same test, same surname. */
+const RSD_SURNAME = 'Bilbrey';
+
+/** The market's districts, copied from the source app's own DISTRICTS table so
+ *  a store lands in the same district on this wall as it does on the deck.
+ *  `dmMatch` is a DM-surname substring from the Store Rank sheet; storeMatch /
+ *  storeExclude are the hand-placed exceptions (Cicero reports to the East DM
+ *  but belongs to Chicago North on the org chart). The 'all' row is dropped —
+ *  this board never filters. */
+const REPORT_DISTRICTS = [
+  { key: 'north',     label: 'Chicago North', dmMatch: ['dhorajiwala'], storeMatch: ['cicero'] },
+  { key: 'south',     label: 'Chicago South', dmMatch: ['carrillo'] },
+  { key: 'east',      label: 'Chicago East',  dmMatch: ['cabrales'], storeExclude: ['cicero'] },
+  { key: 'west',      label: 'Chicago West',  dmMatch: ['chowdhury'] },
+  { key: 'big-south', label: 'Big South',     dmMatch: ['brooks'] }
+];
+
+/** The two regions this market sits inside, for the region standings card.
+ *  The source app's CONFIG.OUR_REGIONS, unchanged. */
+const OUR_REGIONS = ['Greater Chicago', 'Big South'];
+
+/** Sheet names, the source app's CONFIG values. */
+const SHEET_STORE  = 'Store Rank';
+const SHEET_ZERO   = 'Zero';
+const SHEET_DM     = 'District Rank';
+const SHEET_REGION = 'Region Rank';
+
+/* ── format helpers, the deck's own ──────────────────────────────────────── */
+
+/** `$79,118` / `-$3,051`. Verbatim from the source app's fmtMoney. */
+const fmtMoney = (n) => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString();
+/** `0.1291` -> `12.9%`. The source app's pctStr. */
+const pctStr = (v) => `${(v * 100).toFixed(1)}%`;
+/** Whole percent. A tenth of a point is noise on a goal meter read at 18px. */
+const pctWhole = (v) => `${Math.round(v * 100)}%`;
+
+/** The source app's storeMatchesDistrict, minus the catch-all branch. */
+function storeInDistrict(store, dist) {
+  const name = String(store.name || '').toLowerCase();
+  if (dist.storeExclude && dist.storeExclude.some((m) => name.includes(m))) return false;
+  if (dist.storeMatch && dist.storeMatch.some((m) => name.includes(m))) return true;
+  const dm = String(store.dm || '').toLowerCase();
+  return dist.dmMatch.some((m) => dm.includes(m));
+}
+
+/* ── SheetJS, loaded lazily and never twice ──────────────────────────────── */
+
+/** Pinned, exactly the build the source app loads. It is NOT run through
+ *  freshUrl(): the two data URLs below are, because the client's requirement is
+ *  fresh NUMBERS, but this is an immutable version-pinned library on a CDN and
+ *  a rolling query string on it would defeat the only cache that matters and
+ *  re-download 900KB for nothing. */
+const SHEETJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+
+let sheetJsPromise = null;
+
+/**
+ * Resolve to `window.XLSX`, or to `null` if the library never arrives.
+ *
+ * Three things this has to get right:
+ *   1. ONE <script>, however many report panels arm in the same frame. The id
+ *      guard plus the shared promise does that; a second panel awaits the
+ *      first one's tag instead of injecting another 900KB.
+ *   2. A DEADLINE. A <script> that neither loads nor errors — a captive portal,
+ *      a CDN blocked by a store's filter — otherwise leaves the board waiting
+ *      forever on a promise that never settles, which is the exact shape of the
+ *      `live` bug this whole mode replaces.
+ *   3. A FAILURE IS NOT MEMOISED. On failure the promise AND the dead tag are
+ *      both dropped, so the next retry tick genuinely re-injects. Caching the
+ *      failure would settle the board's contents for the session.
+ */
+function ensureSheetJS() {
+  if (window.XLSX && typeof window.XLSX.read === 'function') {
+    return Promise.resolve(window.XLSX);
+  }
+  if (sheetJsPromise) return sheetJsPromise;
+
+  sheetJsPromise = new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(deadline);
+      const lib = ok && window.XLSX && typeof window.XLSX.read === 'function' ? window.XLSX : null;
+      if (!lib) {
+        // Drop both memos so a later retry is a real one.
+        sheetJsPromise = null;
+        const dead = document.getElementById('ccc-sheetjs');
+        if (dead) dead.remove();
+        console.warn('[screens] SheetJS unavailable; the report board falls back to its no-workbook cards');
+      }
+      resolve(lib);
+    };
+    const deadline = window.setTimeout(() => finish(false), SHEETJS_TIMEOUT_MS);
+
+    let tag = document.getElementById('ccc-sheetjs');
+    if (!tag) {
+      tag = el('script', {
+        id: 'ccc-sheetjs',
+        src: SHEETJS_URL,
+        async: true,
+        crossorigin: 'anonymous',
+        referrerpolicy: 'no-referrer'
+      });
+      document.head.append(tag);
+    }
+    tag.addEventListener('load', () => finish(true), { once: true });
+    tag.addEventListener('error', () => finish(false), { once: true });
+  });
+
+  return sheetJsPromise;
+}
+
+/* ── the workbook itself ─────────────────────────────────────────────────── */
+
+let bookCache = { at: 0, promise: null, data: null, failed: false, inflight: false };
+
+/** `XLSX.utils.sheet_to_json(sheet, {header:1})` on a named sheet, or null. */
+function sheetRows(XLSX, wb, name) {
+  const sheet = wb.Sheets[name];
+  if (!sheet) return null;
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+}
+
+/**
+ * `Store Rank` -> this market's stores.
+ *
+ * Header discovery and every column lookup are the source app's parseWorkbook,
+ * kept row for row: the header row is the first of the top 15 carrying both a
+ * cell equal to 'Rank' and a cell containing 'Store'; columns are found by
+ * case-insensitive substring so a renamed "Net Target GP $" still resolves.
+ * Two columns are matched EXACTLY rather than by substring, and both for the
+ * source app's reasons: 'GP $ Trend' would otherwise be eaten by
+ * 'GP $ Est Net Trend', and 'Fiscal NPS' by 'Last Month Fiscal NPS'.
+ */
+function parseStoreRank(aoa) {
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(15, aoa.length); i++) {
+    const row = aoa[i];
+    if (row && row.some((c) => c && String(c).trim() === 'Rank')
+            && row.some((c) => c && String(c).includes('Store'))) { headerRow = i; break; }
+  }
+  if (headerRow < 0) return [];
+
+  const headers = aoa[headerRow].map((h) => (h ? String(h).trim() : ''));
+  const col = (name) => headers.findIndex((h) => h.toLowerCase().includes(name.toLowerCase()));
+  const iRank   = col('Rank'),   iRegion = col('Region'), iStore = col('Store'),
+        iRSD    = col('RSD'),    iDM     = col('DM'),     iSM    = col('SM'),
+        iTarget = col('Net Target GP'), iVar = col('Var Target GP');
+  const iTrend  = headers.findIndex((h) => h === 'GP $ Trend');
+  const iMobCR  = headers.findIndex((h) => h.toLowerCase().includes('mobile close rate'));
+  const iFisCR  = headers.findIndex((h) => h.toLowerCase().includes('fiscal close rate'));
+  const iNPS    = headers.findIndex((h) => h.toLowerCase().includes('fiscal nps')
+                                        && !h.toLowerCase().includes('last'));
+
+  const out = [];
+  for (let i = headerRow + 1; i < aoa.length; i++) {
+    const row = aoa[i];
+    if (!row || !row[iRank]) break;                 // the sheet ends at its first gap
+    if (!String(row[iRSD] || '').includes(RSD_SURNAME)) continue;
+    out.push({
+      rank:   Number(row[iRank]) || 0,
+      region: String(row[iRegion] || ''),
+      name:   String(row[iStore] || ''),
+      dm:     String(row[iDM] || ''),
+      sm:     String(row[iSM] || ''),
+      gpTrend: iTrend  >= 0 ? Number(row[iTrend])  || 0 : 0,
+      target:  iTarget >= 0 ? Number(row[iTarget]) || 0 : 0,
+      varTarget: iVar  >= 0 ? Number(row[iVar])    || 0 : 0,
+      mobileCR:  iMobCR >= 0 ? Number(row[iMobCR]) || 0 : 0,
+      fiscalCR:  iFisCR >= 0 ? Number(row[iFisCR]) || 0 : 0,
+      nps:       iNPS   >= 0 ? Number(row[iNPS])   || 0 : 0
+    });
+  }
+  out.sort((a, b) => a.rank - b.rank);
+  return out;
+}
+
+/**
+ * `Zero` -> yesterday's walk-ins and mobile sales, by store name.
+ * The source app's parseZeroSheet, unchanged: header row is the one whose
+ * first cell reads 'Store Name'; column 2 is TTL Mobile, 7 is Yesterday MCR %,
+ * 8 is Yesterday Traffic. MCR arrives as either a fraction or a percentage
+ * depending on how the sheet was last saved, so it is normalised the same way.
+ */
+function parseZeroSheet(aoa) {
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(10, aoa.length); i++) {
+    if (aoa[i] && aoa[i][0] && String(aoa[i][0]).trim().toLowerCase() === 'store name') {
+      headerIdx = i; break;
+    }
+  }
+  if (headerIdx < 0) return {};
+  const out = {};
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const r = aoa[i];
+    if (!r || !r[0]) continue;
+    const name = String(r[0]).trim();
+    const mcrRaw = r[7];
+    out[name] = {
+      store: name,
+      mobile:  Number(r[2]) || 0,
+      traffic: Number(r[8]) || 0,
+      mcr: typeof mcrRaw === 'number' ? (mcrRaw <= 1 ? mcrRaw * 100 : mcrRaw) : null
+    };
+  }
+  return out;
+}
+
+/**
+ * `District Rank` / `Region Rank` -> the national standings.
+ * The source app's parseRankSheet: the header row is the one of the top six
+ * whose first cell is exactly 'Rank'; column 2 is Avg GP Trend $ and column 32
+ * is NPS%. Only the columns this board actually shows are kept.
+ */
+function parseRankSheet(aoa) {
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(aoa.length, 6); i++) {
+    if (aoa[i] && String(aoa[i][0] || '').trim() === 'Rank') { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) return [];
+  const rows = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const r = aoa[i];
+    if (!r || r[0] == null) continue;
+    const name = String(r[1] || '').trim();
+    if (!name) continue;
+    rows.push({
+      rank: Number(r[0]) || 0,
+      name,
+      avgGpTrend: Number(r[2]) || 0,
+      nps: Number(r[32]) || 0
+    });
+  }
+  rows.sort((a, b) => a.rank - b.rank);
+  return rows;
+}
+
+/** Everything the report cards need, in one plain object. */
+function buildSalesModel(XLSX, wb) {
+  const storeAoa = sheetRows(XLSX, wb, SHEET_STORE);
+  const stores = storeAoa ? parseStoreRank(storeAoa) : [];
+  if (!stores.length) throw new Error('no stores for this market');
+
+  const zeroAoa = sheetRows(XLSX, wb, SHEET_ZERO);
+  const dmAoa = sheetRows(XLSX, wb, SHEET_DM);
+  const regionAoa = sheetRows(XLSX, wb, SHEET_REGION);
+
+  const zero = zeroAoa ? parseZeroSheet(zeroAoa) : {};
+  const dmRanks = dmAoa ? parseRankSheet(dmAoa) : [];
+  const regionRanks = regionAoa ? parseRankSheet(regionAoa) : [];
+
+  // Yesterday, rolled up per district and for the market. The deck prints the
+  // same three numbers per row plus a DISTRICT TOTAL; this board has room for
+  // one row per district and one MARKET total, which is the same table with
+  // the market's five districts standing in for one district's five stores.
+  const districts = REPORT_DISTRICTS.map((d) => {
+    const own = stores.filter((s) => storeInDistrict(s, d));
+    const y = own.reduce((acc, s) => {
+      const z = zero[s.name];
+      if (z) { acc.traffic += z.traffic; acc.mobile += z.mobile; }
+      return acc;
+    }, { traffic: 0, mobile: 0 });
+    const gp = own.reduce((acc, s) => {
+      acc.trend += s.gpTrend; acc.target += s.target; return acc;
+    }, { trend: 0, target: 0 });
+    return { key: d.key, label: d.label, stores: own, ...y, gp };
+  }).filter((d) => d.stores.length);
+
+  const market = districts.reduce((acc, d) => {
+    acc.traffic += d.traffic; acc.mobile += d.mobile;
+    acc.trend += d.gp.trend;  acc.target += d.gp.target;
+    return acc;
+  }, { traffic: 0, mobile: 0, trend: 0, target: 0 });
+  market.stores = stores.length;
+  market.atGoal = stores.filter((s) => s.target > 0 && s.gpTrend >= s.target).length;
+
+  // Our own district managers, looked up in the national District Rank table.
+  // Matched the way the deck matches them: a DM name off our store rows,
+  // compared loosely in both directions so "Matt Brooks" still finds
+  // "Matthew Brooks".
+  const ourDMs = new Set(stores.map((s) => String(s.dm || '').toLowerCase().trim()).filter(Boolean));
+  const isOurDM = (name) => {
+    const n = String(name).toLowerCase().trim();
+    if (ourDMs.has(n)) return true;
+    for (const dm of ourDMs) if (dm.includes(n) || n.includes(dm)) return true;
+    return false;
+  };
+  const dmMine = dmRanks.filter((r) => isOurDM(r.name));
+  const dmTotal = dmRanks.length;
+
+  const regionMine = (name) =>
+    OUR_REGIONS.some((r) => String(name).toLowerCase().includes(r.toLowerCase()));
+
+  return { stores, zero, districts, market, dmRanks, dmMine, dmTotal, regionRanks, regionMine };
+}
+
+/**
+ * Fetch + parse the workbook, at most once per window, shared by every report
+ * screen. Resolves the model, the last good model, or null.
+ *
+ * The deadline is longer than the feeds' because the payload is: the streak
+ * JSON is 16KB and the workbook is ~1.1MB, and a store's wifi is a store's
+ * wifi. It is still a hard deadline — an unanswered request is a failure like
+ * any other and must reach the retry clock rather than hang.
+ */
+function loadWorkbook({ force = false } = {}) {
+  const now = Date.now();
+
+  if (!force && bookCache.promise) {
+    const age = now - bookCache.at;
+    const window_ = bookCache.inflight ? BOOK_TIMEOUT_MS + SHEETJS_TIMEOUT_MS + 2000
+                  : bookCache.failed   ? FEED_RETRY_MS
+                                       : FEED_TTL_MS;
+    if (age < window_) return bookCache.promise;
+  }
+
+  bookCache.at = now;
+  bookCache.inflight = true;
+
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const deadline = ctrl ? window.setTimeout(() => ctrl.abort(), BOOK_TIMEOUT_MS) : 0;
+
+  // The library and the bytes are fetched together: neither is useful alone and
+  // starting them in series would add a whole round trip to a cold board.
+  bookCache.promise = Promise.all([
+    ensureSheetJS(),
+    fetch(freshUrl(EXCEL_URL, BUCKET_MS), {
+      credentials: 'omit',
+      cache: 'no-store',
+      signal: ctrl ? ctrl.signal : undefined
+    }).then((res) => (res.ok ? res.arrayBuffer()
+                             : Promise.reject(new Error(`HTTP ${res.status}`))))
+  ])
+    .then(([XLSX, buf]) => {
+      if (deadline) window.clearTimeout(deadline);
+      if (!XLSX) throw new Error('SheetJS unavailable');
+      // `sheets` is the whole reason this parse is affordable on a phone.
+      // buildSalesModel() reads FOUR sheets by exact name and nothing else, and
+      // without this option SheetJS materialises every sheet in a ~1.1MB
+      // workbook as a cell-per-key object graph — tens of megabytes of transient
+      // JS objects, allocated in the one room (the Break Room) that a phone
+      // reaches last, with the whole runway's plates already resident. Naming
+      // the four keeps the graph to what is actually read. The names are the
+      // same constants sheetRows() then looks up in wb.Sheets, so a workbook
+      // that renames a tab fails exactly as it did before: a missing sheet, a
+      // null AoA and the holding card, not a wrong number.
+      const model = buildSalesModel(XLSX, XLSX.read(buf, {
+        type: 'array',
+        sheets: [SHEET_STORE, SHEET_ZERO, SHEET_DM, SHEET_REGION]
+      }));
+      bookCache.data = model;
+      bookCache.failed = false;
+      bookCache.inflight = false;
+      return model;
+    })
+    .catch((err) => {
+      if (deadline) window.clearTimeout(deadline);
+      console.warn('[screens] sales workbook unavailable:', err && err.message);
+      bookCache.failed = true;
+      bookCache.inflight = false;
+      return bookCache.data;             // stale beats blank; null only if never
+    });
+
+  return bookCache.promise;
+}
+
+/* -----------------------------------------------------------------------------
  * 6 · Mode renderers
  *
  * Every renderer returns a small controller:
@@ -1124,31 +2058,109 @@ function holdingCard(title, note) {
 
 /* ── title ────────────────────────────────────────────────────────────────── */
 
+/** Rooms, as a terminal's chrome would name them. Falls back to the house
+ *  name, so a `title` screen mounted in a room this map has never heard of
+ *  still gets a plausible station id rather than a blank rail. */
+const ROOM_TITLES = {
+  pass: 'The Pass', host: 'Host Stand', dining: 'Dining Room', prep: 'Prep',
+  office: 'Back Office', breakroom: 'Break Room', freezer: 'Walk-In'
+};
+
+/** "THE PASS · 02" — the station id in the chrome rail. The number is the
+ *  panel's position among the screen hosts of its own room, in DOM order, so
+ *  the three tablets read 01/02/03 left to right without anything in rooms.js
+ *  having to say so. Derived, never hand-set. */
+function stationLabel(rec) {
+  const { room, roomId } = roomOf(rec.host);
+  const scope = room || document;
+  let n = 1;
+  try {
+    const hosts = Array.from(scope.querySelectorAll('[data-screen]'));
+    const i = hosts.indexOf(rec.host);
+    if (i >= 0) n = i + 1;
+  } catch { /* a detached host is still worth a station id */ }
+  const place = ROOM_TITLES[roomId] || 'Cook County Cooks';
+  return `${place} · ${String(n).padStart(2, '0')}`;
+}
+
 function makeTitle(rec) {
   const name = el('h3', { class: 'ccc-scr-title__name', text: rec.headline });
-  const node = el('div', { class: 'ccc-scr-title' }, [
-    name,
-    el('hr', { class: 'ccc-scr-title__rule', 'aria-hidden': 'true' }),
-    el('p', { class: 'ccc-scr-title__cta', text: 'Tap to open' })
+
+  /* Row 1 — the chrome. aria-hidden throughout: the button's accessible name is
+     already "Open <tool>", and a screen reader has no use for set dressing. */
+  const bar = el('div', { class: 'ccc-scr-title__bar', 'aria-hidden': 'true' }, [
+    el('span', { class: 'ccc-scr-title__term', text: stationLabel(rec) }),
+    el('span', { class: 'ccc-scr-title__stat' }, [
+      el('i', { class: 'ccc-scr-title__pip' }),
+      el('span', { text: 'Online' })
+    ])
   ]);
+
+  /* Row 2 — the one subject on the screen. */
+  /* No second brass rule under the name: the chrome rail's own hairline is
+     the rule now, and at 150px of glass a third brass element competes with
+     the key for the eye instead of structuring anything. */
+  const body = el('div', { class: 'ccc-scr-title__body' }, [name]);
+
+  /* Row 3 — the primary key. Not a button: the whole panel is already one
+     <button>, and nesting a second interactive element inside a control is
+     invalid and would hand the tab order a duplicate. This is the KEY CAP the
+     panel-wide button presses. */
+  const key = el('div', { class: 'ccc-scr-title__key', 'aria-hidden': 'true' }, [
+    el('span', { class: 'ccc-scr-title__cta', text: 'Tap to open' }),
+    el('span', { class: 'ccc-scr-title__chev', text: '›' })
+  ]);
+
+  const node = el('div', { class: 'ccc-scr-title' }, [bar, body, key]);
 
   return {
     node,
     resize(r) {
-      // Auto-fit: solve a font size from the glass area and the character
-      // count, then cap it on both axes. A tablet 10% of frame width and a
-      // full-width phone strip are the same problem with different numbers,
-      // so there is one solve rather than a table of breakpoints.
+      // ── THE AUTO-FIT ───────────────────────────────────────────────────
+      // Two numbers come out of one solve, and both are pure functions of the
+      // glass box: a tablet 15% of frame width and a full-width phone strip
+      // are the same problem with different numbers, so there is one solve
+      // rather than a table of breakpoints.
+      //
+      //   --scr-pos-fs   the chrome unit. Everything in the rail and the key
+      //                  is an em of it, so paying for the chrome is a single
+      //                  multiplication rather than a stack of guesses.
+      //   --scr-title-fs the subject. Solved from what is LEFT after the
+      //                  chrome, which is the whole reason the terminal
+      //                  layout does not squeeze the name off the glass.
       const w = r.planeW, h = r.planeH;
       if (!w || !h) return;
+      const narrow = r.narrow;
+
+      // The chrome unit. Capped on both axes so a very wide strip does not get
+      // a rail out of proportion to its height, and floored at 7px because
+      // below that uppercase tracking stops resolving at all.
+      const u = Math.max(7, Math.min(h * (narrow ? 0.13 : 0.093), w * 0.040));
+
+      // What the chrome actually costs, in the same em terms the CSS uses:
+      //   rail = 1 line + .62em padding + the hairline
+      //   key  = 1.06em cap-line + .78em + .74em padding + the 2px shadow lip
+      const railH = u * 1.0 + u * 0.62 + 1;
+      const keyH  = Math.max(narrow ? 44 : 0, u * 1.06 + u * 1.36 + 2);
+      const padY  = h * (narrow ? 0.08 : 0.09);
+      const gaps  = h * (narrow ? 0.03 : 0.08);
+
+      // The name's own box. In the narrow strip the key sits BESIDE the
+      // subject rather than under it, so it costs width, not height.
+      const bw = (w - w * (narrow ? 0.09 : 0.11)) * (narrow ? 0.62 : 1);
+      const bh = narrow
+        ? Math.max(14, h - railH - padY - gaps)
+        : Math.max(14, h - railH - keyH - padY - gaps);
+
       const text = (rec.headline || '').replace(/\s+/g, ' ').trim();
       const chars = Math.max(8, text.length);
-      const narrow = r.narrow;
-      const bw = w * (narrow ? 0.66 : 0.86);
-      const bh = h * (narrow ? 0.62 : 0.58);
       let fs = Math.sqrt((bw * bh * 0.42) / chars) * 1.42;
-      fs = Math.min(fs, bh * 0.52, bw * 0.36);
+      // Cap on both axes: bh*0.46 leaves room for two lines of the name,
+      // bw*0.34 keeps the longest single word inside the glass.
+      fs = Math.min(fs, bh * 0.46, bw * 0.34);
       fs = Math.max(fs, 10);
+
+      r.plane.style.setProperty('--scr-pos-fs', `${u.toFixed(2)}px`);
       r.plane.style.setProperty('--scr-title-fs', `${fs.toFixed(2)}px`);
     },
     activate: noop,
@@ -1558,6 +2570,21 @@ function makeLive(rec) {
     }, 12000);
   }
 
+  /**
+   * The no-frame state: this board is in range but the live-iframe ration is
+   * spent (see MAX_LIVE_FRAMES / liveBudget()). Shows the mode's own holding
+   * card rather than leaving the glass empty. Idempotent — reconcile() calls it
+   * on every observer callback — and it never fights mount(): a board that
+   * later wins a frame goes through activate(), which replaces these children.
+   */
+  function hold() {
+    if (frame) return;
+    if (node.firstElementChild &&
+        node.firstElementChild.classList.contains('ccc-scr-holding')) return;
+    node.replaceChildren(holdingCard(rec.title, 'Tap to open this board full screen.'));
+    rec.panel.classList.add('is-live');
+  }
+
   function unmount() {
     window.clearTimeout(watchdog);
     rec.panel.classList.remove('is-live');
@@ -1572,13 +2599,32 @@ function makeLive(rec) {
     node.replaceChildren();
   }
 
+  /**
+   * Size the frame to the glass.
+   *
+   * The virtual viewport keeps the panel's own aspect — that is what makes the
+   * scaled frame land corner to corner with no bars and no crop — and is made
+   * big enough that the deck inside it lays a whole slide out rather than
+   * clipping one. See LIVE_MIN_VIRTUAL_H for the measurements behind 960.
+   *
+   * The scale is uniform, so nothing is distorted, and the frame is positioned
+   * at the plane's top-left with `transform-origin: top left`, so the scaled
+   * box starts exactly where the glass starts.
+   */
   function fit() {
     if (!frame) return;
     const w = rec.planeW, h = rec.planeH;
     if (!w || !h) return;
-    const scale = w / rec.renderWidth;          // uniform: no distortion
-    frame.style.width = `${rec.renderWidth}px`;
-    frame.style.height = `${Math.round(h / scale)}px`;
+
+    const aspect = w / h;                       // the panel's, as measured
+    // Derived, not hand-tuned per board: the height the decks need, the
+    // panel's own aspect, and whatever floor rooms.js asked for.
+    const vw = Math.max(rec.renderWidth, Math.round(LIVE_MIN_VIRTUAL_H * aspect));
+    const vh = Math.max(1, Math.round(vw / aspect));
+
+    const scale = w / vw;                       // uniform: no distortion
+    frame.style.width = `${vw}px`;
+    frame.style.height = `${vh}px`;
     frame.style.transform = `scale(${scale.toFixed(5)})`;
   }
 
@@ -1588,11 +2634,479 @@ function makeLive(rec) {
     activate: mount,
     deactivate: unmount,
     destroy: unmount,
+    hold,
     get isLive() { return !!frame; }
   };
 }
 
-const RENDERERS = { title: makeTitle, image: makeImage, feed: makeFeed, live: makeLive };
+/* ── report ───────────────────────────────────────────────────────────────── */
+
+/** Money compacted for a 297px screen: `$1.63M`, `$107k`, `$8,009`.
+ *  The deck prints fmtMoney() everywhere because it has 1920px to print it in.
+ *  Here a nine-character figure would take a third of the row and push the
+ *  store name — the thing the card is ABOUT — into an ellipsis, so anything
+ *  over ten thousand is rounded. Measured: `$107,467` is 62px at 1.24em/1440
+ *  and `$107k` is 38px, which is the difference between a 19-character and a
+ *  15-character store name in the same row. Below $10,000 nothing is rounded,
+ *  because that is the range where the last three digits are the news. */
+function fmtMoneyShort(n) {
+  const sign = n < 0 ? '-$' : '$';
+  const abs = Math.abs(n);
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(2)}M`;
+  if (abs >= 1e4) return `${sign}${Math.round(abs / 1e3).toLocaleString()}k`;
+  return fmtMoney(n);
+}
+
+/**
+ * How many rows one card can carry.
+ *
+ * The only decision on this board that a percentage cannot make. Every SIZE is
+ * a fraction of the panel's width (see MODE: report in §3), but the row COUNT
+ * depends on the panel's height measured in those units — and at a 1024
+ * viewport the 11.2px floor under --rpt-u makes the same box relatively
+ * shorter, so the same board honestly holds one row fewer.
+ *
+ * The two constants are the card's own chrome and one row, both in units and
+ * both read straight off the CSS above:
+ *   chrome 4.1u = slide padding (.72 + .5) + header rail (1.15em x 1.15 line
+ *                 + .34 padding + 1px rule) + the body gap + the 2px tick
+ *   row    2.5u = 1.62em name x 1.06 line + .44 padding + .34 gap
+ *
+ * Measured against the panel as it actually lays out:
+ *   1024  143 / 11.20 = 12.8u  ->  3 rows
+ *   1440  167 / 11.29 = 14.8u  ->  4 rows
+ *   1920  201 / 13.53 = 14.9u  ->  4 rows
+ *   2560  268 / 18.05 = 14.8u  ->  4 rows
+ *   narrow band (390px viewport)  ->  6 rows
+ * The clamp is there so a mis-measured plane cannot produce a one-row card or
+ * a hundred-row one.
+ */
+function reportRows(rec) {
+  const w = rec.planeW || 300;
+  const h = rec.planeH || 170;
+  const u = Math.max(11.2, w * 0.038);
+  return Math.max(2, Math.min(8, Math.floor((h / u - 4.1) / 2.5)));
+}
+
+/**
+ * Is this panel too narrow to carry a secondary column?
+ *
+ * The board's SIZES are a percentage of the panel, so a 253px panel and a
+ * 475px one are the same picture - except at 1024, where --rpt-u hits its
+ * 11.2px floor and the type stops shrinking with the box. Measured in units
+ * the panel is 26.3u wide at 1440, 1920, 2560 AND in the narrow band, and only
+ * 22.6u at 1024. Below 24u the money column costs more than it is worth: at
+ * 1024 it took the store-name column down to ~13 characters, which put
+ * "Evergreen Park" and "Round Lake Beach" - the name is what the row is ABOUT
+ * - into an ellipsis. Dropping it gives the name ~17 characters back.
+ */
+function reportDense(rec) {
+  const w = rec.planeW || 300;
+  return w / Math.max(11.2, w * 0.038) < 24;
+}
+
+/** Split a list into as few pages as `per` allows, then even them out, so 5
+ *  districts over a 4-row card come out 3 + 2 rather than 4 + 1. */
+function paginate(list, per) {
+  const pages = Math.max(1, Math.ceil(list.length / Math.max(1, per)));
+  const size = Math.ceil(list.length / pages);
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+/** The source app's own staleness rule, and its reason: "a wrong counter on a
+ *  store TV is worse than no counter at all". A streak board more than three
+ *  days old is dropped from the rotation rather than shown. */
+function streaksFresh(data) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String((data && data.asOf) || ''));
+  if (!m) return false;
+  const asOf = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return (Date.now() - asOf.getTime()) / 86400000 <= 3;
+}
+
+/** One data row. `fill` (0..1) paints the meter behind the type. */
+function rptRow(spec) {
+  const kids = [
+    el('i', { class: 'ccc-scr-rpt__fill', style: `--fill:${(spec.fill || 0).toFixed(3)}` })
+  ];
+  if (spec.rank) kids.push(el('span', { class: 'ccc-scr-rpt__rank', text: spec.rank }));
+  kids.push(el('span', { class: 'ccc-scr-rpt__name', text: spec.name || '' }));
+  if (spec.sub) kids.push(el('span', { class: 'ccc-scr-rpt__sub', text: spec.sub }));
+  if (spec.val) kids.push(el('span', { class: 'ccc-scr-rpt__val', text: spec.val }));
+  return el('div', { class: `ccc-scr-rpt__row${spec.cls ? ' ' + spec.cls : ''}` }, kids);
+}
+
+/** The frame every card shares: header rail, body, slide clock. */
+function rptSlide(kick, meta, body, extra) {
+  return el('div', { class: `ccc-scr-rpt__slide${extra ? ' ' + extra : ''}` }, [
+    el('div', { class: 'ccc-scr-rpt__head' }, [
+      el('span', { class: 'ccc-scr-rpt__kick', text: kick }),
+      meta ? el('span', { class: 'ccc-scr-rpt__meta', text: meta }) : null
+    ]),
+    body,
+    el('div', { class: 'ccc-scr-rpt__tick', 'aria-hidden': 'true' }, [el('i')])
+  ]);
+}
+
+const rptBody = (kids) => el('div', { class: 'ccc-scr-rpt__body' }, kids);
+
+/**
+ * The rotation.
+ *
+ * Card order follows the deck's own buildSlides(): the market first, then
+ * store performance, then yesterday's conversion, then the standings — with
+ * the promo card interleaved every PROMO_EVERY_N slides and always last,
+ * which is the source app's rule and its number.
+ *
+ * WHAT IS DELIBERATELY NOT HERE. The Back Office monitor already runs
+ * district-by-district "days since last detractor" across all 27 stores. This
+ * board takes ONE different slice of the same feed — a market-wide leaderboard
+ * of the longest clean streaks, top N only — so the two screens in the
+ * building never show the same card.
+ *
+ * @param {object|null} model    the parsed workbook, or null if it never came
+ * @param {object|null} streaks  nps-detractor-streaks.json, or null
+ * @param {number} rows          rows this panel can carry, from reportRows()
+ * @param {boolean} promoOk      false once the promo card has 404'd
+ * @param {boolean} dense        drop the secondary column; see reportDense()
+ */
+function buildReportCards(model, streaks, rows, promoOk, dense) {
+  const cards = [];
+
+  if (model) {
+    cards.push({ kind: 'pulse' });
+
+    // Store overview / profit-goal tracking, best-tracking first. The deck
+    // pages these in national-rank order; on a board this size a monotonic
+    // meter is what makes the card readable at a glance from across the room,
+    // so the sort is % of goal and the national rank is not shown here (it is
+    // one tap away in the deck itself).
+    const goal = model.stores.slice().sort((a, b) => {
+      const pa = a.target > 0 ? a.gpTrend / a.target : -1;
+      const pb = b.target > 0 ? b.gpTrend / b.target : -1;
+      return pb - pa;
+    });
+    paginate(goal, rows).forEach((page, i, all) =>
+      cards.push({ kind: 'goal', page, i, n: all.length, dense }));
+
+    // Yesterday's conversion: one row per district plus the MARKET total, the
+    // same table the deck draws per district with its DISTRICT TOTAL row.
+    const conv = model.districts.slice()
+      .sort((a, b) => (b.traffic ? b.mobile / b.traffic : 0) - (a.traffic ? a.mobile / a.traffic : 0));
+    // The MARKET total is paginated as an ITEM rather than bolted onto the
+    // last page: 5 districts + 1 total over a 4-row card pages 3 + 3, both
+    // full, where 5 districts alone paged 3 + 2 and left the first card a row
+    // short of its own rule.
+    const convItems = conv.concat([Object.assign({ total: true }, model.market)]);
+    paginate(convItems, rows).forEach((page, i, all) =>
+      cards.push({ kind: 'yesterday', page, i, n: all.length, dense }));
+  }
+
+  if (streaks && Array.isArray(streaks.stores) && streaksFresh(streaks)) {
+    const board = streaks.stores
+      .filter((s) => num(s.days) !== null && s.status !== 'no-data')
+      .sort((a, b) => num(b.days) - num(a.days));
+    if (board.length) {
+      cards.push({ kind: 'streak', board: board.slice(0, rows), goal: num(streaks.goalDays) || 30,
+                   asOf: streaks.asOf });
+    }
+  }
+
+  if (model) {
+    if (model.dmMine.length) {
+      paginate(model.dmMine, rows).forEach((page, i, all) =>
+        cards.push({ kind: 'rank', of: 'dm', page, i, n: all.length, total: model.dmTotal, dense }));
+    }
+    if (model.regionRanks.length) {
+      paginate(model.regionRanks, rows).forEach((page, i, all) =>
+        cards.push({ kind: 'rank', of: 'region', page, i, n: all.length, dense,
+                     total: model.regionRanks.length, mine: model.regionMine }));
+    }
+  }
+
+  // Nothing from either feed, but the promo card may still be there — and
+  // "today's deals to lead with" is real content, not a placeholder. If that
+  // 404s too, promoOk goes false, this returns empty and the caller falls to
+  // the branded holding card.
+  if (!cards.length) return promoOk === false ? [] : [{ kind: 'promo' }];
+
+  // The source app's interleave, verbatim in shape: a promo every N cards, and
+  // the rotation always ends on one.
+  if (promoOk !== false) {
+    const woven = [];
+    for (let i = 0; i < cards.length; i++) {
+      woven.push(cards[i]);
+      if ((i + 1) % PROMO_EVERY_N === 0) woven.push({ kind: 'promo' });
+    }
+    if (woven[woven.length - 1].kind !== 'promo') woven.push({ kind: 'promo' });
+    return woven;
+  }
+  return cards;
+}
+
+function makeReport(rec) {
+  const node = el('div', { class: 'ccc-scr-rpt' });
+  const stage = el('div', { class: 'ccc-scr-rpt__stage' });
+
+  let cards = [];
+  let slides = [];
+  let index = 0;
+  let rows = 0;
+  let dense = false;
+  let timer = 0;
+  let retryTimer = 0;
+  let retries = 0;
+  let active = false;
+  let pending = false;
+  let model = null;
+  let streaks = null;
+  let promoOk = true;
+
+  const TITLE = () => rec.title || 'Daily Sales Report';
+  const WAITING = 'Bringing up today’s numbers… tap to open the full Daily Sales Report.';
+  const OFFLINE = 'Today’s numbers are not reachable right now. Tap to open the full Daily Sales Report.';
+
+  node.style.setProperty('--rpt-slide', `${REPORT_SLIDE_MS}ms`);
+
+  /* The glass is never empty — the same rule §6's feed learned the hard way.
+     The branded card is the RESTING state and the board replaces it. */
+  function showHolding(note) {
+    node.replaceChildren(holdingCard(TITLE(), note));
+    rec.panel.classList.remove('is-live');
+  }
+
+  /** The promo card, built out of `image` mode's own two-layer art so a 1.40
+   *  card in a 1.77 screen goes edge to edge instead of sitting in two bars. */
+  function promoNode() {
+    const art = el('div', { class: 'ccc-scr-art' });
+    const src = promoSrc();
+    const bg = el('img', { class: 'ccc-scr-art__bg', alt: '', 'aria-hidden': 'true', decoding: 'async' });
+    const fg = el('img', { class: 'ccc-scr-art__fg', alt: '', 'aria-hidden': 'true', decoding: 'async' });
+    // A promo card that has not been uploaded yet must not become a broken
+    // slide in the rotation — the source app drops the slide, so this does too.
+    fg.addEventListener('error', () => {
+      if (rec.destroyed || promoOk === false) return;
+      promoOk = false;
+      build();
+    }, { once: true });
+    fg.src = src; bg.src = src;
+    art.append(bg, fg);
+    return el('div', { class: 'ccc-scr-rpt__slide is-art' }, [
+      art, el('div', { class: 'ccc-scr-rpt__tick', 'aria-hidden': 'true' }, [el('i')])
+    ]);
+  }
+
+  function cardNode(card) {
+    if (card.kind === 'promo') return promoNode();
+
+    if (card.kind === 'pulse') {
+      const m = model.market;
+      const pct = m.target > 0 ? m.trend / m.target : 0;
+      const cr = m.traffic > 0 ? m.mobile / m.traffic : 0;
+      return rptSlide('The market', `${m.stores} stores`,
+        el('div', { class: 'ccc-scr-rpt__hero' }, [
+          el('span', { class: 'ccc-scr-rpt__num', text: pctWhole(pct) }),
+          el('span', { class: 'ccc-scr-rpt__cap', text: 'of this month’s profit goal' }),
+          // Two short lines rather than one long one: measured at 1440 the
+          // combined line ran past 276px of usable row and ellipsised its own
+          // last clause away. The close rate has a whole card of its own.
+          el('span', { class: 'ccc-scr-rpt__line',
+            text: `${fmtMoneyShort(m.trend)} trend · ${fmtMoneyShort(m.target)} goal` }),
+          el('span', { class: 'ccc-scr-rpt__line',
+            text: `${m.atGoal} of ${m.stores} stores at goal` })
+        ]));
+    }
+
+    if (card.kind === 'goal') {
+      return rptSlide('Profit goal',
+        card.n > 1 ? `${card.i + 1}/${card.n}` : null,
+        rptBody(card.page.map((s) => {
+          const pct = s.target > 0 ? s.gpTrend / s.target : 0;
+          return rptRow({
+            name: s.name,
+            sub: card.dense ? null : fmtMoneyShort(s.gpTrend),
+            val: s.target > 0 ? pctWhole(pct) : '—',
+            fill: Math.max(0, Math.min(1, pct)),
+            cls: pct >= 1 ? 'is-hit' : (pct > 0 && pct < 0.9 ? 'is-miss' : '')
+          });
+        })));
+    }
+
+    if (card.kind === 'yesterday') {
+      const best = Math.max(0.0001,
+        ...card.page.filter((d) => !d.total)
+                    .map((d) => (d.traffic ? d.mobile / d.traffic : 0)));
+      const kids = card.page.map((d) => {
+        const cr = d.traffic ? d.mobile / d.traffic : 0;
+        return rptRow({
+          // The MARKET row is the deck's own DISTRICT TOTAL one level up:
+          // same columns, lit rule, and no meter, because a total has nothing
+          // to race against.
+          name: d.total ? 'Market' : d.label,
+          cls: d.total ? 'is-total' : '',
+          sub: card.dense ? null : `${d.traffic.toLocaleString()} → ${d.mobile}`,
+          val: pctStr(cr),
+          fill: d.total ? 0 : Math.max(0, Math.min(1, cr / best))
+        });
+      });
+      return rptSlide('Yesterday · close rate',
+        card.n > 1 ? `${card.i + 1}/${card.n}` : null, rptBody(kids));
+    }
+
+    if (card.kind === 'streak') {
+      return rptSlide('Clean streaks', `Goal ${card.goal} days`,
+        rptBody(card.board.map((s, i) => {
+          const days = num(s.days) || 0;
+          return rptRow({
+            rank: `#${num(s.rankMarket) || i + 1}`,
+            name: s.store || s.storeFull || '',
+            val: `${s.capped ? days + '+' : days} ${days === 1 ? 'day' : 'days'}`,
+            fill: Math.max(0, Math.min(1, days / (card.goal || 30))),
+            cls: (i < 3 ? 'is-podium' : '') + (s.goalMet || s.atGoal ? ' is-hit' : '')
+          });
+        })));
+    }
+
+    // card.kind === 'rank'
+    const isDM = card.of === 'dm';
+    // Kickers are kept under ~22 characters on purpose: measured at 1440 the
+    // header rail has 276px, and at 1.15em with .085em of tracking that is
+    // about where a nowrap kicker starts eating its own tail.
+    return rptSlide(isDM ? 'District managers' : 'Region rankings',
+      `of ${card.total}`,
+      rptBody(card.page.map((r) => rptRow({
+        rank: `#${r.rank}`,
+        name: r.name,
+        // On a dense panel the rank and the name are the story; the average GP
+        // trend is what gets dropped, because "Imaad Dhorajiwala" truncated to
+        // "Imaad Dhoraj..." is a worse card than one carrying no dollar figure.
+        val: card.dense ? null : fmtMoneyShort(r.avgGpTrend),
+        fill: card.total > 0 ? Math.max(0, 1 - (r.rank - 1) / card.total) : 0,
+        cls: (r.rank <= 3 ? 'is-podium' : '') +
+             (!isDM && card.mine && card.mine(r.name) ? ' is-mine' : '')
+      }))));
+  }
+
+  function show(i) {
+    if (!slides.length) return;
+    index = ((i % slides.length) + slides.length) % slides.length;
+    for (let s = 0; s < slides.length; s++) {
+      slides[s].classList.toggle('is-current', s === index);
+    }
+  }
+
+  function build() {
+    const next = buildReportCards(model, streaks, rows || reportRows(rec), promoOk, dense);
+    if (!next.length) { showHolding(OFFLINE); return; }
+    cards = next;
+    slides = cards.map(cardNode);
+    stage.replaceChildren(...slides);
+    if (!node.contains(stage)) node.replaceChildren(stage);
+    if (index >= slides.length) index = 0;
+    show(index);
+    rec.panel.classList.add('is-live');
+    startTimer();
+  }
+
+  function startTimer() {
+    if (timer || slides.length < 2 || !active) return;
+    timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      show(index + 1);
+    }, REPORT_SLIDE_MS);
+  }
+  function stopTimer() { if (timer) { window.clearInterval(timer); timer = 0; } }
+  function stopRetry() { if (retryTimer) { window.clearInterval(retryTimer); retryTimer = 0; } }
+
+  /** Keep asking while the board is on screen and the WORKBOOK has still never
+   *  arrived — a board running on the streak feed alone is showing something
+   *  real, but it is not yet the sales report the client asked for. */
+  function startRetry() {
+    if (retryTimer || model || !active) return;
+    retryTimer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      if (model || retries >= RETRY_LIMIT) { stopRetry(); return; }
+      retries++;
+      pull({ force: true });
+    }, RETRY_EVERY_MS);
+  }
+
+  /**
+   * One round of fetching, at most one in flight per panel.
+   *
+   * Both sources are asked together and NEITHER can take the other down: each
+   * loader swallows its own failure and resolves last-good-or-null, and the
+   * extra .catch() here is belt and braces for a synchronous throw inside one
+   * of them. Whatever arrives is rendered; whatever did not is retried.
+   */
+  function pull({ force = false } = {}) {
+    if (pending) return;
+    pending = true;
+    Promise.all([
+      loadStreaks({ force }).catch(() => null),
+      loadWorkbook({ force }).catch(() => null)
+    ]).then(([s, m]) => {
+      pending = false;
+      if (rec.destroyed) return;
+      if (s) streaks = s;
+      if (m) { model = m; stopRetry(); }
+      // build() unconditionally, even with nothing from either feed: the promo
+      // card may still be up, and buildReportCards() falls back to it before it
+      // falls back to the holding card. build() shows the holding card itself
+      // when there is genuinely nothing, so there is no second code path here.
+      build();
+      if (!model) startRetry();
+    });
+  }
+
+  // The resting state, in the DOM from the moment the panel mounts.
+  showHolding(WAITING);
+
+  return {
+    node,
+    /** Re-page only when the panel's height in units has actually crossed a
+     *  row boundary. Every SIZE on the board is a container percentage and
+     *  needs no help from here. */
+    resize() {
+      const next = reportRows(rec);
+      const nextDense = reportDense(rec);
+      if (next === rows && nextDense === dense) return;
+      rows = next;
+      dense = nextDense;
+      if (model || streaks) build();
+    },
+    activate() {
+      active = true;
+      rows = reportRows(rec);
+      dense = reportDense(rec);
+      if (!model) { pull(); startRetry(); }
+      else startTimer();
+    },
+    deactivate() {
+      active = false;
+      stopTimer();
+      stopRetry();
+    },
+    /** A tab returning to the foreground gets a board no older than the TTL —
+     *  and never re-downloads 1.1MB just because someone changed windows. */
+    refresh() {
+      retries = 0;
+      pull({ force: !model });
+      if (!model) startRetry();
+    },
+    destroy() {
+      stopTimer();
+      stopRetry();
+      slides = [];
+      cards = [];
+    }
+  };
+}
+
+const RENDERERS = {
+  title: makeTitle, image: makeImage, feed: makeFeed, live: makeLive, report: makeReport
+};
 
 /* -----------------------------------------------------------------------------
  * 7 · The record set + narrow-mode relocation
@@ -1602,6 +3116,18 @@ const records = new Set();
 let narrowMQ = null;
 let isNarrow = false;
 let narrowHostResolver = null;
+
+/* The phone band is watched separately from the narrow band because it is a
+   different question with a different answer: the narrow band decides WHERE a
+   panel is drawn, the phone band decides how many of them may be a whole extra
+   document. A phone matches both; an iPad matches only the first. */
+let phoneMQ = null;
+let isPhone = false;
+
+/** How many `live` iframes may run at once, right now. */
+function liveBudget() {
+  return isPhone ? MAX_LIVE_FRAMES_PHONE : MAX_LIVE_FRAMES;
+}
 
 function initNarrowWatch() {
   if (narrowMQ) return;
@@ -1616,6 +3142,19 @@ function initNarrowWatch() {
   };
   if (narrowMQ.addEventListener) narrowMQ.addEventListener('change', onChange);
   else if (narrowMQ.addListener) narrowMQ.addListener(onChange);
+
+  phoneMQ = window.matchMedia(PHONE_MEDIA);
+  isPhone = phoneMQ.matches;
+  // Rotating a phone crosses this boundary, so the budget has to be re-applied
+  // rather than sampled once at boot. reconcile() is idempotent.
+  const onPhoneChange = () => {
+    const next = phoneMQ.matches;
+    if (next === isPhone) return;
+    isPhone = next;
+    reconcile();
+  };
+  if (phoneMQ.addEventListener) phoneMQ.addEventListener('change', onPhoneChange);
+  else if (phoneMQ.addListener) phoneMQ.addListener(onPhoneChange);
 }
 
 /** The room this host belongs to, and its stage. */
@@ -1847,13 +3386,28 @@ function reconcile() {
     return Math.abs((r.top + r.height / 2) - mid);
   };
 
+  const budget = liveBudget();
   let running = live.filter((r) => r.active);
+
+  // The budget can SHRINK under us — a phone rotating out of landscape, where
+  // (max-height: 500px) stops matching, goes 2 -> 1 with two frames already up.
+  // Evict the furthest until the budget is met, or the ration is a ceiling that
+  // only ever applies to boards that had not mounted yet.
+  while (running.length > budget) {
+    let worst = null, worstD = -1;
+    for (const rec of running) { const d = dist(rec); if (d > worstD) { worstD = d; worst = rec; } }
+    if (!worst) break;
+    worst.active = false;
+    worst.api.deactivate(worst);
+    running = running.filter((r) => r !== worst);
+  }
+
   const waiting = live.filter((r) => r.wantsMount && !r.active)
     .map((r) => ({ rec: r, d: dist(r) }))
     .sort((a, b) => a.d - b.d);
 
   for (const cand of waiting) {
-    if (running.length >= MAX_LIVE_FRAMES) {
+    if (running.length >= budget) {
       let worst = null, worstD = -1;
       for (const rec of running) { const d = dist(rec); if (d > worstD) { worstD = d; worst = rec; } }
       if (!worst || worstD <= cand.d) break;
@@ -1864,6 +3418,17 @@ function reconcile() {
     cand.rec.active = true;
     cand.rec.api.activate(cand.rec);
     running.push(cand.rec);
+  }
+
+  // WHAT THE UNBUDGETED BOARD SHOWS. Not black glass. A `live` panel that is in
+  // range but did not win a frame gets the same branded holding card the mode
+  // already falls back to when a deck will not load — it names the board and
+  // says "tap to open it full screen", and the button over the glass is
+  // untouched, so the client's rule (every screen readable and clickable the
+  // whole time its room is on screen) still holds with one iframe instead of
+  // two. hold() is idempotent; reconcile() runs on every observer callback.
+  for (const rec of live) {
+    if (rec.wantsMount && !rec.active && rec.api && rec.api.hold) rec.api.hold(rec);
   }
 }
 
@@ -1898,7 +3463,7 @@ function applyMeta(rec) {
  *                                  With `quad` it is the PERCENT REFERENCE BOX
  *                                  and should be full-bleed over the plate.
  * @param {string}  cfg.slug        tool slug — drives the click-through
- * @param {'title'|'image'|'feed'|'live'} [cfg.mode]  default: SCREEN_MODES[slug] or 'title'
+ * @param {'title'|'image'|'feed'|'live'|'report'} [cfg.mode]  default: SCREEN_MODES[slug] or 'title'
  * @param {Array<[number,number]>}  [cfg.quad]  TL,TR,BR,BL in % of the reference box
  * @param {Element} [cfg.quadRef]   measure the % against this instead of host
  * @param {string}  [cfg.url]       default: the tool's url
@@ -2040,7 +3605,7 @@ export function mountScreen(cfg = {}) {
  *
  * Attributes read off the host:
  *   data-screen        the tool slug (required)
- *   data-screen-mode   title | image | feed | live   (default: SCREEN_MODES)
+ *   data-screen-mode   title | image | feed | live | report  (default: SCREEN_MODES)
  *   data-screen-title  accessible / caption name     (default: the tool label)
  *   data-screen-name   short display name for a title card
  *   data-screen-quad   TL,TR,BR,BL in % of the plate — eight numbers or JSON
@@ -2098,22 +3663,28 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* =============================================================================
- * CLASS HOOKS — the contract with assets/theme.f4c9abadeb.css
+ * CLASS HOOKS — the contract with assets/theme.8b1bffe6fc.css
  * -----------------------------------------------------------------------------
  * Structure (one per screen):
  *   .ccc-scr[data-screen-panel="<slug>"]      the panel
- *     .ccc-scr--title|--image|--feed|--live   its mode
+ *     .ccc-scr--title|--image|--feed|--live|--report   its mode
  *     .ccc-scr--quad                          a solved perspective warp is on
  *     .ccc-scr--narrow                        it is in the narrow band
  *     .is-live                                its content has arrived
  *     .ccc-scr__plane   > __glow __glass __scan __crt __sheen __bezel __cap __hit
  *     .ccc-scr__content > one of:
- *         .ccc-scr-title  (__name __rule __cta)
+ *         .ccc-scr-title  (__bar __term __stat __pip __body __name
+ *                          __key __cta __chev)
  *         .ccc-scr-art    (__bg __fg)
  *         .ccc-scr-feed   (__stage __slide __head __eyebrow __district __goal
  *                          __grid __store __days __unit __name __meter __flag
  *                          __foot __dots)
  *         .ccc-scr-live
+ *         .ccc-scr-rpt    (__stage __slide __head __kick __meta __body __row
+ *                          __fill __rank __name __sub __val __hero __num
+ *                          __cap __line __tick;  row states .is-podium
+ *                          .is-hit .is-miss .is-total .is-mine;  slide state
+ *                          .is-art, which carries an .ccc-scr-art promo card)
  *         .ccc-scr-holding (__mark __title __note)
  *
  * Narrow band:
@@ -2129,12 +3700,18 @@ document.addEventListener('visibilitychange', () => {
  *   --scr-w --scr-h      the glass size in px, PRE-warp (unitless numbers)
  *   --scr-u              the type unit: max(9px, width / 40), or / 32 when narrow.
  *                        Every size inside a feed or holding card is an em of it.
- *   --scr-title-fs       the solved title size for `title` mode
+ *   --scr-title-fs       the solved subject size for `title` mode
+ *   --scr-pos-fs         the solved chrome unit for `title` mode — the rail,
+ *                        the key and the chevron are all ems of it
  * and on the panel: --scr-ar (narrow aspect ratio, a plain number).
  * CSS-side, `.ccc-scr--narrow .ccc-scr__plane` defines --scr-cap-h (the caption
  * rail's height); set it to 0px to reclaim that strip for the glass.
  * The feed's grid carries --scr-cols and --scr-num (the numeral's em size),
  * both solved from the glass width and the store count.
+ * The report board carries --rpt-u (its one type unit — max(11.2px, 3.8cqw),
+ * with a --scr-w-derived fallback for engines without container queries) and
+ * --rpt-slide (the slide clock's duration, written by JS from
+ * REPORT_SLIDE_MS). Its row COUNT is solved in JS by reportRows().
  *
  * Custom properties JS READS (all from the engine, all @property-registered):
  *   --enter --bloom --p

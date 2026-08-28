@@ -41,6 +41,7 @@ import { initOverlay, openTool } from './overlay.js';
 import { mountRoomScreens } from './screens.js';
 import { initChefWall } from './chefwall.js';
 import { initLabels } from './labels.js';
+import { buildWallPrint, revealWallPrints } from './wallprint.js';
 import { initFreezer } from './freezer.js';
 import {
   loadEnvelope, unseal, restore, remember, cryptoAvailable
@@ -528,6 +529,77 @@ function openKeypad() {
  * room runway (--room-run, theme.css §02), not of anything this file controls.
  */
 /**
+ * ── THE PHONE BAND, AND WHY `sizes` HAS A BRANCH FOR IT ──────────────────
+ * ADDED 2026-08-28, after a shipped-site crash: "the site keeps crashing on my
+ * iPhone ... it works well on iPads and desktops ... when I scroll down the
+ * site crashes and it turns into a blue screen". Blue ground with every layer
+ * above it gone, then unresponsive, is WebKit killing the tab's web content
+ * process under memory pressure. iPhones have a far smaller per-tab budget than
+ * iPads, which is exactly why one reproduced it and the other did not.
+ *
+ * MEASURED, at 390x844 DPR 3 in a real device profile, reading `currentSrc` off
+ * every plate and multiplying each RESOURCE's pixels by 4 bytes (a decoded
+ * bitmap costs its pixel count regardless of how small the WebP is):
+ *
+ *   eight lit plates, all at the 2400 cut .......... 98.2 MB
+ *   eight dark twins, at the 1800 cut (§06b's cap) .. 55.2 MB
+ *   the chef wall's three photographs ............... 2.6 MB
+ *                                                    -------
+ *   resident at the bottom of the runway ........... 156 MB
+ *
+ * and it climbs MONOTONICALLY with scroll depth — 105 MB at the hero, 143 MB by
+ * the Prep Station, 156 MB in the walk-in — which is precisely the shape of the
+ * report. That is before the compositor's own backing stores and before the two
+ * live iframes, on a device whose whole budget is around 200 MB.
+ *
+ * The branch below is why the phone was taking the 2400 cut in the first place,
+ * and it was not a bug in `sizes` — it was `sizes` being HONEST. §06 sizes
+ * .plate-wrap to the plate's cover box, which in a 390x844 portrait viewport is
+ * `100svh * 1.79104` = 1512 CSS px, and §17's --overscan-k lifts it to 1602.
+ * `197vh` resolves to 1663 CSS px, x DPR 3 = 4988 device px, and the 2400 cut
+ * duly won. The declaration was right; what was wrong was spending the honest
+ * answer on a device that cannot afford it — and only ~24% of that 1602px box
+ * is ever on screen (390 / 1602), so three quarters of those 98 MB are decoded
+ * for pixels the phone crops away.
+ *
+ * So the phone band under-declares, deliberately, and says so:
+ *
+ *   440px  x DPR 3 -> 1400 / 440 = 3.18 >= 3  -> the 1400 cut
+ *          x DPR 2 -> 3.18 >= 2               -> the 1400 cut
+ *          x DPR 1 -> 3.18 >= 1               -> the 1400 cut
+ *
+ * Every iPhone lands on 1400 in both orientations, at 4.4 MB a plate instead of
+ * 12.3, and NOTHING ELSE MATCHES THE BRANCH. The two conditions are the phone
+ * and only the phone:
+ *
+ *   (max-width: 500px)                       every iPhone in portrait (320-440)
+ *   (max-width: 1000px) and (max-height: 500px)   every iPhone in landscape
+ *                                            (568-956 wide, 320-440 tall)
+ *
+ * They are deliberately NOT §17's `(max-width: 900px), (max-aspect-ratio: 8/7)`
+ * takeover, and not §06b's `(min-width: 901px)` dark-plate cap: both of those
+ * catch an iPad — iPad Pro portrait by aspect, iPad mini portrait at 744px by
+ * width — and the iPads work today. Nothing here may reach them. Verify any
+ * change to this line by reading `currentSrc` at deviceScaleFactor 2 AND 3, on
+ * both a 390x844 and an 820x1180 profile, and keep index.html's `imagesizes`
+ * and freezer.js's buildDoorImg() identical to it.
+ *
+ * WHAT IT COSTS, LOOKED AT RATHER THAN ASSUMED. The 1400 cut, the 1200 and the
+ * 1000 were rendered side by side at this exact presentation geometry — same
+ * 1602px box, same crop, DPR 3, ungraded and unveiled, which is far harsher
+ * than the phone ever shows it. At 1200 the subway grout in the Prep Station
+ * starts to smear and the ruled lines on the recipe cards go; at 1000 both are
+ * gone and the scissor clips are blobs. At 1400 the grout, the card rules and
+ * the clips all survive. 1400 is the floor, so 1400 is what the phone takes —
+ * and it does not need to go lower: with §06b's dark twins off in the same band
+ * this leaves 35 MB of plates where there were 153.
+ */
+const PLATE_SIZES =
+  '(max-width: 500px) 440px, ' +
+  '(max-width: 1000px) and (max-height: 500px) 440px, ' +
+  '(min-aspect-ratio: 2400/1340) 110vw, 197vh';
+
+/**
  * Every plate URL in the site, written out as literal strings.
  *
  * It used to be `plates/${room}.webp`. It is a table now because
@@ -594,7 +666,7 @@ function buildPlate(room, index) {
     class: 'plate',
     src: art.src,
     srcset: art.srcset,
-    sizes: '(min-aspect-ratio: 2400/1340) 110vw, 197vh',
+    sizes: PLATE_SIZES,
     width: String(PLATE_W),
     height: String(PLATE_H),
     alt: '',                              // decorative: the rail names the room
@@ -635,6 +707,12 @@ const FULL_BLEED = boxVars(0, 0, 100, 100);
  *            box and mountRoomScreens() passes no quadRef.
  *   'chefs'  a full-bleed host for chefwall.js (mounted later, in boot()).
  *   'lock'   the freezer keypad. Styled as a .hotspot but carries no data-tool.
+ *   'print'  a sheet of paper drawn onto the wall by assets/wallprint.js. It
+ *            returns a .hotspot button like 'tool' does — the printed page is
+ *            a decoration INSIDE that button, never a second element over it.
+ *            A print spot names its tool with `slug` OR with `object`; the
+ *            second form resolves at runtime and builds nothing until its tool
+ *            exists, which is how the walk-in's sheet stays sealed.
  */
 function buildHotspot(spot, data) {
   if (spot.kind === 'chefs') {
@@ -681,6 +759,21 @@ function buildHotspot(spot, data) {
       el('span', { class: 'hotspot-label', text: spot.label || 'Manager access' })
     ]);
   }
+
+  // kind: 'print' — a sheet of paper on the wall. wallprint.js draws it and
+  // hands back a normal <button data-tool>, so everything downstream of here
+  // (overlay.js's delegated click, the deep link, the ownership gate,
+  // theme.css §09's reticle, §17's narrow-band suppression) is unchanged.
+  //
+  // It gets the whole index rather than one looked-up tool, because a print
+  // hotspot may name its tool by `object` instead of by `slug` — the walk-in's
+  // note does, since its slug is encrypted and is not in this tree (rooms.js,
+  // and wallprint.js §7). Resolving by object needs the tool LIST, it needs to
+  // happen inside the module so it can happen again after an unlock, and it is
+  // also what gates that sheet: while the fourteen are ciphertext there is no
+  // matching tool, so wallprint.js builds no button, no paper and no name at
+  // all. playUnlockBeat() calls revealWallPrints() when the door opens.
+  if (spot.kind === 'print') return buildWallPrint(spot, data);
 
   // kind: 'tool'
   const tool = data.bySlug.get(spot.slug);
@@ -851,6 +944,10 @@ function playUnlockBeat() {
   // shut door the locked page was showing. The bytes were requested when the
   // code was accepted, ~2s ago, so this is a swap and not a fetch.
   revealFreezerInterior();
+  // The note on the walk-in's back wall. It was not built at boot — its tool
+  // was ciphertext then — so this is where it arrives, with the chips and the
+  // room behind the door. See wallprint.js §7.
+  revealWallPrints();
 
   const rail = document.querySelector('[data-room-chips="freezer"]');
   if (rail && rail.hasAttribute('data-locked')) {
@@ -1429,6 +1526,12 @@ async function boot() {
     // Named here rather than defaulted inside freezer.js so PLATES stays the one
     // table build/fingerprint.mjs has to rewrite.
     interior: PLATES.freezer.src,
+    interiorSrcset: PLATES.freezer.srcset,
+    // The jamb and the leaf are the SAME picture as the room's own plate, so
+    // they must resolve to the same candidate or the phone decodes the door
+    // twice — once at 1400 for the plate and once at 2400 for the door. Passed
+    // in rather than repeated inside freezer.js so PLATE_SIZES has one owner.
+    sizes: PLATE_SIZES,
     isUnlocked: isFreezerUnlocked,
     onUnlock: onFreezerUnlock,
     onRevealed: playUnlockBeat
