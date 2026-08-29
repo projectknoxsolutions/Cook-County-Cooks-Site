@@ -88,11 +88,28 @@ jobs:
       # step is a stated precondition, not an install: if it ever disappears
       # from the image the job fails HERE with a one-line reason instead of
       # halfway through an encode.
+      # ⚠ THIS USED TO BE A BARE `convert -version` AND IT BROKE THE JOB.
+      # ubuntu-latest moved to 24.04 and ImageMagick is no longer preinstalled;
+      # even where it is, IM7 ships `magick` and drops the `convert` alias. The
+      # job failed here on every run — which is worse than it sounds, because a
+      # failure at this step means the decks are never re-read at all and the
+      # chef wall silently holds last week's winners while looking healthy.
+      # So: probe the way build/pull-headchefs.mjs itself probes (magick, then
+      # convert), install only if neither is there, and only then assert WebP.
       - name: Check the image encoder
         run: |
-          convert -version | head -1
-          convert -list format | grep -qi '^ *WEBP' \
-            || { echo "::error::ImageMagick has no WebP delegate on this runner."; exit 1; }
+          if command -v magick >/dev/null 2>&1; then IM="magick"
+          elif command -v convert >/dev/null 2>&1; then IM="convert"
+          else
+            echo "No ImageMagick on this runner — installing."
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq imagemagick webp
+            command -v magick >/dev/null 2>&1 && IM="magick" || IM="convert"
+          fi
+          echo "Using: $IM"
+          $IM -version | head -1
+          $IM -list format | grep -qi '^ *WEBP' \
+            || { echo "::error::ImageMagick on this runner has no WebP delegate."; exit 1; }
 
       - name: Pull the head chefs
         id: pull

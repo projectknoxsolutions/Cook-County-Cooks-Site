@@ -590,7 +590,7 @@ function encodePhoto(srcBuf, key) {
   if (!im) {
     fail(`ImageMagick not found, and "${key}" needs its photograph re-encoded. ` +
          `A 1024x1536 deck JPEG must never be committed straight into a picture ` +
-         `frame ~105px wide. Install imagemagick (every GitHub ubuntu runner has ` +
+         `frame ~105px wide. Install imagemagick (the workflow installs it when missing; ` +
          `it) or run with the photo already on disk. Nothing written.`);
   }
   const tmpIn  = join(tmpdir(), `ccc-hc-${process.pid}-${key}.src`);

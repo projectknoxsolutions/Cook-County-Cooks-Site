@@ -78,7 +78,7 @@ import { ROOM_ORDER } from './roomorder.a179fcfeea.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.54dc1b8404.js';
+} from './coldgate.301b4b4eef.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
