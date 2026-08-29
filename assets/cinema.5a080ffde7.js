@@ -50,7 +50,7 @@ import { initEngine, scrollToRoom, onRoomChange } from './engine.e8325407a0.js';
 import { initOverlay, openTool } from './overlay.d791a31119.js';
 import { mountRoomScreens } from './screens.d3ac568901.js';
 import { initChefWall } from './chefwall.15419bd9fc.js';
-import { initLabels } from './labels.021cd141e8.js';
+import { initLabels } from './labels.1481e8a914.js';
 import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
 import { initFreezer } from './freezer.35040b26ef.js';
 /* The lock is shared with the pocket list — see coldgate.js. It owns the
@@ -59,9 +59,9 @@ import { initFreezer } from './freezer.35040b26ef.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.b270f1f302.js';
+} from './coldgate.54dc1b8404.js';
 import { el, fill, $ } from './dom.a199da796c.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.fa1f497a8b.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.4bbb06cd4f.js';
 
 
 /* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the

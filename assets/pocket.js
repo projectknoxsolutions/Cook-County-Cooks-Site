@@ -46,12 +46,34 @@
  * target="_blank": on a phone a new tab is a tab the rep then has to find their
  * way out of, whereas a same-tab navigation makes the system Back gesture the
  * way back to the list — and iOS restores the page, search text and all, from
- * the back/forward cache. The C³ menu on the desktop build opens externals in a
- * new tab; that is the right call there and the wrong one here.
+ * the back/forward cache.
+ *
+ * TOOLS OPEN INSIDE THE SITE, IN THE SAME FRAMED VIEWER THE DESKTOP USES.
+ * The first cut of this file shipped rows that navigated straight out to
+ * blufoxmobile.github.io, on the reasoning that the system Back gesture is a
+ * better "close" than any button we could draw. The client's answer was that
+ * leaving the site is the problem, not the ergonomics of coming back: "I want
+ * to have these repositories baked into the site, not opening with the external
+ * link." He is right, and the desktop had always behaved that way — a phone
+ * doing something different was an inconsistency nobody asked for.
+ *
+ * overlay.js turns out to import nothing but freshurl.js and to inject its own
+ * styles, so the phone can mount the identical viewer rather than growing a
+ * second one. It also already delegates clicks on [data-tool] and owns the
+ * `#/tool/<slug>` history entry, so a row here is the same kind of object a
+ * hotspot is in the cinema, and Back still closes the tool — the gesture the
+ * external-link version was written to preserve is preserved anyway.
+ *
+ * The href is the INTERNAL deep link, not the repository URL, so "copy link"
+ * hands someone a cookcountycooks.com address that opens the tool in the site
+ * rather than a bare github.io one. The repository URL stays on the row in
+ * data-url, which is what the freshUrl stamp is computed from and what the
+ * viewer's "open in a new tab" control uses.
  * ========================================================================== */
 
 import { el, fill, $ } from './dom.js';
 import { freshUrl } from './freshurl.js';
+import { initOverlay } from './overlay.js';
 import { ROOM_ORDER } from './roomorder.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
@@ -168,7 +190,12 @@ const FOX_SVG =
 function toolRow(tool) {
   const a = el('a', {
     class: 'tool-row pocket-row',
-    href: freshUrl(tool.url),
+    /* INTERNAL. overlay.js §8 owns this shape and §9 delegates the click off
+       data-tool, so this row needs no handler of its own — and because it is a
+       real href, a long-press still offers "copy link" and hands over a URL on
+       this site. The repository URL lives in data-url below. */
+    href: `#/tool/${encodeURIComponent(tool.slug)}`,
+    'data-tool': tool.slug,
     'data-slug': tool.slug,
     'data-url': tool.url,
     // AN EXPLICIT NAME, because the computed one was wrong. The name and the
@@ -425,37 +452,72 @@ export async function boot() {
   });
   window.addEventListener('pageshow', (ev) => { if (ev.persisted) restamp(); });
 
-  /* ---- deep links -------------------------------------------------------
-   * The site's own shape is `#/tool/<slug>` (overlay.js §8); `?tool=<slug>` is
-   * normalised into it by the router before either front end boots, so both
-   * spellings arrive here as a hash. There is no framed viewer on a phone, so
-   * "open the tool" means go to the tool — with the same cache-busting stamp a
-   * tapped row would carry.
+  /* The sealed thirteen. While the walk-in is shut coldTools() is empty and
+     every unknown slug is gated, which is what keeps a typed deep link from
+     confirming that a guessed name is real. Once it is open the set is empty
+     and nothing is gated. */
+  function gatedSlugs() {
+    if (isFreezerUnlocked()) return new Set();
+    // Everything the open list does NOT contain — so the twenty-four open
+    // tools pass, and both a sealed slug and an invented one are refused
+    // identically. data.bySlug holds only what is currently listable.
+    return { has: (slug) => !data.bySlug.has(slug) };
+  }
+
+  /* ---- the framed viewer ------------------------------------------------
+   * The SAME overlay the cinema mounts, with the SAME gate. It owns the
+   * `#/tool/<slug>` history entry, the delegated [data-tool] click, keyboard
+   * activation, focus handling and the deep link on load — so everything this
+   * block used to do by hand is now one call, and a phone and a desktop cannot
+   * drift apart in how a tool opens.
    *
-   * A slug this build has never heard of, while the walk-in is shut, is treated
-   * exactly as the cinema treats it (see watchSealedDeepLink in cinema.js): the
-   * keypad is offered, and it NEVER confirms whether the slug was one of the
-   * thirteen. A wrong slug and a real one behave identically right up until the
-   * code decrypts. */
-  function followDeepLink() {
+   * canOpen is re-read on EVERY path in (click, keyboard, deep link, hash
+   * sync, programmatic), which is what makes `#/tool/<a sealed slug>` typed
+   * into the address bar hit the keypad instead of the tool. There is no
+   * freezer DOOR on a phone — that set piece belongs to the cinema — so the
+   * retry runs as soon as the code is accepted, with no whenOpen() to wait on.
+   *
+   * A slug this build has never heard of, while the walk-in is shut, is
+   * refused exactly as a sealed one is: the keypad comes up and NEVER confirms
+   * whether the slug was one of the thirteen. */
+  const overlayApi = initOverlay({
+    // Straight in, no fetch, so a deep link resolves on the first frame.
+    tools: data.tools,
+    canOpen: (slug) => !gatedSlugs().has(slug) || isFreezerUnlocked(),
+    onRefused: (slug, { retry }) => { openKeypad().then((ok) => { if (ok) retry(); }); }
+  });
+
+  /* A SLUG THE OVERLAY HAS NEVER HEARD OF STILL HAS TO REACH THE KEYPAD.
+   * canOpen only runs for slugs that are IN the registry, and while the
+   * walk-in is shut the sealed thirteen are not in it — they are ciphertext.
+   * So `#/tool/<a sealed slug>` typed into the address bar falls off the end
+   * of overlay.js §8 and does nothing at all, while `#/tool/<an open slug>`
+   * opens a tool. That difference is itself the answer to "is this name one of
+   * the thirteen?", which is the question the walk-in exists not to answer.
+   *
+   * This is the same job cinema.js does in watchSealedDeepLink, and it was in
+   * this file too until the framed viewer replaced the hand-rolled deep-link
+   * handler; it is restored here rather than left to the overlay because the
+   * overlay cannot gate on a slug it does not have. An unknown slug and a
+   * sealed one now behave identically: hash stripped, keypad up, and only a
+   * correct code tells them apart. */
+  function catchSealedDeepLink() {
     const m = /^#\/tool\/([^/?#]+)/.exec(location.hash || '');
     if (!m) return;
-    let slug;
-    try { slug = decodeURIComponent(m[1]); } catch { slug = m[1]; }
-    const go = () => {
-      const tool = data.bySlug.get(slug);
-      if (!tool) return false;
-      location.replace(freshUrl(tool.url));   // replace: Back returns to the list
-      return true;
-    };
-    if (go()) return;
-    if (isFreezerUnlocked()) return;          // genuinely unknown; say nothing
+    let slug; try { slug = decodeURIComponent(m[1]); } catch { slug = m[1]; }
+    if (data.bySlug.has(slug)) return;      // the overlay has this one
+    if (isFreezerUnlocked()) return;        // open, and genuinely unknown
     try { history.replaceState(null, '', location.pathname + location.search); }
     catch { /* noop */ }
-    openKeypad().then((ok) => { if (ok) go(); });
+    openKeypad().then((ok) => {
+      // coldTools() has re-populated data.bySlug via the unlock listener by
+      // the time this resolves, so a sealed slug now opens and an invented one
+      // still does not — without either having been confirmed beforehand.
+      if (ok && data.bySlug.has(slug)) overlayApi.open(slug);
+    });
   }
-  window.addEventListener('hashchange', followDeepLink);
-  followDeepLink();
+  window.addEventListener('hashchange', catchSealedDeepLink);
+  catchSealedDeepLink();
 
   // A tiny handle for debugging in a store, matching the cinema's window.CCC.
   window.CCC = Object.assign(window.CCC || {}, { view: 'pocket', data, render });
