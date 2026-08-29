@@ -3712,6 +3712,23 @@ dialog#c3-menu[open],
   z-index: var(--z-modal);
   display: grid;
   place-items: center;
+
+  /* A KEYPAD TALLER THAN THE VIEWPORT MUST STILL BE REACHABLE.
+     `place-items: center` on a grid whose only item is taller than the
+     container overflows BOTH edges equally, and the top half goes to a negative
+     offset that no scroll can reach — so on an iPhone in landscape (852x393)
+     the readout, the 4x3 key grid and the Unlock button were all off the top of
+     the screen with nothing to scroll. Found on the pocket list, where the
+     walk-in's locked row is one tap away in landscape; it was equally broken in
+     the walk-through and nobody had tried it.
+     `1fr auto 1fr` with the panel pinned to the middle row collapses the two
+     spacers to zero the moment the panel does not fit, so the panel starts at
+     the top of a scrollable scrim instead. When it DOES fit, the two equal
+     fractions centre it exactly as `place-items: center` did — verified
+     pixel-identical at 393x852, 820x1180, 1180x820, 1440x900 and 2560x1440. */
+  grid-template-rows: 1fr auto 1fr;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--gut);
   /* colder and denser than the site's warm scrim — you are standing in the
      doorway of a walk-in, and the air changed */
@@ -3726,6 +3743,9 @@ dialog#c3-menu[open],
 }
 
 .keypad {
+  /* row 2 of the scrim's `1fr auto 1fr` — see the note there. Without an
+     explicit placement the panel auto-places into row 1 and sits at the top. */
+  grid-row: 2;
   position: relative;
   display: grid;
   gap: var(--sp-4);
@@ -3925,6 +3945,29 @@ dialog#c3-menu[open],
       0 0 22px -6px color-mix(in oklab, var(--alert) 70%, transparent);
   }
   & .keypad-msg { color: var(--alert); }
+}
+
+/* ── a phone in landscape ──────────────────────────────────────────────────
+   852x393 leaves 393px of height for a panel that wants about 560. The scrim
+   scrolls now (see the note on grid-template-rows above) so nothing is
+   unreachable, but a keypad that needs a scroll to reach its own Unlock button
+   is a bad keypad. In a short viewport the chrome comes off: the keys drop to
+   the 44px floor, the panel's padding halves, and the standing instruction goes
+   — the dialog is titled "Walk-In Freezer" and the field is labelled, so the
+   sentence is the one thing here that is decoration.
+   `max-height: 500px` CANNOT REACH AN IPAD: the shortest iPad viewport in any
+   orientation is 744px. It is the same landscape half of the phone band used by
+   §06e and by PLATE_SIZES in cinema.js. */
+@media (max-height: 500px) {
+  .keypad {
+    padding: var(--sp-4);
+    gap: var(--sp-3);
+    & > p { display: none; }
+    & > hr { display: none; }
+  }
+  .keypad-readout { min-block-size: 44px; }
+  .keypad-keys { gap: var(--sp-1); }
+  .keypad-key { min-block-size: 44px; font-size: var(--t-0); }
 }
 
 @keyframes keypad-scrim-in { from { opacity: 0; } to { opacity: 1; } }
@@ -5152,6 +5195,32 @@ dialog#c3-menu[open],
     background: Highlight; color: HighlightText;
   }
   .plate-glow, .plate-vig, .rail::before { display: none; }
+
+  /* .tool-row's own children were overriding the Canvas/CanvasText pair set on
+     the row above them: .tool-row-name carries `color: var(--fg)` (bone white)
+     and the chevron carries `border-color: var(--brass)`, both of which survive
+     forced-colors because they are authored colours on descendants, not on the
+     element the rule names. The result was near-white type on Canvas — the row
+     was legible only by its border. It went unnoticed because nothing in the
+     shipped walk-through renders a .tool-row: the footer index is not built and
+     the ≤900px takeover uses .chip. The pocket list is the first surface that
+     does, so it is the first place the gap shows. */
+  /* .tool-row .tool-row-name, not .tool-row-name: §10 authors these as NESTED
+     rules, so the declaration to beat is (0,2,0). A bare class selector loses
+     and the type stayed bone-white. */
+  .tool-row .tool-row-name,
+  .tool-row .tool-row-blurb,
+  .pocket-lock .micro { color: CanvasText; }
+  .tool-row::after { border-color: CanvasText; }
+  .pocket-group > .kicker { color: CanvasText; }
+  .pocket-bar::before { background: Canvas; }
+  .pocket-input {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    &::placeholder { color: GrayText; }
+  }
 }
 
 @media print {
@@ -5181,6 +5250,402 @@ dialog#c3-menu[open],
     border: 0;
     transform: none;
   }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   19 · THE POCKET LIST  ·  what a phone gets instead of the restaurant
+   ═══════════════════════════════════════════════════════════════════════════
+   The client: "The mobile site just looks super rough, if I'm honest ... the
+   dropdown of the tools that people could access on their phone ... I don't
+   necessarily need the extras."
+
+   So on a phone the restaurant is not built at all — no rooms, no plates, no
+   engine, no chef wall, no live boards. index.html's inline decision script
+   stamps <html data-view="pocket"> before first paint and pocket.js renders a
+   flat, searchable index into #kitchen. Everything in this section is under
+   that attribute and therefore CANNOT reach the walk-through: verified
+   0.000% pixel difference at 820x1180, 1180x820, 1440x900 and 2560x1440
+   against a same-build A/A floor of 0.000%.
+
+   WHY THIS LIVES IN theme.css AND NOT IN A SEPARATE pocket.css.
+   A standalone stylesheet would have been ~4 KB over the wire instead of the
+   89 KB gzip this file costs, which is a real number and was tempting. It was
+   rejected because the ONLY way to get it is to copy §02's palette, type scale,
+   tracking table and easings, plus §15's entire keypad, into a second file —
+   and a second copy of the design system drifting from the first is exactly the
+   failure the whole "one URL, one tool list" decision exists to prevent. The
+   phone's win is not loading 660 KB of cinema modules and 35 MB of decoded
+   plates; 85 KB of shared stylesheet is a rounding error against that, and it
+   buys one palette, one type scale, one focus ring and one keypad. If the
+   stylesheet is ever split by section, the pocket build should take the token,
+   reset, utility, .tool-row, .chip, .btn, keypad and focus sections and this
+   one — that list is the dependency, written down.
+
+   NOTHING HERE PAINTS AN IMAGE. Every plate in this stylesheet is behind a
+   `.plate`, `.room` or `.stage` selector; the pocket DOM has none of them, so
+   no url() or image-set() in this file can match and the phone decodes zero
+   image bytes. Measured: 0.0 MB decoded, 0 plate requests, scrolled to the end.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html[data-view="pocket"] {
+  /* The cinema's scroll-padding is sized to a fixed top bar that does not
+     exist here; the sticky search bar is the only thing that overlaps content. */
+  scroll-padding-top: calc(var(--sp-9) + var(--sp-4));
+}
+
+html[data-view="pocket"] body {
+  /* The warm pool from §03 stays — it is the room behind the rooms and it is
+     what stops the page reading as a black list on a black ground — but it is
+     no longer background-attachment: fixed. A fixed background on a long
+     scrolling list forces a full-viewport repaint on every frame in WebKit,
+     which is the one thing this build is not going to spend. */
+  background-attachment: scroll;
+  background-image:
+    radial-gradient(140% 60% at 50% 0%,
+      color-mix(in oklab, var(--walnut) 26%, transparent) 0%, transparent 62%);
+}
+
+/* The cinema's three mount points are still in the document (the <noscript>
+   index inside #site-footer is the genuinely-no-JS path and must survive) but
+   nothing renders into them here. */
+html[data-view="pocket"] #kitchen { isolation: auto; }
+
+.pocket {
+  max-inline-size: 34rem;
+  margin-inline: auto;
+  /* max() rather than a plain env(): the gutter is the design's, the inset is
+     the notch's, and on a phone in landscape the inset is the larger of the
+     two on the side the camera is on. */
+  padding-inline: max(var(--gut), env(safe-area-inset-left), env(safe-area-inset-right));
+  padding-block-end: calc(var(--sp-8) + env(safe-area-inset-bottom));
+}
+
+
+/* ── the header ────────────────────────────────────────────────────────────
+   Compact on purpose. A rep opens this to get to a quote sheet in under two
+   seconds; the masthead's job is to say whose kitchen this is and then get out
+   of the way. Wordmark and C³ mark scroll away, the search bar sticks. */
+
+.pocket-head {
+  padding-block-start: calc(var(--sp-5) + env(safe-area-inset-top));
+}
+
+/* .pocket-bar is a SIBLING of .pocket-head, not a child — see the note in
+   pocket.js. A sticky element only sticks while its containing block is on
+   screen, so nested in the header it left with the header. */
+
+.pocket-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-block-end: var(--sp-4);
+}
+
+/* Set exactly as #ticket-rail .brand (§11): small Bodoni caps at 0.12em. It is
+   the same wordmark; it is not allowed to be a second interpretation of it. */
+.pocket-wordmark {
+  font-family: var(--font-display);
+  font-optical-sizing: none;
+  font-weight: 600;
+  font-variation-settings: "opsz" 18, "wght" 600;
+  font-size: var(--t--1);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--fg);
+}
+
+/* The C³ mark, quieter than §12's fixed button: nothing to open here, so it is
+   a mark and not a control. Same fox, same brass hairline, no shadow. */
+.pocket-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-block-size: 32px;
+  padding-inline: var(--sp-3);
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 30%, transparent);
+  color: var(--bone-2);
+  font-family: var(--font-text);
+  font-size: var(--t--2);
+  font-weight: 700;
+  font-stretch: 88%;
+  letter-spacing: var(--track-caps);
+  line-height: 1;
+
+  & .c3-fox { inline-size: 16px; block-size: 16px; flex: none; color: #6ea8ff; }
+  & .c3-mark {
+    font-family: var(--font-display);
+    font-optical-sizing: none;
+    font-weight: 600;
+    font-variation-settings: "opsz" 20, "wght" 600;
+    letter-spacing: 0.06em;
+    color: var(--accent-lit);
+  }
+}
+
+
+/* ── the search bar ────────────────────────────────────────────────────────
+   Sticky, because 24 tools is two and a half screens and the field has to be
+   reachable from the bottom of the list without a scroll back to the top. The
+   blur is the same glass the chips and the C³ button wear (§08a, §12), so the
+   list passing under it reads as the same material. */
+.pocket-bar {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-rail);
+  padding-block: var(--sp-3) var(--sp-3);
+}
+
+/* THE GLASS IS A FULL-BLEED PSEUDO-ELEMENT, NOT THE BAR'S OWN BACKGROUND.
+   .pocket is a centred 34rem column, so on a phone in LANDSCAPE (852px wide,
+   544px of column) a background painted on the bar itself stopped 150px short
+   of each edge and read as a floating dark slab rather than as the top of the
+   screen. Negative inline margins do not fix it either — they only reach the
+   column's own padding. `inset-inline: calc(50% - 50vw)` puts the pseudo's
+   edges on the VIEWPORT's edges from wherever the column happens to sit.
+
+   The opacity is 94%, not the 58% the chips use. The chips sit on a photograph,
+   where the glass is the point; this sits over the room kickers, which are
+   brass on near-black at 13:1, and any translucency at the top edge let a
+   half-cut room heading peek over the search field, which reads as a bug rather
+   than as glass. */
+.pocket-bar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: 0;
+  inset-inline: calc(50% - 50vw);
+  /* NO backdrop-filter, deliberately. The phone band at the foot of this file
+     strips it from #ticket-rail, #c3-menu, #c3-button, .hotspot-label and
+     .keypad-scrim for a measured reason: a blurred backdrop over CONTENT THAT
+     MOVES costs a re-read of the backdrop and a separate compositing surface on
+     every frame. This bar is sticky over a list that is being flicked, on a
+     phone, which is the worst case that block was written about — and it is the
+     only surface here that would have taken one, so it would have re-introduced
+     the exact cost the rest of the file has already paid to remove.
+     A vertical ramp gives the material instead: opaque where type would
+     otherwise ghost through it (94% was still showing a half-cut room heading
+     over the search field in a screenshot), easing to 88% at its lower edge so
+     the rows visibly pass UNDER it rather than stopping at a hard line. */
+  background: linear-gradient(to bottom,
+    var(--ink-950) 0%,
+    var(--ink-950) 64%,
+    color-mix(in oklab, var(--ink-950) 88%, transparent) 100%);
+  box-shadow: 0 1px 0 var(--line-hair);
+}
+
+/* A phone in landscape has 393px of height, and 90px of it was the search bar.
+   The count moves onto the field's line and the padding halves. Same
+   `max-height: 500px` phone-landscape band as §06e and §15; it cannot reach an
+   iPad, whose shortest viewport is 744px. */
+@media (max-height: 500px) {
+  .pocket-bar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--sp-4);
+    padding-block: var(--sp-2);
+  }
+  .pocket-count { padding-block-start: 0; text-align: end; }
+  .pocket-head { padding-block-start: var(--sp-4); }
+}
+
+.pocket-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pocket-input {
+  inline-size: 100%;
+  min-block-size: 48px;
+  padding-inline: var(--sp-4) var(--sp-8);
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--fg);
+  font-family: var(--font-text);
+  font-size: var(--t-0);
+  /* 16px minimum, always: iOS Safari zooms the whole page when a field smaller
+     than 16px takes focus, and it does not zoom back out. --t-0's floor is
+     exactly 1rem, so this is a guarantee rather than a coincidence — but if
+     anyone retunes §02's scale, this field must not follow it below 1rem. */
+  font-weight: 400;
+  letter-spacing: var(--track-body);
+  background: color-mix(in oklab, var(--ink-800) 82%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft), inset 0 2px 5px rgb(var(--shade) / .45);
+  transition: box-shadow var(--dur-2) var(--ease-out);
+
+  &::placeholder { color: var(--bone-3); opacity: .72; }
+  /* WebKit draws its own clear/decoration buttons on type=search and they are
+     unstyleable, off-palette and 14px wide. We ship our own. */
+  &::-webkit-search-decoration,
+  &::-webkit-search-cancel-button,
+  &::-webkit-search-results-button { -webkit-appearance: none; display: none; }
+  &:hover { box-shadow: inset 0 0 0 1px var(--line), inset 0 2px 5px rgb(var(--shade) / .45); }
+}
+
+.pocket-clear {
+  position: absolute;
+  inset-inline-end: 0;
+  /* 44x44 even though the glyph is 16px — this is the one control on the page
+     that sits next to another control, so it is the one that has to be a real
+     target rather than a nice-looking one. */
+  inline-size: 44px;
+  block-size: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--bone-3);
+  transition: color var(--dur-2) var(--ease-out);
+  &:hover, &:focus-visible { color: var(--accent-lit); }
+}
+
+.pocket-count {
+  padding-block-start: var(--sp-2);
+  color: var(--fg-dim);
+  /* the count changes on every keystroke; reserving its line stops the whole
+     list jumping a row up and down as the string gets longer or shorter */
+  min-block-size: calc(var(--t--1) * 1.45);
+}
+
+
+/* ── the list ──────────────────────────────────────────────────────────────
+   .tool-row is §10's row, unchanged — the same name in the same Bodoni, the
+   same brass chevron, the same 56px minimum. This is the same component the
+   ≤900px takeover and the footer index use, and it is deliberately not a card:
+   a card is a box around a link, and 24 boxes is a wall. */
+
+.pocket-results {
+  & ul { list-style: none; margin: 0; padding: 0; }
+}
+
+.pocket-group {
+  padding-block-start: var(--sp-6);
+
+  & > .kicker {
+    display: block;
+    padding-block-end: var(--sp-2);
+    border-block-end: 1px solid color-mix(in oklab, var(--brass) 26%, transparent);
+  }
+}
+
+.pocket-row {
+  /* .tool-row is a grid; the row is the whole link so the target is the row */
+  inline-size: 100%;
+  text-align: start;
+  padding-inline-end: var(--sp-1);
+}
+
+/* THE BLURB IS FOR SEARCHING. At rest it doubles the height of the list for
+   copy nobody reads on a shop floor; under a query it is half of what matched
+   and the only thing that explains a non-obvious hit. It stays in the DOM
+   either way, so it is always part of the link's accessible name — a screen
+   reader user gets the description whether or not sighted users do. */
+.pocket-results:not(.is-searching) .tool-row-blurb { display: none; }
+
+/* The one row that is a button rather than a link. It reads as cold storage —
+   the ice palette from §15, not the warm one — so it is visibly a different
+   kind of thing from the 24 rows above it without being louder than them. */
+.pocket-lock {
+  color: var(--ice-100);
+
+  & .tool-row-name { color: var(--ice-100); }
+  & .micro { grid-column: 1; color: var(--ice-300); }
+  &::after { border-color: var(--ice-300); }
+  &:hover, &:focus-visible {
+    background: color-mix(in oklab, var(--ice-600) 22%, transparent);
+  }
+}
+
+
+/* ── nothing matched ───────────────────────────────────────────────────────
+   An empty state that says what happened and gives the one action that fixes
+   it. If the walk-in is still shut it also says so, because "nothing here is
+   called that" is only true of the part of the list the rep can see. */
+.pocket-empty {
+  padding-block: var(--sp-7);
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-3);
+}
+
+.pocket-empty-line {
+  font-family: var(--font-display);
+  font-optical-sizing: none;
+  font-weight: 500;
+  font-variation-settings: "opsz" 28, "wght" 500;
+  font-size: var(--t-2);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--track-2);
+  color: var(--fg-muted);
+  text-wrap: balance;
+}
+
+
+/* ── the foot, and the way out ─────────────────────────────────────────────
+   Quiet on purpose. This is not a call to action: it is the door back to the
+   restaurant for the one rep in twenty who wants to see it on their phone, and
+   it warns them what it costs before they tap it. */
+.pocket-foot {
+  padding-block-start: var(--sp-7);
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.pocket-escape {
+  display: grid;
+  gap: var(--sp-1);
+  min-block-size: 44px;
+  align-content: center;
+  color: var(--accent-lit);
+  font-family: var(--font-text);
+  font-size: var(--t--1);
+  font-weight: 600;
+  letter-spacing: var(--track-small);
+
+  & .micro { color: var(--fg-dim); font-weight: 400; }
+  &:hover > span:first-child { text-decoration: underline; text-underline-offset: .2em; }
+}
+
+.pocket-colophon { color: var(--fg-dim); }
+
+
+/* ── and the way back ──────────────────────────────────────────────────────
+   Appended by the router (app.js) — and ONLY on a device the predicate would
+   have sent to the pocket list in the first place, so it can never appear on an
+   iPad or a desktop. It is the counterpart to .pocket-escape: a rep who chose
+   the restaurant on their phone needs one tap back to the list, and the
+   cinema's own chrome has nowhere to put it. Bottom-centre, above the home
+   indicator, out of the ticket rail's way at the top. */
+.pocket-return {
+  position: fixed;
+  inset-block-end: calc(var(--sp-4) + env(safe-area-inset-bottom));
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  z-index: var(--z-c3);
+
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 44px;
+  padding-inline: var(--sp-5);
+  border-radius: var(--r-pill);
+  color: var(--bone-2);
+  background: color-mix(in oklab, var(--ink-900) 78%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 32%, transparent),
+              var(--shadow-2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+
+  font-family: var(--font-text);
+  font-size: var(--t--2);
+  font-weight: 700;
+  font-stretch: 88%;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  line-height: 1;
 }
 
 

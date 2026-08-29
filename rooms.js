@@ -35,7 +35,12 @@
               on the break-room television below.
    ========================================================================== */
 
-export const ROOM_ORDER = ['pass','host','dining','prep','office','breakroom','freezer'];
+/* THE ORDER MOVED, THE DEFINITION DID NOT DOUBLE. It now lives in
+   assets/roomorder.js — a 200-byte module — so the phone's pocket list can
+   import the order without dragging this file's 24 KB of hotspot geometry
+   down the wire with it. Everything that imports ROOM_ORDER from here is
+   unchanged; this is a re-export, so the binding is the same one. */
+export { ROOM_ORDER } from './assets/roomorder.js';
 
 export const HOTSPOTS = {
   pass: [

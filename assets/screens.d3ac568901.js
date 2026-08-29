@@ -73,7 +73,7 @@
  * -------------------------------------------------------------------------- */
 
 /** The two public, CORS-open data files behind the Host Stand and Back Office. */
-import { freshUrl } from './overlay.7e95381e4e.js';   // shared fresh-load cache buster
+import { freshUrl } from './overlay.d791a31119.js';   // shared fresh-load cache buster
 
 export const PROMO_CARD_URL =
   'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/promo-card.jpg';
@@ -384,7 +384,7 @@ function getTool(slug) {
  * 3 · Stylesheet
  *
  * Injected once, prefixed `ccc-scr`, every colour and face read through a
- * `var(--ccc-…, fallback)` so assets/theme.afa48f2d91.css owns the look. Nothing here
+ * `var(--ccc-…, fallback)` so assets/theme.177d9d3b9f.css owns the look. Nothing here
  * animates anything but transform / opacity / filter.
  * -------------------------------------------------------------------------- */
 
@@ -3947,7 +3947,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* =============================================================================
- * CLASS HOOKS — the contract with assets/theme.afa48f2d91.css
+ * CLASS HOOKS — the contract with assets/theme.177d9d3b9f.css
  * -----------------------------------------------------------------------------
  * Structure (one per screen):
  *   .ccc-scr[data-screen-panel="<slug>"]      the panel

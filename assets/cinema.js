@@ -1,6 +1,16 @@
 /* =============================================================================
  * Cook County Cooks — v3 "Cinema"
- * assets/app.js  ·  THE INTEGRATOR
+ * assets/cinema.js  ·  THE INTEGRATOR
+ * -----------------------------------------------------------------------------
+ * THIS FILE USED TO BE app.js AND IS OTHERWISE UNCHANGED. app.js is now a ~2 KB
+ * router that decides, before first paint, whether this device gets the
+ * restaurant or the pocket list, and dynamic-imports one of the two. Everything
+ * below is the restaurant. A phone never reaches this file — and that is the
+ * point: engine, overlay, screens, chefwall, labels, wallprint and freezer are
+ * ~700 KB of modules and eight full-bleed plates, on a device whose whole web
+ * content budget is around 200 MB and which was crashing under it.
+ *
+ * The one export is boot(); the router calls it. Nothing else changed.
  * -----------------------------------------------------------------------------
  * The four feature modules (engine, overlay, chefwall, theme) know nothing about
  * each other. This file is the only place that does. Its whole job is:
@@ -36,50 +46,27 @@
  * Plain ES module. No build step, no npm, no framework, no external JS.
  * ========================================================================== */
 
-import { initEngine, scrollToRoom, onRoomChange } from './engine.e8325407a0.js';
-import { initOverlay, openTool } from './overlay.7e95381e4e.js';
-import { mountRoomScreens } from './screens.e4e111f774.js';
-import { initChefWall } from './chefwall.15419bd9fc.js';
-import { initLabels } from './labels.22c7bbd0dd.js';
-import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
-import { initFreezer } from './freezer.35040b26ef.js';
+import { initEngine, scrollToRoom, onRoomChange } from './engine.js';
+import { initOverlay, openTool } from './overlay.js';
+import { mountRoomScreens } from './screens.js';
+import { initChefWall } from './chefwall.js';
+import { initLabels } from './labels.js';
+import { buildWallPrint, revealWallPrints } from './wallprint.js';
+import { initFreezer } from './freezer.js';
+/* The lock is shared with the pocket list — see coldgate.js. It owns the
+   sealed envelope, the session restore, the keypad and every path to
+   coldstore.js's crypto; this file owns the door, the beat and the chips. */
 import {
-  loadEnvelope, unseal, restore, remember, cryptoAvailable
-} from './coldstore.b6c3b1d897.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.37f2966f8e.js';
+  initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
+  onFreezerUnlock, openKeypad
+} from './coldgate.js';
+import { el, fill, $ } from './dom.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.js';
 
 
-/* ─────────────────────────────────────────────────────────────────────────────
- * 0 · TINY DOM HELPERS
- * Deliberately minimal — this is not a framework, it is four functions.
- * ────────────────────────────────────────────────────────────────────────── */
-
-/**
- * Build an element in one breath.
- * `class`, `text` and `style` are special-cased; anything else becomes an
- * attribute, so data-* and aria-* work without ceremony. A `false`/`null` value
- * omits the attribute entirely, which keeps the callers below free of `if`s.
- */
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (v === null || v === undefined || v === false) continue;
-    if (k === 'class') node.className = v;
-    else if (k === 'text') node.textContent = v;
-    else if (k === 'style') node.setAttribute('style', v);
-    else node.setAttribute(k, v === true ? '' : v);
-  }
-  for (const child of [].concat(children)) if (child) node.append(child);
-  return node;
-}
-
-/** Replace an element's children in one shot. */
-function fill(node, children) {
-  node.replaceChildren(...[].concat(children).filter(Boolean));
-  return node;
-}
-
-const $ = (sel, root = document) => root.querySelector(sel);
+/* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the
+ * pocket list and the cold-storage gate build DOM the same way and must not
+ * import this file to do it. Same three functions, same behaviour. */
 
 /** Ordinal words for the course kickers. Seven rooms; no need to be clever. */
 const COURSE = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'];
@@ -158,7 +145,7 @@ async function loadData() {
 
   // Fallback for a served deployment where the inline block was removed.
   const [tools, headchefs] = await Promise.all([
-    fetch('data/tools.ac8a24642f.json').then((r) => r.json()),
+    fetch('data/tools.json').then((r) => r.json()),
     fetch('headchefs/headchefs.json').then((r) => r.json())
   ]);
   return { tools, headchefs };
@@ -185,268 +172,23 @@ function indexTools(toolsDoc) {
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * 2 · THE FREEZER GATE — NOW A LOCK, NOT A NOTICE
+ * 2 · THE FREEZER GATE — NOW IN coldgate.js
  *
- * v3 shipped a courtesy gate: the fourteen manager tools were in tools.json and
- * in the inline bootstrap, and the "lock" was a POST to an endpoint that did not
- * exist yet and therefore unlocked on 404. Anyone could read the fourteen URLs
- * out of View Source. The client's brief is the opposite of that:
+ * The whole gate — the sealed envelope, COLD, the session hint, the unlock
+ * listeners, submitFreezerCode() and the keypad dialog — moved to coldgate.js
+ * unchanged, so the phone's pocket list can open the same lock without loading
+ * a byte of the cinema. The contract, the threat model and the honest list of
+ * what this protects and what it does not are all in that file's header.
  *
- *   "I don't want the other employees to have access to what's behind the
- *    freezer door as these tools are specifically for the managers."
- *
- * This is a static site on GitHub Pages. There is no server to ask, so the
- * answer cannot be "check with the server" — it has to be that THE DATA IS NOT
- * THERE. The fourteen ship as one AES-256-GCM blob (see coldstore.js and
- * build/seal-freezer.mjs); the password is the key. Typing it decrypts the list
- * in memory. Typing something else fails GCM's authentication tag and produces
- * nothing — no partial list, no hash to compare against, no oracle beyond
- * "that did not decrypt".
- *
- * THE CONTRACT, in full:
- *
- *   sealed    the envelope from window.__CCC_INLINE__.freezer, or a fetch of
- *             data/freezer.sealed.json. Public. Meaningless without the key.
- *   unlocked  ⇔  COLD !== null  — i.e. we are HOLDING the decrypted tools.
- *             Restored at boot from sessionStorage['c3f-cold'] when
- *             sessionStorage['c3f-unlocked'] === '1', so a reload inside the
- *             same session stays unlocked exactly as it did before.
- *   unlock    ⇔  the code decrypts the envelope. No network. No endpoint.
- *
- * WHAT CHANGED FROM THE v3 CONTRACT, ON PURPOSE:
- *   · /api/freezer-unlock is gone. There is nothing to POST to and nothing that
- *     could answer 404-means-yes.
- *   · The `c3f=` cookie is still READ, but it can no longer unlock on its own:
- *     a cookie is not a key, and without the key there is nothing to show. It
- *     now means "this session unlocked once", and the payload beside it is what
- *     actually opens the room. A cookie with no payload re-prompts, which is
- *     the honest outcome.
- *
- * WHAT THIS PROTECTS, AND WHAT IT DOES NOT — the same honest list as
- * coldstore.js's header, because this is the file people read first:
- *   · It stops a rep reading the links out of the page. There is no list.
- *   · It does not stop someone who has the password from sharing it.
- *   · It does not protect the destination tools — every one of those URLs is a
- *     public GitHub Pages site or a public Smartsheet form.
- *   · It does not hide plates/freezer.01697f04b3.webp, the interior photograph, which is a
- *     static file at a guessable path.
- * ────────────────────────────────────────────────────────────────────────── */
-
-/** The v3 keys, unchanged, so an unlock from earlier in this session survives.
- *  coldstore.js owns the writes; these two are here for the read below. */
-const FREEZER_SESSION_KEY = 'c3f-unlocked';
-const FREEZER_COOKIE = 'c3f=';
-
-/** Subscribers re-render themselves when the door opens. */
-const unlockListeners = [];
-
-/** The sealed envelope, resolved once in boot(). Public, and useless alone. */
-let FREEZER_SEALED = null;
-
-/** THE DECRYPTED FOURTEEN, or null. This — not a flag, not a cookie — is what
- *  "unlocked" means. Nothing else in this file may write it. */
-let COLD = null;
-
-/** The one place the index gets mutated when the door opens, so the C³ menu,
- *  the footer, the rail and overlay.js's registry all agree. Set in boot(). */
-let ADOPT_COLD = null;
-
-function isFreezerUnlocked() { return COLD !== null; }
-
-/** How many tools are behind the door. Public metadata on the envelope — the
- *  count is recoverable from the ciphertext's length anyway, and the locked
- *  copy has to be able to say "14" rather than invent a number. */
-function sealedCount() {
-  return (FREEZER_SEALED && +FREEZER_SEALED.count) || 0;
-}
-
-/** "This session unlocked once" — the v3 signal, kept verbatim. It is a HINT
- *  used to decide whether to look for a stored payload, never an authorisation
- *  on its own. */
-function freezerSessionHint() {
-  try { if (sessionStorage.getItem(FREEZER_SESSION_KEY) === '1') return true; }
-  catch { /* private mode / storage disabled — fall through to the cookie */ }
-  return document.cookie.split('; ').some((c) => c.startsWith(FREEZER_COOKIE));
-}
-
-function onFreezerUnlock(cb) { unlockListeners.push(cb); }
-
-/** Adopt a decrypted payload and tell every surface. Idempotent. */
-function markFreezerUnlocked(payload) {
-  if (COLD || !payload || !payload.tools || !payload.tools.length) return;
-  COLD = payload;
-  if (ADOPT_COLD) { try { ADOPT_COLD(payload.tools); } catch (err) { console.error(err); } }
-  unlockListeners.forEach((cb) => { try { cb(true); } catch (err) { console.error(err); } });
-}
-
-/**
- * Try a code against the sealed envelope.
- *
- * No network, so there is no "transient error" in the v3 sense — but there IS a
- * real environment fault worth distinguishing: a browser with no WebCrypto
- * (a non-secure http:// origin) genuinely cannot check any code, and telling
- * that manager "wrong code" would send them hunting for a password they already
- * typed correctly.
- *
- * @returns {Promise<'ok'|'wrong'|'error'>}
- */
-async function submitFreezerCode(code) {
-  if (!code) return 'wrong';
-  if (isFreezerUnlocked()) return 'ok';
-  if (!FREEZER_SEALED) return 'error';
-  try {
-    const payload = await unseal(FREEZER_SEALED, code);
-    if (!payload) return 'wrong';
-    remember(payload);
-    markFreezerUnlocked(payload);
-    return 'ok';
-  } catch (err) {
-    console.error('[freezer] cannot check codes in this context:', err);
-    return 'error';
-  }
-}
-
-/* ── The keypad dialog ────────────────────────────────────────────────────────
- * theme.css §15 now ships the `.keypad*` component — a cold-storage access
- * panel: brushed steel, a mint LCD readout, keys that travel, and an
- * `.is-wrong` state. All presentation lives there; this function only builds
- * the structure and owns the behaviour. It mounts into #modal-root, the
- * container index.html declares for it.
- *
- * The one class this file toggles is `.is-wrong` on the panel — added when the
- * lock rejects a code, removed on the next keystroke so the alert clears the
- * moment the user starts over.
- * ───────────────────────────────────────────────────────────────────────── */
-
-/** Only ever one keypad on screen. Resolves true when the door opens. */
-function openKeypad() {
-  const root = $('#modal-root');
-  if (!root || root.firstChild) return Promise.resolve(false);
-
-  return new Promise((resolve) => {
-    const returnFocus = document.activeElement;
-
-    const input = el('input', {
-      type: 'password', inputmode: 'text', autocomplete: 'off',
-      autocapitalize: 'off', spellcheck: 'false',
-      'aria-label': 'Freezer code', class: 'keypad-readout'
-    });
-    const msg = el('p', { class: 'micro keypad-msg', role: 'alert', 'aria-live': 'assertive' });
-
-    const keyBtn = (key, label) => el('button', {
-      type: 'button', 'data-key': key, class: 'keypad-key', text: label
-    });
-    const grid = el('div', { class: 'keypad-keys' }, [
-      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => keyBtn(String(n), String(n))),
-      keyBtn('clear', 'CLR'),
-      keyBtn('0', '0'),
-      keyBtn('back', '⌫')
-    ]);
-
-    const cancel = el('button', { type: 'button', class: 'chip', 'data-act': 'cancel', text: 'Cancel' });
-    const unlock = el('button', { type: 'button', class: 'btn', 'data-act': 'unlock', text: 'Unlock' });
-
-    const panel = el('div', {
-      role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'keypad-title',
-      class: 'keypad'
-    }, [
-      el('h2', { class: 't-sub', id: 'keypad-title', text: 'Walk-In Freezer' }),
-      el('p', { class: 'micro', text: 'Manager access. Enter the freezer code to open cold storage.' }),
-      el('hr', { class: 'rule' }),
-      input, grid, msg,
-      el('div', { class: 'keypad-actions' }, [cancel, unlock])
-    ]);
-
-    const scrim = el('div', { class: 'keypad-scrim' }, [panel]);
-    root.append(scrim);
-    input.focus();
-
-    let settled = false;
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      document.removeEventListener('keydown', onKeydown, true);
-      scrim.remove();
-      if (returnFocus && returnFocus.focus) returnFocus.focus();
-      resolve(ok);
-    };
-
-    // Re-arm the shake: removing and re-adding the class on the next frame is
-    // what makes a second wrong code animate again rather than sit still.
-    const flagWrong = () => {
-      panel.classList.remove('is-wrong');
-      void panel.offsetWidth;                 // one deliberate reflow, off-loop
-      panel.classList.add('is-wrong');
-    };
-
-    // Deriving the key is 600,000 rounds of PBKDF2 — a few hundred milliseconds
-    // on a laptop, a second or two on an old store iPad, and that cost is the
-    // ONLY thing standing between an attacker and a brute force, so it is not
-    // getting tuned down. It does mean the dialog has to say it is working:
-    // an unresponsive keypad reads as broken, and the button is already
-    // aria-disabled, so the readout says so too. `busy` guards a second Enter.
-    let busy = false;
-    const attempt = async () => {
-      if (busy) return;
-      busy = true;
-      panel.classList.remove('is-wrong');
-      unlock.setAttribute('aria-disabled', 'true');
-      msg.textContent = 'Checking the code…';
-      let result;
-      try { result = await submitFreezerCode(input.value.trim()); }
-      finally { busy = false; unlock.removeAttribute('aria-disabled'); }
-      if (result === 'ok') { finish(true); return; }
-      flagWrong();
-      msg.textContent = result === 'wrong'
-        ? 'That code didn’t open the door. Try again.'
-        : 'This browser can’t check the code here. Open the site over https.';
-      input.select();
-    };
-
-    scrim.addEventListener('click', (ev) => {
-      if (ev.target === scrim) { finish(false); return; }
-      const key = ev.target.closest('[data-key]');
-      if (key) {
-        panel.classList.remove('is-wrong');
-        const k = key.dataset.key;
-        if (k === 'clear') input.value = '';
-        else if (k === 'back') input.value = input.value.slice(0, -1);
-        else input.value += k;
-        input.focus();
-        return;
-      }
-      const act = ev.target.closest('[data-act]');
-      if (act && act.dataset.act === 'cancel') finish(false);
-      if (act && act.dataset.act === 'unlock') attempt();
-    });
-
-    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') attempt(); });
-    input.addEventListener('input', () => panel.classList.remove('is-wrong'));
-
-    // Escape closes; Tab is trapped inside the panel so focus cannot wander out
-    // to the page underneath while a modal dialog is up.
-    function onKeydown(ev) {
-      if (ev.key === 'Escape') { ev.preventDefault(); finish(false); return; }
-      if (ev.key !== 'Tab') return;
-      const focusables = panel.querySelectorAll('button, input, [href]');
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
-      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
-    }
-    document.addEventListener('keydown', onKeydown, true);
-  });
-}
-
-/* The gate is installed ON overlay.js in boot(), through its canOpen /
+ * The gate is installed ON overlay.js in boot(), through its canOpen /
  * onRefused options. There used to be a capture-phase click interceptor here.
  * It is gone, because it only ever guarded CLICKS: a deep link to
- * `#/tool/<a-manager-tool>` went through overlay's own syncFromLocation() and opened
- * a manager tool with the door still shut and sessionStorage still empty. The
- * gate now sits inside openTool() itself, so every path reaches it — click,
- * keyboard, hash sync on load, and the openTool re-exported on window.CCC.
- */
+ * `#/tool/<a-manager-tool>` went through overlay's own syncFromLocation() and
+ * opened a manager tool with the door still shut and sessionStorage still
+ * empty. The gate now sits inside openTool() itself, so every path reaches it —
+ * click, keyboard, hash sync on load, and the openTool re-exported on
+ * window.CCC.
+ * ────────────────────────────────────────────────────────────────────────── */
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * 3 · ROOMS — the DOM contract from SPEC.md, built from rooms.js + tools.json
@@ -612,15 +354,15 @@ const PLATE_SIZES =
  * shows `freezer-door` instead — see plateFor().)
  */
 const PLATES = {
-  hero:         { src: 'plates/hero.197e175d93.webp',         srcset: 'plates/hero@1400.24df9e8171.webp 1400w, plates/hero@1800.e298cedad8.webp 1800w, plates/hero.197e175d93.webp 2400w' },
-  pass:         { src: 'plates/pass.96df41e5e3.webp',         srcset: 'plates/pass@1400.19e2f93c88.webp 1400w, plates/pass@1800.67a9fef62f.webp 1800w, plates/pass.96df41e5e3.webp 2400w' },
-  host:         { src: 'plates/host.77ad3dcb2d.webp',         srcset: 'plates/host@1400.9f4f7fceb0.webp 1400w, plates/host@1800.c1093ca544.webp 1800w, plates/host.77ad3dcb2d.webp 2400w' },
-  dining:       { src: 'plates/dining.e833a21953.webp',       srcset: 'plates/dining@1400.940873ea4c.webp 1400w, plates/dining@1800.f2e000e730.webp 1800w, plates/dining.e833a21953.webp 2400w' },
-  prep:         { src: 'plates/prep.e1ff2fd61f.webp',         srcset: 'plates/prep@1400.71a1c3421a.webp 1400w, plates/prep@1800.914c0511c4.webp 1800w, plates/prep.e1ff2fd61f.webp 2400w' },
-  office:       { src: 'plates/office.4e4c6d7172.webp',       srcset: 'plates/office@1400.ac0e7111c5.webp 1400w, plates/office@1800.7c45276712.webp 1800w, plates/office.4e4c6d7172.webp 2400w' },
-  breakroom:    { src: 'plates/breakroom.57d227f685.webp',    srcset: 'plates/breakroom@1400.ef37dc6807.webp 1400w, plates/breakroom@1800.b68af49648.webp 1800w, plates/breakroom.57d227f685.webp 2400w' },
-  freezer:      { src: 'plates/freezer.01697f04b3.webp',      srcset: 'plates/freezer@1400.bc3f759e61.webp 1400w, plates/freezer@1800.950d506378.webp 1800w, plates/freezer.01697f04b3.webp 2400w' },
-  'freezer-door': { src: 'plates/freezer-door.833492497b.webp', srcset: 'plates/freezer-door@1400.2c18d7f0b7.webp 1400w, plates/freezer-door@1800.5d976c9501.webp 1800w, plates/freezer-door.833492497b.webp 2400w' }
+  hero:         { src: 'plates/hero.webp',         srcset: 'plates/hero@1400.webp 1400w, plates/hero@1800.webp 1800w, plates/hero.webp 2400w' },
+  pass:         { src: 'plates/pass.webp',         srcset: 'plates/pass@1400.webp 1400w, plates/pass@1800.webp 1800w, plates/pass.webp 2400w' },
+  host:         { src: 'plates/host.webp',         srcset: 'plates/host@1400.webp 1400w, plates/host@1800.webp 1800w, plates/host.webp 2400w' },
+  dining:       { src: 'plates/dining.webp',       srcset: 'plates/dining@1400.webp 1400w, plates/dining@1800.webp 1800w, plates/dining.webp 2400w' },
+  prep:         { src: 'plates/prep.webp',         srcset: 'plates/prep@1400.webp 1400w, plates/prep@1800.webp 1800w, plates/prep.webp 2400w' },
+  office:       { src: 'plates/office.webp',       srcset: 'plates/office@1400.webp 1400w, plates/office@1800.webp 1800w, plates/office.webp 2400w' },
+  breakroom:    { src: 'plates/breakroom.webp',    srcset: 'plates/breakroom@1400.webp 1400w, plates/breakroom@1800.webp 1800w, plates/breakroom.webp 2400w' },
+  freezer:      { src: 'plates/freezer.webp',      srcset: 'plates/freezer@1400.webp 1400w, plates/freezer@1800.webp 1800w, plates/freezer.webp 2400w' },
+  'freezer-door': { src: 'plates/freezer-door.webp', srcset: 'plates/freezer-door@1400.webp 1400w, plates/freezer-door@1800.webp 1800w, plates/freezer-door.webp 2400w' }
 };
 
 /**
@@ -1507,7 +1249,7 @@ function buildFooter(data) {
  *   initChefWall    — last; it appends a modal to <body> and nothing waits on it.
  * ────────────────────────────────────────────────────────────────────────── */
 
-async function boot() {
+export async function boot() {
   /* NOTE 1, applied: kill the CSS smooth scroll before anything can scroll.
      See the header comment — this is what stops theme.css's
      `html { scroll-behavior: smooth }` from fighting the engine's tween. */
@@ -1524,25 +1266,13 @@ async function boot() {
 
   /* ---- 0. the sealed freezer ---------------------------------------------
    * Before ANY markup, because every surface that renders below asks
-   * isFreezerUnlocked() and sealedCount() as it builds. The envelope is
-   * public and inert; `restore()` is what can actually open the room, and it
-   * only finds anything if THIS TAB unlocked earlier in the session.
-   *
-   * A missing envelope is not fatal. The freezer simply has nothing in it: the
-   * rail, the C³ menu and the footer all say "locked", the keypad answers
-   * "this browser can't check the code here", and every other room is
-   * untouched. A broken seal must never take the restaurant down with it. */
-  FREEZER_SEALED = await loadEnvelope();
-  if (!FREEZER_SEALED) console.warn('[app] no sealed freezer payload — cold storage stays shut.');
-  else if (!cryptoAvailable()) console.warn('[app] no WebCrypto in this context — the keypad cannot check codes.');
-
-  /* The one place the fourteen get folded into the index. Called by
-   * markFreezerUnlocked() — from a correct code now, or from the session
-   * restore two lines below. Everything downstream (the rail, the C³ menu,
-   * the footer, overlay.js's registry, the `gatedSlugs` predicate) reads these
-   * structures, so this is also the only place that has to be right. */
+   * isFreezerUnlocked() and sealedCount() as it builds. coldgate.js resolves
+   * the envelope and re-adopts a payload this tab already decrypted earlier in
+   * the session; see its header for the contract. setAdopt() has to be handed
+   * over BEFORE initColdGate() runs, or a session restore would fold the
+   * fourteen into nothing. */
   let overlayApi = null;
-  ADOPT_COLD = (tools) => {
+  const adoptCold = (tools) => {
     const room = data.byRoom.get('freezer') || [];
     for (const tool of tools) {
       if (data.bySlug.has(tool.slug)) continue;
@@ -1560,11 +1290,9 @@ async function boot() {
       label: (data.roomById.get('freezer') || {}).label || 'Walk-In Freezer'
     };
   };
+  setAdopt(adoptCold);
 
-  // Unlocked earlier in this tab: the payload is in sessionStorage, so a reload
-  // stays open exactly as it did in v3 — and without re-running 600,000 rounds
-  // of PBKDF2 on a store iPad.
-  if (freezerSessionHint()) markFreezerUnlocked(restore());
+  await initColdGate();
 
   // playUnlockBeat() is handed to freezer.js as a bare callback and runs long
   // after boot() has returned, so the one thing it cannot do is close over a
@@ -1689,7 +1417,7 @@ async function boot() {
 
   // Anything already unlocked from earlier in this session has to be in the
   // registry before overlay.js honours the first deep link.
-  if (isFreezerUnlocked()) ADOPT_COLD(COLD.tools);
+  if (isFreezerUnlocked()) adoptCold(coldTools());
 
   /* THE DEEP LINK THAT OVERLAY.JS CANNOT SEE.
    *
@@ -1759,11 +1487,6 @@ async function boot() {
   window.CCC = Object.assign(window.CCC || {}, { engine, data, openTool, freezer });
 }
 
-/* The module is loaded with type="module", which is deferred by definition, so
-   the parser has finished by the time this runs. The readyState check is there
-   only for the case where someone loads this file some other way. */
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot, { once: true });
-} else {
-  boot();
-}
+/* NO SELF-START. app.js — the router — awaits the dynamic import of this module
+   and calls boot() itself, after it has already decided that this device gets
+   the restaurant. Starting here as well would boot the cinema twice. */

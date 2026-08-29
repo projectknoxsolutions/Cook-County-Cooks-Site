@@ -25,6 +25,14 @@
  *   openTool(slug), closeTool()
  * ========================================================================== */
 
+/* FRESH-LOAD CACHE BUSTING — moved to its own module so the phone's pocket
+ * list can use it without loading this file. The rationale, the client quote
+ * and the reason same-origin URLs are left alone are all in freshurl.js.
+ * Re-exported here because screens.js imports it from this module. */
+import { freshUrl } from './freshurl.11f28a5de9.js';
+export { freshUrl };
+
+
 /* -----------------------------------------------------------------------------
  * 0. Constants & tiny helpers
  * -------------------------------------------------------------------------- */
@@ -164,7 +172,7 @@ function getTool(slug) {
 /* -----------------------------------------------------------------------------
  * 2. Stylesheet
  *    Injected once. Everything is prefixed `ccc-` and every colour is a
- *    custom property with a fallback, so assets/theme.afa48f2d91.css (Agent D) can
+ *    custom property with a fallback, so assets/theme.177d9d3b9f.css (Agent D) can
  *    retheme the viewer without touching this file.
  * -------------------------------------------------------------------------- */
 
@@ -599,43 +607,6 @@ function makeStageFrame() {
  *
  * @returns {HTMLIFrameElement} the frame that is now in the DOM
  */
-/* ──────────────────────────────────────────────────────────────────────────
- * FRESH-LOAD CACHE BUSTING
- *
- * The client: "I have made changes to my repositories on the backend but the
- * changes aren't loading on the repositories we have baked into the website.
- * I want to ensure that new changes to the repositories would also be visible
- * ... essentially, it would be a fresh load every time we pull up the
- * repository."
- *
- * Every embedded tool is a GitHub Pages site, and Pages serves its HTML with a
- * cache lifetime of its own. A rep who opened a quote sheet an hour ago gets
- * that hour-old copy back from the browser's HTTP cache, so a fix pushed to the
- * repo in between is invisible inside the frame while the same URL opened in a
- * new tab is correct — exactly the mismatch he photographed.
- *
- * Appending a unique parameter makes each open a distinct URL, which no cache
- * can satisfy, so the frame always fetches the current build. We keep the
- * parameter namespaced (`_ccc`) and preserve any query string the tool already
- * carries. Only the document request is affected; the tool's own sub-resources
- * still cache normally, so this costs one small round trip, not a cold load.
- * ────────────────────────────────────────────────────────────────────────── */
-export function freshUrl(url, bucketMs) {
-  try {
-    const u = new URL(url, location.href);
-    // Same-origin pages on this site are content-hashed already; busting them
-    // would defeat that and re-download our own assets on every open.
-    if (u.origin === location.origin) return u.href;
-    const stamp = bucketMs
-      ? Math.floor(Date.now() / bucketMs)   // shared bucket: refresh, don't hammer
-      : Date.now();                          // every open is its own fetch
-    u.searchParams.set('_ccc', String(stamp));
-    return u.href;
-  } catch {
-    return url;                              // never let this break a navigation
-  }
-}
-
 function navigateStageFrame(ui, url) {
   const fresh = makeStageFrame();
   ui.frame.replaceWith(fresh);          // keeps its slot/order inside the stage

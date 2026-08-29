@@ -35,7 +35,12 @@
               on the break-room television below.
    ========================================================================== */
 
-export const ROOM_ORDER = ['pass','host','dining','prep','office','breakroom','freezer'];
+/* THE ORDER MOVED, THE DEFINITION DID NOT DOUBLE. It now lives in
+   assets/roomorder.js — a 200-byte module — so the phone's pocket list can
+   import the order without dragging this file's 24 KB of hotspot geometry
+   down the wire with it. Everything that imports ROOM_ORDER from here is
+   unchanged; this is a re-export, so the binding is the same one. */
+export { ROOM_ORDER } from './assets/roomorder.a179fcfeea.js';
 
 export const HOTSPOTS = {
   pass: [
@@ -227,7 +232,7 @@ export const HOTSPOTS = {
        ⚠ NO slug AND NO label, ON PURPOSE, AND DO NOT ADD THEM.
        This tool lives behind the walk-in's lock, which means it is not in the
        deployed tree at all — it is AES-256-GCM ciphertext in
-       data/freezer.sealed.ed7463ed64.json (see build/seal-freezer.mjs and the gate note
+       data/freezer.sealed.da99b57355.json (see build/seal-freezer.mjs and the gate note
        in app.js §2). Writing its slug, its name or its URL here would put in
        plaintext exactly the three strings the seal exists to remove, and
        build/seal-freezer.mjs's own leak check would fail the next build.
