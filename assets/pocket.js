@@ -257,6 +257,7 @@ export async function boot() {
   /* ---- the cold-storage gate, before any markup -------------------------
    * Same order as the cinema, for the same reason: every surface below asks
    * isFreezerUnlocked() and sealedCount() as it renders. */
+  let overlayApi = null;              // set below; adopt reads it lazily
   setAdopt((tools) => {
     const room = data.byRoom.get('freezer') || [];
     for (const tool of tools) {
@@ -264,6 +265,23 @@ export async function boot() {
       data.tools.push(tool);
       data.bySlug.set(tool.slug, tool);
       room.push(tool);
+      /* ⚠ THE LINE THAT MAKES THE THIRTEEN OPENABLE, and the one this function
+         was missing. overlay.js resolves a slug through its own registry Map
+         inside openTool(); that Map is populated once, from the `tools` array
+         handed to initOverlay(), and at that moment the freezer is ciphertext.
+         So every sealed row rendered correctly, carried the right label and the
+         right href, and did NOTHING when tapped — the viewer had never heard of
+         the slug. cinema.js has carried this line (and a comment saying why)
+         since deep links were added; pocket.js did not, because when it was
+         written a phone had no framed viewer to register anything with. When
+         v12 gave it one, this is what was left behind.
+
+         Two paths reach the registry and BOTH are needed: a fresh unlock runs
+         adopt after initOverlay, so it must write the entry here; a session
+         restore runs adopt inside initColdGate() BELOW, before the viewer
+         exists, and is covered because initOverlay is handed data.tools after
+         that call and therefore already contains the fourteen. */
+      if (overlayApi && overlayApi.registry) overlayApi.registry.set(tool.slug, tool);
     }
     data.byRoom.set('freezer', room);
   });
@@ -480,7 +498,7 @@ export async function boot() {
    * A slug this build has never heard of, while the walk-in is shut, is
    * refused exactly as a sealed one is: the keypad comes up and NEVER confirms
    * whether the slug was one of the thirteen. */
-  const overlayApi = initOverlay({
+  overlayApi = initOverlay({
     // Straight in, no fetch, so a deep link resolves on the first frame.
     tools: data.tools,
     canOpen: (slug) => !gatedSlugs().has(slug) || isFreezerUnlocked(),

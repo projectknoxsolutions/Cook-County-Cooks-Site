@@ -232,7 +232,7 @@ export const HOTSPOTS = {
        ⚠ NO slug AND NO label, ON PURPOSE, AND DO NOT ADD THEM.
        This tool lives behind the walk-in's lock, which means it is not in the
        deployed tree at all — it is AES-256-GCM ciphertext in
-       data/freezer.sealed.40439b6714.json (see build/seal-freezer.mjs and the gate note
+       data/freezer.sealed.89618698bc.json (see build/seal-freezer.mjs and the gate note
        in app.js §2). Writing its slug, its name or its URL here would put in
        plaintext exactly the three strings the seal exists to remove, and
        build/seal-freezer.mjs's own leak check would fail the next build.
