@@ -1691,6 +1691,232 @@ export function onRoomChange(cb) {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * FOCUS OWNERSHIP — the keyboard's own way of changing rooms.
+ *
+ * THE DEFECT, MEASURED. theme.css §05 gives every room a --cut: the room that
+ * owns the page keeps its affordances, and every other room's `.rail-chips`,
+ * `.hotspot`, `[data-screen]` and `.frz-pad` go to `clip-path: inset(50%)`
+ * behind a stage at `opacity: 0`. That is exactly right for a POINTER — it is
+ * the one declaration that makes an element neither painted nor hit-tested, and
+ * it is what stops a room you have scrolled past from eating clicks through an
+ * invisible plate.
+ *
+ * It is exactly wrong for the TAB KEY, because sequential focus navigation does
+ * not care about --cut. It moves focus to the next element in DOM order and
+ * scrolls it to the nearest viewport EDGE — which is never the position at
+ * which its room owns the page. So the control took focus while clipped:
+ *
+ *     Tab walk, 1600x900, 66 stops (10 of them page chrome, 56 in the rooms):
+ *       48 of the 56 at effective opacity 0 AND clip-path inset(50%)
+ *       47 of the 56 with document.elementFromPoint() at the control's own
+ *          centre returning MAIN — i.e. voice control and every other
+ *          pointer-emulating assistive technology could not activate it at all
+ *       Enter still fired on all 56.
+ *
+ * Operable, and invisible. WCAG 2.4.7 in its textbook form.
+ *
+ * THE FIX IS NOT TO UN-CLIP ANYTHING. Un-clipping a room that does not own the
+ * page is how the click-through bug §05 documents comes back: the stage is
+ * pinned a full --pin-lead early, so a non-owning room's hotspots sit over the
+ * room you are actually looking at. Instead, focus is treated as what it
+ * genuinely is — a statement about where the reader is. If focus enters a room
+ * that does not own the page, that room is BROUGHT to the reading position, and
+ * it then owns the page for the same reason and by the same maths as if you had
+ * scrolled there: --p 0, --enter 1, --cut 1, nothing clipped, everything lit.
+ * One room is un-clipped at a time, and it is the room the engine itself calls
+ * active. Nothing new can be clicked through.
+ *
+ *     After, same walk: 0 of 56 failing the hit test, and 1 of 56 still not
+ *     fully on screen — the Back Office's Fall-Off Summary, whose clipboard is
+ *     photographed at the right edge of the plate, so 39% of the control hangs
+ *     past a 1600px viewport at every scroll position. That one is geometry in
+ *     the photograph, not a clip; it is unclipped, hit-testable over the 39%
+ *     that IS on screen, and has a fully visible chip in the rail. At 820x1180
+ *     and 430x932 the plate is cropped differently and the count is 0 of 49 and
+ *     0 of 31.
+ *
+ *     Re-verified at the same time, because this rule must not buy visibility
+ *     with click-through: 549 controls belonging to a NON-owning room,
+ *     hit-tested at 60 scroll positions, 0 reachable — and 46 more with focus
+ *     deliberately parked in a room the page has since scrolled away from, also
+ *     0. A room only ever un-clips by becoming the room you are looking at.
+ *
+ * WHY IT READS --cut RATHER THAN RE-DERIVING IT. --cut is theme.css's answer,
+ * assembled from --enter, --p, --cut-z and --cut-k, and --cut-z/--cut-k are
+ * solved PER BREAKPOINT (§02, §17). A copy of that arithmetic here would be a
+ * second source of truth that drifts the first time someone re-solves a
+ * breakpoint. This is one getComputedStyle read per focus event — a handful a
+ * second at a human's tabbing speed, on the event, never in the loop. The rule
+ * at the top of this file stands: nothing reads a computed style inside tick().
+ *
+ * WHY THE JUMP IS INSTANT, always. The engine has a perfectly good tween
+ * (scrollToRoom) and it is the wrong tool here twice over. A tween is up to
+ * 1100ms during which the control that just took focus is still clipped — the
+ * defect, merely shortened — and a Tab-Tab-Tab user restarts it on every press.
+ * And an unrequested multi-thousand-pixel glide is precisely the motion
+ * prefers-reduced-motion exists to suppress. `behavior: 'instant'` is what the
+ * browser itself does when it scrolls a focused element into view, so this is
+ * the native behaviour aimed at the right scroll position. Under reduced motion
+ * applyReducedMotion() pins --enter 1 / --p 0 for EVERY room, so --cut is 1
+ * everywhere, nothing is ever clipped, and this handler returns at the first
+ * test without scrolling anything at all.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The --cut a room must reach before focus is allowed to stay in it.
+ *
+ *  Any value above zero already restores hit-testing (--live-cut snaps to 1 the
+ *  instant --cut leaves zero, and that is what drives the clip), but --cut also
+ *  IS the hotspot layer's opacity, so a room at --cut 0.04 is hit-testable and
+ *  still invisible. Half-lit is the line: at 0.5 the room is plainly on screen
+ *  and a keyboard user can see the ring, below it they cannot.
+ *
+ *  The exact number is close to immaterial in practice. §05 ramps --cut at x34
+ *  on --enter and x100 on --p, so it crosses 0 to 1 in about 0.03 of a room's
+ *  --enter — one or two frames of scrolling. Anything in (0, 1) picks the same
+ *  rooms; this one is written down so nobody has to re-derive why. */
+const OWNS_PAGE_MIN_CUT = 0.5;
+
+/** theme.css §05's own answer to "does this room own the page right now?".
+ *  --cut is registered `<number>`, so the computed value parses as one. A
+ *  browser that has not registered it (or a stage the engine never wrote to)
+ *  yields NaN, which is treated as "owns" — fail open, exactly as the curtain
+ *  does: the cost of being wrong that way is nothing, and the cost of being
+ *  wrong the other way is a page that scrolls itself on every focus event. */
+function roomOwnsPage(room) {
+  let cut;
+  try { cut = parseFloat(getComputedStyle(room.stage).getPropertyValue('--cut')); }
+  catch (_) { return true; }
+  if (!Number.isFinite(cut)) return true;
+  return cut >= OWNS_PAGE_MIN_CUT;
+}
+
+/** Put a room at its reading position NOW, and make the page agree in the same
+ *  turn — serviceFrame(snap) is the one update path (see its header), so the
+ *  vars the browser paints on the very next frame are already this room's. */
+function bringRoomToReadingPosition(i) {
+  const maxY = Math.max(0, document.documentElement.scrollHeight - (window.innerHeight || 0));
+  const to = Math.max(0, Math.min(maxY, state.M[i * M_STRIDE + M_TOP]));
+  if (Math.abs(to - (window.scrollY || window.pageYOffset || 0)) < 2) return;
+
+  // Any in-flight jump is superseded — the keyboard is a human taking over.
+  cancelTween('interrupted');
+
+  try { window.scrollTo({ top: to, left: 0, behavior: 'instant' }); }
+  catch (_) { window.scrollTo(0, to); }          // no options bag: old WebKit
+
+  // Same treatment a jump gets in onScroll(): show everything, land ON the
+  // values rather than easing toward them, and do it before the next paint.
+  openCurtain();
+  armCurtain();
+  syncNow();
+  wake();
+}
+
+/**
+ * Bring --p / --enter up to date with the scroll position we are at RIGHT NOW,
+ * synchronously, before anything reads a style off a stage.
+ *
+ * WITHOUT THIS THE OWNERSHIP TEST BELOW READS THE PAST, twice over:
+ *   · focusing an element scrolls it into view first and dispatches the event
+ *     second, so by the time we run, the page has moved and --enter/--p are
+ *     still the values the last rAF frame wrote for where we used to be; and
+ *   · a room the engine has never written to at all resolves --cut at its
+ *     registered initial-value of 1 (§01's no-JS rendering), which reads as
+ *     "owns the page" for every room on the document until it is first ticked.
+ * Both were reproduced: focus() on the Back Office's Fall-Off hotspot from
+ * scrollY 0 measured --cut 1 for a room 7,920px down the page, so the handler
+ * declined to move and left the control clipped at the viewport's edge — the
+ * original defect, in the one case that matters most (a deep link or a
+ * restored scroll position).
+ *
+ * serviceFrame(snap) is the one update path; snap lands ON this position's
+ * values instead of easing toward them, and its own jump test primes liveness
+ * for whatever room we have arrived at.
+ */
+function syncNow() {
+  state.lastScrollY = -1;      // force a full recompute, not an early-out
+  state.dirty = true;
+  serviceFrame(nowMs(), 0, true, false, false);
+}
+
+function onFocusIn(ev) {
+  if (state.destroyed || !state.rooms.length) return;
+
+  const t = ev.target;
+  if (!t || typeof t.closest !== 'function') return;
+
+  // .hero carries `class="hero room"`, so it is matched here too — it holds no
+  // interactive element today, but a future one gets the same treatment free.
+  const roomEl = t.closest('.room');
+  if (!roomEl) return;                    // page chrome: skip link, ticket rail, C³
+
+  const i = state.byId.get(roomEl.id);
+  if (i === undefined) return;            // a section the engine skipped
+
+  if (state.reduceMotion) return;         // §18 un-clips everything; nothing to do
+  syncNow();
+  if (!roomOwnsPage(state.rooms[i])) bringRoomToReadingPosition(i);
+  revealWithinRoom(t, state.rooms[i].stage);
+}
+
+/**
+ * THE SECOND HALF OF THE SAME PROBLEM, one scroller down.
+ *
+ * The browser scrolls a newly focused element into view through EVERY
+ * scrollable ancestor, not just the page — but it does it before this handler
+ * runs, i.e. while the room is still clipped to `inset(50%)`. A clipped element
+ * has no visible rectangle to scroll into view, so the inner scrollers are left
+ * exactly where they were, and un-clipping the room afterwards reveals a strip
+ * still scrolled to the wrong card. Measured at 820x1180 after the room fix
+ * landed: Tab into the Break Room's Head Chef strip and card 5 sat at x 772 in
+ * a strip whose visible box ends at 784, with scrollLeft 0 — one stop still off
+ * screen out of 49. So the reveal is re-run now that nothing is clipped.
+ *
+ * IT IS HAND-ROLLED, AND `el.scrollIntoView()` IS NOT USED, because that call
+ * scrolls every scroll container on the way up and TWO of them must not move:
+ *
+ *   · the page. The room's own scroll position is the thing this whole block
+ *     exists to establish; handing it to a nested strip gives it straight back.
+ *   · .stage. `overflow: hidden` is still a scroll container to script, and
+ *     scrollIntoView will happily scroll one. Measured: focusing the Back
+ *     Office's Fall-Off hotspot (whose object sits at the right edge of the
+ *     photograph, §17) left `.stage.scrollLeft = 65` — the plate, the light
+ *     layers, the hotspot layer and the rail all panned 65px sideways, with
+ *     nothing to ever put them back. The composition is not a scroller.
+ *
+ * So this walks up to the stage and moves only boxes that are genuinely
+ * scrollable — overflow auto/scroll AND actually overflowing, i.e. exactly the
+ * ones a user could scroll themselves — by the smallest delta that brings the
+ * element inside. Measured after: 0 of 49 at 820x1180, 0 of 31 at 430x932, and
+ * `.stage.scrollLeft` 0 everywhere.
+ */
+function scrollIntoBox(box, el) {
+  const b = box.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  let dx = 0;
+  let dy = 0;
+  if (r.left < b.left) dx = r.left - b.left;
+  else if (r.right > b.right) dx = Math.min(r.left - b.left, r.right - b.right);
+  if (r.top < b.top) dy = r.top - b.top;
+  else if (r.bottom > b.bottom) dy = Math.min(r.top - b.top, r.bottom - b.bottom);
+  if (dx) box.scrollLeft += dx;
+  if (dy) box.scrollTop += dy;
+}
+
+function revealWithinRoom(el, stage) {
+  let node = el.parentElement;
+  while (node && node !== stage && node !== document.body) {
+    let cs;
+    try { cs = getComputedStyle(node); } catch (_) { return; }
+    const canX = /auto|scroll/.test(cs.overflowX) && node.scrollWidth > node.clientWidth + 1;
+    const canY = /auto|scroll/.test(cs.overflowY) && node.scrollHeight > node.clientHeight + 1;
+    if (canX || canY) scrollIntoBox(node, el);
+    node = node.parentElement;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Event wiring.
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -1857,6 +2083,12 @@ function wireEvents() {
   on(window, 'orientationchange', onOrientationChange, { passive: true });
   on(window, 'pageshow', onGeometryEvent, { passive: true });
   on(document, 'visibilitychange', onVisibilityChange);
+
+  // Sequential focus is a scroll input like any other — see the FOCUS
+  // OWNERSHIP block above for what it is for and what it measured. focusin,
+  // not focus, because focus does not bubble and every control on this page is
+  // built by another module into a room this one only knows by its .room class.
+  on(document, 'focusin', onFocusIn);
 
   if (window.visualViewport) {
     on(window.visualViewport, 'resize', onVisualViewportChange, { passive: true });

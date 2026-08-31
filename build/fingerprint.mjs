@@ -71,9 +71,21 @@
  *   and leaves the source file byte-for-byte alone. Re-run the build after any
  *   theme.css edit and the copy catches up. Nobody has to type a hash.
  *
+ * ONE PREVIOUS GENERATION IS KEPT ON PURPOSE — see §6. index.html is served
+ *   with `cache-control: max-age=600`, so for up to ten minutes after a push a
+ *   rep returning to a bookmark is holding the PREVIOUS index.html and asking
+ *   for the PREVIOUS hashes. Deleting them the moment the new ones exist made
+ *   every deploy a ten-minute window in which a 404'd module was a blank page.
+ *
+ * EVERY EMITTED MODULE'S IMPORTS ARE RESOLVED BEFORE THE BUILD IS ALLOWED TO
+ *   EXIT — see §5b. A rewrite this script silently misses is the one way it can
+ *   ship a page that 404s while printing a confident "entry:" line.
+ *
  * Usage:  node build/fingerprint.mjs [--clean]
- *         --clean  removes previously-emitted *.<hash>.* files first, so old
- *                  builds do not accumulate in the repo.
+ *         --clean  removes every previously-emitted *.<hash>.* file first —
+ *                  BOTH generations — and starts the retention window over.
+ *                  Use it to reset, never as part of a deploy: a --clean build
+ *                  is precisely the blank-page window §6 exists to close.
  * ========================================================================== */
 
 import { createHash } from 'node:crypto';
@@ -94,6 +106,7 @@ const HASHED_RE = new RegExp(`\\.[0-9a-f]{${HASH_LEN}}\\.[A-Za-z0-9]+$`);
 
 const p = (...s) => resolve(ROOT, ...s);
 const rel = (abs) => relative(ROOT, abs).split('\\').join('/');
+const fileExists = (f) => { try { return statSync(p(f)).isFile(); } catch { return false; } };
 
 function listDir(dir, exts) {
   let names = [];
@@ -327,6 +340,84 @@ if (screens) {
   }
 }
 
+/* ── 5b · every emitted module's imports must actually resolve ────────────── *
+ * WHY THIS EXISTS.
+ *   IMPORT_RE (§3) is anchored `^[ \t]*` under /gm, deliberately: it stops a
+ *   module's own doc comment ("import { initChefWall } from './chefwall.js';"
+ *   as a usage example) from reading as a self-import and therefore as a
+ *   dependency cycle. The cost of that anchor is that an import which does not
+ *   BEGIN its own line is invisible to this script:
+ *
+ *       const m = await import('./screens.js');      // assignment, mid-line
+ *       if (needsPocket) { await import('./pocket.js'); }   // nested in a block
+ *
+ *   Such a specifier is never rewritten. The build then exits 0 and prints a
+ *   confident "entry:" line while the emitted module still names an un-hashed
+ *   twin — and after §6 has pruned two generations of it, or if the specifier
+ *   was left hashed at an old hash, that is a 404 on a module, which is a blank
+ *   page. The tree was clean when this was written (2026-08-31: 16 modules, 20
+ *   relative specifiers, all resolved), so this is a latch, not a repair.
+ *
+ * WHAT IT CHECKS, on the BYTES THAT SHIP rather than on the sources:
+ *   1. every relative specifier resolves to a file that exists on disk;
+ *   2. no relative specifier still points at a file this build fingerprints —
+ *      i.e. at an UN-hashed twin. That is the rewrite-miss above, and it is the
+ *      check that catches it, because the un-hashed source is still on disk (it
+ *      is deliberately kept, see "THE SOURCE FILENAMES STAY") and so check 1
+ *      alone would pass straight over it.
+ *
+ * Comments are stripped first, for the same reason IMPORT_RE is anchored: the
+ * doc comments in this codebase are full of example imports and of prose that
+ * matches `from '…'`. Everything left is code.
+ */
+const stripComments = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments, incl. the headers
+  .replace(/^[ \t]*\/\/[^\n]*$/gm, '');      // whole-line // comments
+
+const SPEC_RES = [
+  /\bfrom\s*['"]([^'"\n]+)['"]/g,            // import … from '…' / export … from '…'
+  /\bimport\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g,// await import('…')  — ANY position
+  /\bimport\s*['"]([^'"\n]+)['"]/g           // import '…'  (side-effect only)
+];
+
+let checkedModules = 0, checkedSpecs = 0;
+for (const src of jsOrder) {
+  const emitted = MAP.get(src);
+  if (!emitted) continue;
+  const here = dirname(emitted);
+  const code = stripComments(readFileSync(p(emitted), 'utf8'));
+  const seenSpecs = new Set();
+  for (const re of SPEC_RES) {
+    for (const m of code.matchAll(re)) {
+      const spec = m[1];
+      if (!spec.startsWith('.')) continue;   // bare / URL: not this build's problem
+      if (seenSpecs.has(spec)) continue;
+      seenSpecs.add(spec);
+      checkedSpecs++;
+
+      const target = rel(resolve(p(here), spec));
+      if (!fileExists(target)) {
+        console.error(
+          `fingerprint: ${emitted} imports '${spec}', which resolves to ${target} — ` +
+          `and that file does not exist. The deployed page would 404 on a module, ` +
+          `which is a blank screen. (Was it renamed, or did §3's line-anchored ` +
+          `IMPORT_RE miss a mid-line import and leave a stale hash behind?)`);
+        process.exit(1);
+      }
+      if (SOURCE_PATHS.has(target)) {
+        console.error(
+          `fingerprint: ${emitted} still imports the UN-HASHED '${spec}' (${target}).\n` +
+          `  Every module this build fingerprints must be imported by its hashed name.\n` +
+          `  §3's IMPORT_RE only matches an import that BEGINS ITS OWN LINE, so a\n` +
+          `  mid-line or nested import — const m = await import('${spec}') — is never\n` +
+          `  rewritten. Move it to the start of a line, or widen IMPORT_RE.`);
+        process.exit(1);
+      }
+    }
+  }
+  checkedModules++;
+}
+
 // index.html must end up pointing at hashed entry points, or the whole exercise
 // silently did nothing.
 const html = readFileSync(p('index.html'), 'utf8');
@@ -342,26 +433,141 @@ for (const entry of ['assets/app.js', 'assets/theme.css']) {
   }
 }
 
-/* ── 6 · prune ────────────────────────────────────────────────────────────── *
- * Exactly one hashed copy per source file. Yesterday's `office.9a1c….webp` is
- * referenced by nothing after this run, and leaving it in the repo is how a
- * static site quietly grows to a gigabyte.                                    */
-const CURRENT = new Set([...MAP.values()].map((v) => basename(v)));
+/* ── 6 · prune, KEEPING ONE PREVIOUS GENERATION ───────────────────────────── *
+ * THE BUG THIS NOW EXISTS TO KILL.
+ *   This step used to keep exactly one hashed copy per source and delete
+ *   everything else — the previous build's files included. But index.html is
+ *   the one URL that does not move, and GitHub Pages serves it with
+ *   `cache-control: max-age=600`. So for up to TEN MINUTES after every push, a
+ *   rep coming back to a bookmark is holding the PREVIOUS index.html, which
+ *   names the PREVIOUS hashes, which this step had just deleted. Measured on
+ *   the live site 2026-08-31: assets/app.2d8d16ff8f.js, assets/theme.f4c9abadeb.css
+ *   and data/tools.46eb63be76.json all 404'd — and a 404 on the entry module is
+ *   a blank page, not a degraded one. Every deploy opened that window.
+ *
+ * THE FIX, AND WHY IT CANNOT GROW.
+ *   Prune N-2, not N-1. Two generations of hashed files are on disk at any
+ *   time: the one this build just emitted and the one before it. A cached
+ *   index.html is at most one generation old (it expires in ten minutes; the
+ *   next build is minutes-to-days later), so it always resolves.
+ *
+ *   The retained set is not guessed from the filesystem — it is READ FROM
+ *   build/asset-generations.json, which this step writes and which is committed
+ *   with the build. Two entries, newest first, hard-capped at KEEP_GENERATIONS.
+ *   A file leaves the repo on the SECOND build after the one that emitted it:
+ *   generation 1 is kept by build 2 and deleted by build 3. So the ceiling is
+ *   two hashed copies per source file, forever — the working tree cannot
+ *   accumulate, which is what the original one-copy rule was protecting.
+ *
+ *   A build that changes nothing emits the identical file list. That must NOT
+ *   count as a new generation, or two no-op builds in a row would push the real
+ *   previous generation out and reopen the window. So an unchanged list leaves
+ *   the manifest alone — no rewrite, no git churn.
+ *
+ *   `--clean` wipes both generations and starts the window over. It is a reset,
+ *   not a deploy step; see the header.
+ */
+const KEEP_GENERATIONS = 2;
+const GENERATIONS_FILE = 'build/asset-generations.json';
+
+/** Newest first: [{ written_at, files:[…] }, …]. Absent/unreadable = first run. */
+function readGenerations() {
+  if (CLEAN) return [];                       // --clean already removed them all
+  try {
+    const doc = JSON.parse(readFileSync(p(GENERATIONS_FILE), 'utf8'));
+    return (Array.isArray(doc.generations) ? doc.generations : [])
+      .filter((g) => g && Array.isArray(g.files) && g.files.length)
+      .map((g) => ({ written_at: g.written_at || null, files: g.files.slice() }));
+  } catch { return []; }
+}
+
+/**
+ * FIRST RUN AFTER THIS CHANGE: adopt what is already on disk.
+ *
+ * With no manifest there is no record of the previous generation — and pruning
+ * on that basis would open, one last time, exactly the ten-minute window this
+ * section exists to close. The files from the last build are still sitting in
+ * the working tree, so they ARE the previous generation: adopt them rather than
+ * delete them. Bounded like any other generation — the next build records its
+ * own, and the build after that prunes these.
+ */
+function adoptOnDisk(current) {
+  const have = new Set(current);
+  const found = [];
+  for (const dir of new Set([...MAP.keys()].map((k) => dirname(k)))) {
+    let names = [];
+    try { names = readdirSync(p(dir)); } catch { continue; }
+    for (const n of names) {
+      if (!HASHED_RE.test(n)) continue;
+      const f = dir === '.' ? n : `${dir}/${n}`;
+      if (have.has(f)) continue;
+      const stripped = n.replace(new RegExp(`\\.[0-9a-f]{${HASH_LEN}}(\\.[A-Za-z0-9]+)$`), '$1');
+      if (!SOURCE_PATHS.has(dir === '.' ? stripped : `${dir}/${stripped}`)) continue;
+      found.push(f);
+    }
+  }
+  return found.sort();
+}
+
+const thisGeneration = [...MAP.values()].sort();
+let previous = readGenerations();
+if (!previous.length && !CLEAN) {
+  const adopted = adoptOnDisk(thisGeneration);
+  if (adopted.length) {
+    console.log(`fingerprint: no generation manifest yet — adopting the ${adopted.length} ` +
+                `hashed files already on disk as the previous generation, so this build ` +
+                `does not 404 a cached index.html.`);
+    previous = [{ written_at: null, files: adopted, adopted_from_disk: true }];
+  }
+}
+const isRepeat = previous.length > 0 &&
+  previous[0].files.length === thisGeneration.length &&
+  previous[0].files.every((f, i) => f === thisGeneration[i]);
+
+// A repeat build IS the generation already on record — recording it again would
+// push the real previous generation out and reopen the ten-minute window.
+const retained = (isRepeat
+  ? previous
+  : [{ written_at: new Date().toISOString(), files: thisGeneration }, ...previous]
+).slice(0, KEEP_GENERATIONS);
+const KEEP = new Set(retained.flatMap((g) => g.files));
+
 let pruned = 0;
 for (const dir of new Set([...MAP.keys()].map((k) => dirname(k)))) {
   let names = [];
   try { names = readdirSync(p(dir)); } catch { continue; }
   for (const n of names) {
-    if (!HASHED_RE.test(n) || CURRENT.has(n)) continue;
+    if (!HASHED_RE.test(n)) continue;
+    const f = dir === '.' ? n : `${dir}/${n}`;
+    if (KEEP.has(f)) continue;
     // Only prune something whose un-hashed twin is a source file we own.
     const stripped = n.replace(new RegExp(`\\.[0-9a-f]{${HASH_LEN}}(\\.[A-Za-z0-9]+)$`), '$1');
     const twin = dir === '.' ? stripped : `${dir}/${stripped}`;
     if (!SOURCE_PATHS.has(twin)) continue;
-    try { unlinkSync(p(dir === '.' ? n : `${dir}/${n}`)); pruned++; } catch { /* noop */ }
+    try { unlinkSync(p(f)); pruned++; } catch { /* noop */ }
   }
 }
 
+if (!isRepeat) {
+  writeFileSync(p(GENERATIONS_FILE), JSON.stringify({
+    note: 'GENERATED FILE — do not hand-edit. Written by build/fingerprint.mjs and ' +
+          'COMMITTED WITH THE BUILD. It is the list of hashed asset filenames each ' +
+          'build emitted, newest first. The build keeps the newest ' + KEEP_GENERATIONS +
+          ' generations on disk so that an index.html cached under max-age=600 — up to ' +
+          'ten minutes old — still resolves every URL it names. Deleting this file is ' +
+          'safe: the next build finds no manifest and adopts the hashed files already ' +
+          'in the working tree as the previous generation, then carries on. ' +
+          '`adopted_from_disk` marks a generation recovered that way rather than recorded ' +
+          'by the build that emitted it.',
+    keep_generations: KEEP_GENERATIONS,
+    generations: retained
+  }, null, 2) + '\n');
+}
+
 console.log(`fingerprint: ${MAP.size} assets hashed${pruned ? `, ${pruned} stale removed` : ''}`);
+console.log(`  retention: ${retained.length}/${KEEP_GENERATIONS} generations on disk, ` +
+            `${KEEP.size} hashed files kept${isRepeat ? ' (unchanged build — same generation)' : ''}`);
+console.log(`  imports verified: ${checkedSpecs} relative specifiers across ${checkedModules} emitted modules`);
 console.log(`  ${LEAF_ASSETS.length} media/data · ${CSS_ASSETS.length} css · ${jsOrder.length} js`);
 console.log(`  entry: ${MAP.get('assets/app.js')}`);
 console.log(`  theme: ${MAP.get('assets/theme.css')}  (source file untouched)`);

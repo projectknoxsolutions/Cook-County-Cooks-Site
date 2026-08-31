@@ -185,6 +185,42 @@ const ALIASES = new Map(Object.entries({
 }));
 
 /**
+ * HOW MANY FRAMES ARE PAINTED ON THE BREAK-ROOM WALL.
+ *
+ * The wall is art, not data: rooms.js CHEF_FRAMES holds six boxes measured off
+ * the plate, and chefwall.js can only fill the frames that were painted. Past
+ * six it console.warns "Dropping: …" in a browser nobody has open — and because
+ * the roster is persisted-first, THE ONE IT DROPS IS THE NEWCOMER, i.e. the
+ * district actually in the deck. Reproduced 2026-08-31: retitling the East Side
+ * slide "— Outlawz" -> "— The Outlawz" made a seventh district; the frame
+ * engraved "East Side" showed a held, stale chef and the district really in the
+ * deck never appeared anywhere.
+ *
+ * That has to be a build failure, here, before anything is written — see §10b.
+ * The number is READ from rooms.js so it cannot drift from the art. It is read
+ * as text, not imported: rooms.js is 24 KB of geometry, this needs one integer,
+ * and the repo has no package.json (importing a bare .js warns on every run).
+ * If it cannot be read we fall back to the measured six rather than fail the
+ * chef pipeline over a file that belongs to another agent — a broken read must
+ * degrade to the known number, never to a stopped wall.
+ */
+const CHEF_FRAME_FALLBACK = 6;
+function readFrameCount() {
+  try {
+    const src = readFileSync(resolve(ROOT, 'rooms.js'), 'utf8');
+    const m = /export\s+const\s+CHEF_FRAMES\s*=\s*\[([\s\S]*?)\]\s*;/.exec(src);
+    if (!m) throw new Error('no `export const CHEF_FRAMES = [...]` in rooms.js');
+    const n = (m[1].match(/\{/g) || []).length;
+    if (!n) throw new Error('CHEF_FRAMES parsed as empty');
+    return n;
+  } catch (err) {
+    console.warn(`! could not read CHEF_FRAMES from rooms.js (${err.message}); ` +
+                 `assuming the measured ${CHEF_FRAME_FALLBACK} frames.`);
+    return CHEF_FRAME_FALLBACK;
+  }
+}
+
+/**
  * PHOTO TARGET BOX, and why it is this small.
  *
  * The photograph lands in three places, and the biggest of the three sets the
@@ -430,8 +466,12 @@ function districtFromTitle(title, deck, isXfinity) {
  * Every head-chef slide in one deck.
  * Throws (PullError) on a slide whose shape we do not recognise — that is a
  * deck rewrite, and guessing at it is exactly how a half-file gets written.
+ *
+ * @param history {{had:boolean, slides:number, when:string|null}}
+ *   what this DECK yielded the last time it was read. Used only by the
+ *   empty-harvest guard below; extraction itself never consults it.
  */
-function extractSlides(html, deck) {
+function extractSlides(html, deck, history) {
   // Sanity: is this even the deck? A redirect, a rate-limit page or an empty
   // file must not be read as "this deck has no head chefs this week".
   const slideCount = (html.match(/<div[^>]*\bclass\s*=\s*"[^"]*\bs\b[^"]*"/g) || []).length;
@@ -504,6 +544,47 @@ function extractSlides(html, deck) {
       photo,
       district: districtFromTitle(title, deck, isXfinity)
     });
+  }
+
+  /* ── THE EMPTY HARVEST ────────────────────────────────────────────────────
+   * The deck parsed as a deck (the slide count above cleared the sanity bar)
+   * and yielded ZERO head-chef slides. Every other shape change in here fails
+   * loudly; this one did not, and it is the worst of them, because it fails
+   * SILENTLY AND GREEN: nothing is written, `git status --porcelain -- headchefs`
+   * reports nothing to commit, the workflow goes green, and four districts hold
+   * last-seen for fourteen days and then blank one at a time with nobody told.
+   * Reproduced 2026-08-31 by renaming the deck's `hcs` class to `hcslide`:
+   *   `5.37 MB, 0 head-chef slides … wall content changed: no … exit=0`.
+   * That is exactly the silent staleness this whole pipeline exists to prevent.
+   *
+   * WHY THE GUARD IS PER-DECK AND NOT GLOBAL.
+   *   The header documents the legitimate case: zero head chefs is a real state
+   *   the wall is built to show (a labelled empty mat), and a global "at least
+   *   one chef somewhere" rule would fail a genuinely quiet fortnight. But a
+   *   deck that yielded chefs on the last run and yields none now is not a quiet
+   *   week — the slides were there thirty minutes ago. The signal is the CHANGE,
+   *   per deck, and headchefs.json's own `sources[]` already records it.
+   *
+   *   So: no history (first run, or the hand-made snapshot) and no chefs is a
+   *   warning, not a failure — it cannot be told from a genuinely empty deck,
+   *   and refusing to run on the first run would be its own kind of rot.
+   */
+  if (!out.length) {
+    if (history && history.had) {
+      fail(`${deck.key}: the deck parsed (${slideCount} slides, ${html.length} bytes) but ` +
+           `NOT ONE head-chef slide came out of it — and the last run got ` +
+           `${history.slides}${history.when ? ` at ${history.when}` : ''}.\n` +
+           `  Every head-chef slide is found by the "hcs" class on its <div>; a deck restyle ` +
+           `that renames or drops that class yields exactly this.\n` +
+           `  This is NOT treated as "no head chefs this week": the wall would hold last-seen ` +
+           `for ${STALE_DROP_DAYS} days and then blank one district at a time, with a green tick ` +
+           `on every run in between.\n` +
+           `  Fix the selector against the deck's new markup (see "THE DECK SHAPE" in this ` +
+           `file's header), or, if the slides really are gone for good, clear this deck's ` +
+           `entry from headchefs.json's sources[] to say so deliberately.`);
+    }
+    console.warn(`  ! ${deck.key}: no head-chef slides, and none on record from a previous ` +
+                 `run either — reading that as a genuinely empty deck, not a shape change.`);
   }
 
   return out;
@@ -632,7 +713,7 @@ function encodePhoto(srcBuf, key) {
  * ------------------------------------------------------------------------ */
 
 function readPrevious() {
-  const empty = { districtOrder: [], districts: {}, chefs: {} };
+  const empty = { districtOrder: [], districts: {}, chefs: {}, sources: {} };
   if (!existsSync(OUT_JSON)) return empty;
   let doc;
   try { doc = JSON.parse(readFileSync(OUT_JSON, 'utf8')); }
@@ -664,7 +745,14 @@ function readPrevious() {
     for (const c of Object.values(chefs)) if (!c.last_confirmed) c.last_confirmed = fileStamp;
     for (const d of Object.values(districts)) if (!d.last_confirmed) d.last_confirmed = fileStamp;
   }
-  return { districtOrder: order, districts, chefs };
+  // The per-deck record of the LAST run: how many head-chef slides each deck
+  // yielded, and when. This is what tells a deck that has always had chefs and
+  // suddenly has none apart from a deck that has legitimately never had any.
+  const sources = {};
+  for (const src of (doc && Array.isArray(doc.sources) ? doc.sources : [])) {
+    if (src && src.deck) sources[src.deck] = src;
+  }
+  return { districtOrder: order, districts, chefs, sources };
 }
 
 /** Everything that decides whether an entry actually CHANGED. */
@@ -690,7 +778,14 @@ async function run() {
   for (const deck of DECKS) {
     process.stdout.write(`· ${deck.key}: fetching ${deck.raw}\n`);
     const html = await fetchDeck(deck);
-    const slides = extractSlides(html, deck);
+    const prevSrc = prev.sources[deck.key] || null;
+    const prevFromDeck = Object.values(prev.districts)
+      .filter((d) => d && d.source_deck === deck.key).length;
+    const slides = extractSlides(html, deck, {
+      had: !!((prevSrc && Number(prevSrc.head_chef_slides) > 0) || prevFromDeck > 0),
+      slides: prevSrc ? Number(prevSrc.head_chef_slides) || 0 : prevFromDeck,
+      when: prevSrc ? prevSrc.fetched_at : null
+    });
     process.stdout.write(
       `  ${(html.length / 1048576).toFixed(2)} MB, ${slides.length} head-chef slide` +
       `${slides.length === 1 ? '' : 's'}${slides.length ? ': ' + slides.map((s) => `${s.district.district} / ${s.name}`).join(', ') : ''}\n`);
@@ -728,6 +823,59 @@ async function run() {
   for (const key of found.keys()) if (!order.includes(key)) order.push(key);
 
   const seedByKey = new Map(SEED_ROSTER.map((s) => [s.key, s]));
+
+  /* -- 10b-i. a district key nobody has ever seen -------------------------- *
+   * The EARLY SIGNAL that a slide title was reworded. It is not an error on its
+   * own — the header is explicit that the title IS the district and a rename
+   * follows by itself — but it is the one moment somebody can add an ALIASES
+   * line and keep the rename cosmetic instead of structural. Printed on every
+   * run it happens, whether or not the wall is over capacity.                */
+  const known = new Set([...prev.districtOrder, ...SEED_ROSTER.map((r) => r.key)]);
+  const newcomers = [...found.keys()].filter((k) => !known.has(k));
+  // The district key IS the ALIASES key: both are slug() of the district text,
+  // and slug(titleCase(x)) === slug(x). So the key can be pasted straight in.
+  for (const key of newcomers) {
+    const s = found.get(key);
+    console.warn(`  ! new district key "${key}" ("${s.district.district}") from ${s.deck} ` +
+                 `slide "${s.slideTitle}" — never seen before. If that is a RENAME of a ` +
+                 `district already on the wall, add '${key}': '<the district it used to be>' ` +
+                 `to ALIASES in this file, so the existing frame follows the rename instead ` +
+                 `of a seventh district appearing.`);
+  }
+
+  /* -- 10b-ii. more districts than the wall has frames --------------------- *
+   * A build failure, not a browser console warning. See CHEF_FRAME_FALLBACK
+   * above for the measurement and the reproduction. Nothing has been written at
+   * this point, so the wall keeps its last good state while somebody reads
+   * this — the same fail-soft contract as every other guard in here.         */
+  const FRAMES = readFrameCount();
+  if (order.length > FRAMES) {
+    const overflow = order.slice(FRAMES);
+    const describe = (k) => {
+      const s = found.get(k);
+      return s ? `"${s.district.district}" [${k}] — ${s.deck} slide "${s.slideTitle}"`
+               : `"${k}" (held from headchefs.json; not in a deck this run)`;
+    };
+    const renameHint = (newcomers.length ? newcomers : ['<slug-of-the-new-title>'])
+      .map((k) => `      '${k}': '<the district this slide used to be>',`).join('\n');
+
+    fail(
+      `${order.length} districts on the roster but the break-room wall has ${FRAMES} painted ` +
+      `frames (CHEF_FRAMES in rooms.js).\n` +
+      `  Past ${FRAMES}, chefwall.js drops the overflow with a console warning nobody reads — and ` +
+      `the roster is persisted-first, so the one it drops is the NEWCOMER: the district that is ` +
+      `actually in the deck right now, while its frame shows a held, stale chef.\n` +
+      `  Over capacity: ${overflow.map(describe).join('; ')}\n` +
+      (newcomers.length
+        ? `  Never seen before: ${newcomers.map(describe).join('; ')}\n`
+        : `  No new district keys this run — the roster in headchefs.json is already over capacity.\n`) +
+      `  If a slide title was REWORDED, fold it back onto the district it already is, in ALIASES ` +
+      `in this file:\n${renameHint}\n` +
+      `  If it is genuinely a seventh district, a seventh frame has to be painted into rooms.js ` +
+      `CHEF_FRAMES first — that is an art-direction change, and the wall cannot show more chefs ` +
+      `than it has frames.`
+    );
+  }
 
   /* -- 10c. build one entry per district in the roster --------------------- */
   const now = Date.now();

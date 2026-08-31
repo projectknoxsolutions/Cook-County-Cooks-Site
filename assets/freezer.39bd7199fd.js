@@ -133,10 +133,14 @@ function box(b, d) {
 }
 
 /** Read-only mirror of app.js §2's unlock predicate. Writes nothing, ever. */
+/* Same one-character hole as coldgate.js's freezerSessionHint(), same fix:
+   `document.cookie` throws too (sandboxed frame, cookies disabled), and it was
+   outside the try in a boot-critical path. See the note there. */
 function defaultIsUnlocked() {
   try { if (sessionStorage.getItem('c3f-unlocked') === '1') return true; }
   catch { /* private mode — fall through to the cookie, same as app.js */ }
-  return document.cookie.split('; ').some((c) => c.startsWith('c3f='));
+  try { return document.cookie.split('; ').some((c) => c.startsWith('c3f=')); }
+  catch { return false; }
 }
 
 function prefersReduced() {
@@ -1058,12 +1062,16 @@ export function initFreezer(opts = {}) {
   function buildDoorImg(cls) {
     return el('img', {
       class: cls,
-      src: plate,
+      // ⚠ srcset AND sizes BEFORE src — the same rule the art probe below is
+      // written to, and it applies to the element beside it just as much. el()
+      // applies props in literal order, so `src` first would make the element
+      // choose a candidate and then choose again.
       srcset: srcset || null,
-      // identical to the room plates (app.js buildPlate) so the browser picks
+      // identical to the room plates (cinema.js buildPlate) so the browser picks
       // the same candidate for the jamb and the leaf and fetches it once —
       // handed over as opts.sizes so there is exactly one copy of the string.
       sizes: srcset ? sizes : null,
+      src: plate,
       alt: '',
       decoding: 'async',
       loading: 'lazy',
@@ -1314,6 +1322,10 @@ export function initFreezer(opts = {}) {
         if (led) led.style.cssText = '';
         return;
       }
+      // The keypad is up: warm the door art now (see the art-probe note), so
+      // the 600,000 rounds of PBKDF2 behind the Unlock button are also the
+      // download window for a plate this room has not needed until now.
+      startProbe();
       if (panel.dataset.frzWired) return;
       panel.dataset.frzWired = '1';
 
@@ -1336,6 +1348,15 @@ export function initFreezer(opts = {}) {
       type: 'button',
       class: 'frz-mute',
       'aria-pressed': on ? 'true' : 'false',
+      /* THE NAME IS AN aria-label, NOT THE title. The title carries the one
+         sentence of explanation and is a tooltip — it is never read reliably
+         (JAWS and NVDA both make it optional and both default it off for
+         controls that have any other name source) and it does not exist at all
+         on touch, which is most of this site's traffic. The label is the SAME
+         WORDS as the visible <span> below, deliberately: that keeps
+         label-in-name intact, so "click Door sound" still works in Voice
+         Control and Voice Access. */
+      'aria-label': 'Door sound',
       title: 'The door makes one sound when it opens. Nothing else on this site does.'
     });
     btn.insertAdjacentHTML('afterbegin', SPEAKER_ON + SPEAKER_OFF);
@@ -1425,18 +1446,67 @@ export function initFreezer(opts = {}) {
      question the same way: a candidate that 404s fires `error`, and `build()`
      is still gated on `load`. sizes/srcset before src, so the first selection
      is already the right one. */
-  const probe = new Image();
-  probe.decoding = 'async';
-  if (srcset) { probe.sizes = sizes; probe.srcset = srcset; }
-  probe.addEventListener('load', () => {
-    artOk = true;
-    if (destroyed || isUnlocked()) return;
-    try { build(); } catch (e) { console.error('[freezer] could not mount the door:', e); }
-  }, { once: true });
-  probe.addEventListener('error', () => {
-    console.warn(`[freezer] ${plate} is missing — the walk-in stays as it was.`);
-  }, { once: true });
-  probe.src = plate;
+  let probed = false;
+  function startProbe() {
+    if (probed || destroyed) return;
+    probed = true;
+    const probe = new Image();
+    probe.decoding = 'async';
+    if (srcset) { probe.sizes = sizes; probe.srcset = srcset; }
+    probe.addEventListener('load', () => {
+      artOk = true;
+      if (destroyed || isUnlocked()) return;
+      try { build(); } catch (e) { console.error('[freezer] could not mount the door:', e); }
+    }, { once: true });
+    probe.addEventListener('error', () => {
+      console.warn(`[freezer] ${plate} is missing — the walk-in stays as it was.`);
+    }, { once: true });
+    probe.src = plate;
+  }
+
+  /* AND IT DOES NOT RUN AT FIRST PAINT ANY MORE.
+     The walk-in is the LAST room in the building. This probe was firing during
+     the first paint of the FIRST room, which put a 2400x1340 (or 1800w) copy of
+     plates/freezer-door.833492497b.webp on the critical path of a load that is otherwise
+     the hero, theme.css and the modules. Measured cold at 1440x900 with GitHub
+     Pages-shaped cache headers: freezer-door@1800 is 134 KiB of the 1856 KiB
+     first load — 7% of the bytes, for a room nobody has scrolled to, competing
+     with the LCP image. At 1180x820 DPR 2 it is the full cut: 240 KiB.
+
+     Two triggers, whichever comes first, because the door MUST be built before
+     anyone can reach it and neither trigger is guaranteed on its own:
+       · the freezer room coming within one and a half viewports — the normal
+         path, and 1.5 screens is several seconds of scrolling at any speed;
+       · the KEYPAD appearing in #modal-root — the C³ menu's lock chip opens it
+         without anyone having scrolled the building, and a manager typing a
+         code is about two seconds of PBKDF2 away from wanting a door. That is
+         the same MutationObserver watchKeypad() already runs.
+     Both call the same idempotent starter, so the door is probed exactly once.
+
+     THERE IS DELIBERATELY NO TIMED FLOOR under those two. A `load`-plus-a-few-
+     seconds fallback was tried and removed: it fired on every desktop visit and
+     put the 134 KiB (240 KiB at DPR 2) back on the wire for a room nobody had
+     gone near, which is the whole cost this is here to avoid. If neither
+     trigger ever fires, nobody has looked at the walk-in and nobody has touched
+     the keypad, so the door is not needed; and a browser with no
+     IntersectionObserver probes immediately, exactly as before.
+
+     Nothing else moved: `build()` is still gated on the probe's `load`, a 404
+     still fires `error` and still leaves the walk-in exactly as v3 had it. */
+  if (typeof IntersectionObserver === 'function') {
+    try {
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          io.disconnect();
+          startProbe();
+        }
+      }, { rootMargin: '150% 0px 150% 0px' });
+      io.observe(room);
+    } catch { startProbe(); }
+  } else {
+    startProbe();                                   // no observer: as before
+  }
 
   /* Two ways in, so the module works whether or not app.js is wired to it:
        · opts.onUnlock(cb)                — the explicit hook (preferred)

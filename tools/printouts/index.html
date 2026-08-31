@@ -8,13 +8,19 @@
   <title>Print Outs | Cook County Cooks</title>
   <meta name="description" content="Every printable form, guide and checklist from the Back Office printer — hosted on the site, previewed and printed in place.">
 
-  <!-- theme.css keeps its own @import so it stands alone, but an @import is
-       only discovered after the stylesheet itself has parsed. Preconnect +
-       a direct <link> here starts the font fetch in the same breath as the
-       stylesheet, exactly as index.html does. -->
+  <!-- FONTS, NON-BLOCKING — the same treatment as index.html <head>, and for
+       the same measured reason: a render-blocking stylesheet also blocks
+       script execution, and fonts.googleapis.com HANGS behind a store's
+       captive portal rather than failing. theme.css §00 no longer carries an
+       @import of this URL (it could not be released by media-scoping and held
+       the whole boot), so this <link> is where the webfont comes from.
+       media="print" keeps it out of the critical path; onload flips it to
+       `all` the moment it lands. The <noscript> copy covers scripting-off. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,300..700;1,62..125,300..700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,300..700;1,62..125,300..700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..700&display=swap"
+        media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,300..700;1,62..125,300..700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..700&display=swap"></noscript>
 
   <!-- THE SITE'S OWN STYLESHEET, not a second design language. Everything
        below is written against its tokens (§02) and reuses its primitives —
@@ -22,7 +28,7 @@
        two-tone focus ring in §16. This page is loaded into the tool overlay
        (an iframe), so it has to carry its own <head>; it does not have to
        invent its own palette. -->
-  <link rel="stylesheet" href="../../assets/theme.177d9d3b9f.css">
+  <link rel="stylesheet" href="../../assets/theme.429a145a6a.css">
 
   <script>
     /* INLINE DATA BOOTSTRAP — same reason as index.html, do not "clean this up".

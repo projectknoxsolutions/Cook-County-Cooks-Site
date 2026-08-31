@@ -55,11 +55,46 @@
 
    Two families, four jobs.  No third face, no "friendly geometric".
 
-   NOTE FOR THE INTEGRATOR: keep this @import (the file must stand alone) but
-   ALSO put <link rel="preconnect"> to fonts.googleapis.com + fonts.gstatic.com
-   and the same stylesheet <link> in index.html so the request is not chained.
+   ⚠ THERE IS NO @import HERE ANY MORE, AND THAT IS THE FIX. DO NOT PUT IT BACK.
+   This file used to open with
+
+       @import url('https://fonts.googleapis.com/css2?family=Archivo…');
+
+   and that one line could hold the entire site on a white screen for ever.
+   An @import is fetched only after its parent sheet has parsed, and the PARENT
+   sheet is not "loaded" until every @import it names has settled — whatever
+   media the import carries. theme.css is render-blocking (it must be; it styles
+   the first frame), and a render-blocking sheet also BLOCKS SCRIPT EXECUTION,
+   so a fonts.googleapis.com request that HANGS — connection accepted, never
+   answered, which is exactly what a store's guest wifi and a captive portal do,
+   as opposed to failing fast — meant assets/app.js never ran at all.
+
+   Measured 2026-08-31 against a hung font host, with index.html's own font
+   <link> ALREADY made non-blocking, so this line was the only thing left:
+
+       @import, unscoped   t=1s/10s/30s   <main id="kitchen"> 0 children,
+                                          document.styleSheets EMPTY,
+                                          app.js never executed
+       @import … print;    t=1s/10s/30s   IDENTICAL — scoping the media does
+                                          NOT release the parent sheet
+       no @import at all   t=1s           kitchen built, 8 children, usable
+
+   THE FONT IS NOT LOST. Every HTML page that uses this stylesheet carries the
+   same font URL as a NON-blocking <link> in its own <head>:
+
+       <link rel="preconnect" href="https://fonts.googleapis.com">
+       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+       <link rel="stylesheet" href="…css2?family=Archivo…"
+             media="print" onload="this.media='all'">
+       <noscript><link rel="stylesheet" href="…css2?family=Archivo…"></noscript>
+
+   A media-mismatched stylesheet is still downloaded, but it can hold up neither
+   rendering nor scripts; the onload flips it to `all` the instant it arrives.
+   index.html and tools/printouts/index.html both carry it. If you add a third
+   page, copy those four lines with it — and if the font host is down, that page
+   renders in the fallback stacks in §02 (--font-display and --font-text both
+   end in real system faces) instead of not rendering at all.
    ─────────────────────────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,300..700;1,62..125,300..700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..700&display=swap');
 
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -2112,6 +2147,90 @@ a { color: inherit; text-decoration: none; }
     font-variation-settings: "opsz" 56, "wght" 640;
     margin-inline-start: 0.28em;
   }
+}
+
+/* ── THE MASTHEAD'S OWN GROUND ────────────────────────────────────────────
+   THE DEFECT, MEASURED. The masthead is 120px type over the storefront's lit
+   doorway, which is the brightest thing in the photograph. Sampling only the
+   SOLID glyph pixels (rendered colour within 10/255 of the declared colour)
+   against the same pixel of the same frame with the type painted transparent —
+   never with the type HIDDEN, which would take this scrim with it and measure
+   the wrong ground — over every scroll frame in which the hero is the only room
+   painting. Worst pixel, before / after, floor 3:1 (large text, 1.4.3):
+
+       viewport      Cook          County        Cooks
+       1600x900   2.17 / 9.38   2.14 / 7.95   3.87 / 11.78
+       1366x768   2.16 / 9.30   2.30 / 8.07   3.98 / 12.06
+       820x1180   3.26 / 10.95  1.00 / 3.90   2.86 / 10.57
+       430x932    3.93 / 11.71  1.00 / 4.76   2.50 /  9.77
+
+   The two tablet-and-narrower rows are where it was worst and where the shape
+   of the fix was decided: below about 1000px the masthead stops sitting on the
+   dark brick and lands on the lit doorway itself, and "County" at 1.00 is gold
+   on a blown-out white — the two colours were, to within a rounding error, the
+   same luminance.
+
+   "County" is --brass-300 (#ebce93, relative luminance 0.639) and "Cook" is
+   --bone (0.867); the doorway behind the worst pixels measures 0.27 and 0.37.
+   Both words are BRIGHTER than the ground and too close to it. Text-shadow
+   could not fix that — --shadow-text was already on all three — because the
+   failure is the ground, not the edge.
+
+   WHY THIS AND NOT A BRIGHTER GOLD. Pushing --brass-300 toward white does
+   raise the ratio (white over that doorway is 3.26:1), and it would cost the
+   brand its one warm accent and still leave nothing in hand at 3.26. The
+   ground is the variable with headroom, so the ground moves.
+
+   THE ARITHMETIC, so nobody has to re-run it. Compositing --shade (3 5 9,
+   effectively black) at alpha a scales each sRGB channel by (1-a), i.e. scales
+   relative luminance by (1-a)^2.4. 3:1 needs the ground at L <= 0.180 under
+   "County" and L <= 0.256 under "Cook", so a >= 0.159 and a >= 0.145
+   respectively — and on the doorway, where the ground is blown out rather than
+   merely bright, a >= 0.55. The pool below holds a ~0.63 over the middle line
+   and does not drop under ~0.50 anywhere the type reaches, which is what buys
+   the 3.90 worst pixel at 820x1180: a 30% margin over the floor. That margin is
+   deliberate and not padding. Every number here is measured with a FALLBACK
+   SERIF, because Google Fonts is not reachable from the measuring harness; the
+   real Bodoni Moda italic is a good deal thinner, so more of its area is
+   antialiased edge and its effective contrast is lower than a fallback's at the
+   same nominal colour.
+
+   NOT A SLAB, for the same reason §08 refuses one for the rail: it is an
+   ellipse with no edge anywhere on screen, sized in PERCENTAGES OF THE
+   MASTHEAD'S OWN BOX, so it scales with the type at every breakpoint instead
+   of needing a value per viewport. And it is on the type, not on .plate-vig:
+   the vignette is a child of .plate-wrap and rides the dolly and the parallax,
+   so a lobe aimed at the masthead there would slide off it over the runway.
+   This one cannot — the masthead does not move, and neither does its ground.
+
+   AND IT IS NOT A DARK RECTANGLE ON THE STOREFRONT. At the alphas above the
+   pool reads as the lower-left lobe of the room's own lamp falloff; the only
+   visible difference at 1600x900 is that the two Edison bulbs behind "Cook"
+   are dimmer. Checked by eye at all four viewports above. */
+.hero-title { position: relative; }
+
+.hero-title::before {
+  content: "";
+  position: absolute;
+  /* Percentages of the masthead's own box (inline against its width, block
+     against its height), so the pool scales with the type at every breakpoint.
+     The box is deliberately far bigger than the type: a radial-gradient is
+     CLIPPED BY ITS BOX, and the first cut of this rule sized the ellipse at
+     80% of the box width — i.e. 1.6x the half-width — so the fade ran off the
+     edge and left a visible rectangle across the brick at 820x1180. Every
+     radius below is under 50% for that reason: the gradient must reach
+     transparent before the box does, on the axes AND on the diagonals. */
+  inset: -70% -45%;
+  /* .hero-inner is the stacking context (position + --z-rail), so -1 puts this
+     behind the three spans and no further — still well above the plate. */
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(48% 48% at 50% 50%,
+    rgb(var(--shade) / .66) 0%,
+    rgb(var(--shade) / .62) 60%,
+    rgb(var(--shade) / .32) 80%,
+    rgb(var(--shade) / .09) 91%,
+    transparent 100%);
 }
 
 /* .hero-lede, .scroll-cue and @keyframes cue-draw stood here. All three were
@@ -5310,6 +5429,40 @@ html[data-view="pocket"] body {
    index inside #site-footer is the genuinely-no-JS path and must survive) but
    nothing renders into them here. */
 html[data-view="pocket"] #kitchen { isolation: auto; }
+
+
+/* ── THE FLOOR ─────────────────────────────────────────────────────────────
+   <html data-view="floor"> is stamped by app.js's renderFloor() and by nothing
+   else. It means: one of the front-end modules did not load, so the router has
+   drawn the plain list of tools straight out of window.__CCC_INLINE__ instead.
+   See the block comment above renderFloor() for the deploy window that causes
+   it (a ten-minute cache lifetime on index.html against hashed module names the
+   next build has already pruned).
+
+   Deliberately TINY, and deliberately built only out of primitives that are
+   already in this sheet — .kicker, .t-sub, .micro, .chip, .tool-row and its two
+   spans. The floor exists for the load where something is missing; it must not
+   itself depend on much. If this stylesheet is the file that 404'd there is no
+   CSS at all and the list is still a usable column of links, which is the point.
+   ─────────────────────────────────────────────────────────────────────────── */
+html[data-view="floor"] { scroll-padding-top: var(--sp-6); }
+html[data-view="floor"] body { background-attachment: scroll; }
+html[data-view="floor"] #kitchen { isolation: auto; }
+
+.floor {
+  max-inline-size: 34rem;
+  margin-inline: auto;
+  padding-inline: max(var(--gut), env(safe-area-inset-left), env(safe-area-inset-right));
+  padding-block: calc(var(--sp-6) + env(safe-area-inset-top)) calc(var(--sp-8) + env(safe-area-inset-bottom));
+}
+.floor-head { padding-block-end: var(--sp-5); }
+.floor-head h1 { margin-block: var(--sp-2); }
+.floor-head .micro { max-inline-size: 46ch; }
+.floor-head .chip { margin-block-start: var(--sp-4); }
+.floor section { padding-block-start: var(--sp-5); }
+.floor h2 { padding-block-end: var(--sp-2); }
+.floor ul { list-style: none; margin: 0; padding: 0; }
+.floor .tool-row-blurb { display: block; }
 
 .pocket {
   max-inline-size: 34rem;

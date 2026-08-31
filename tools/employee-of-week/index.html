@@ -8,7 +8,13 @@
   <title>Head Chef Wall | Cook County Cooks</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <!-- NON-BLOCKING, same reason as index.html: a pending stylesheet blocks
+       script execution too, and fonts.googleapis.com hangs (rather than
+       fails) behind a store captive portal. media="print" keeps it off the
+       critical path; onload applies it the moment it lands. -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"
+        media="print" onload="this.media='all'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" /></noscript>
   <style>
     * { box-sizing: border-box; margin: 0; }
     :root {
@@ -105,6 +111,26 @@
     (function () {
       var DATA_URL = '../../headchefs/headchefs.json';
       var PHOTO_BASE = '../../headchefs/';
+
+      /* THE RIGHT NAME OVER THE WRONG FACE — same defect as assets/chefwall.js,
+         same free fix. headchefs/photos/<district>.webp is a stable filename
+         overwritten in place when a district's winner changes, and it is served
+         with cache-control: max-age=14400 while headchefs.json is max-age=600
+         and fetched here with cache:'no-cache'. So the caption updates within
+         ten minutes and the photograph can be four hours behind it. Every entry
+         already carries photo_sha; appending it makes a changed photo a changed
+         URL and leaves an unchanged one cached for the full four hours.
+         Falls back to last_changed, then to nothing — never worse than before. */
+      function photoSrc(c) {
+        var stamp = '';
+        if (typeof c.photo_sha === 'string' && c.photo_sha.length >= 8) stamp = c.photo_sha.slice(0, 12);
+        else if (c.last_changed || c.last_confirmed) {
+          var t = Date.parse(c.last_changed || c.last_confirmed);
+          if (isFinite(t)) stamp = String(Math.floor(t / 1000));
+        }
+        var u = PHOTO_BASE + c.photo_file;
+        return stamp ? u + (u.indexOf('?') === -1 ? '?v=' : '&v=') + stamp : u;
+      }
       var DECK_URLS = {
         'chicago': 'https://blufoxmobile.github.io/Win-The-Weekend---Chicago/',
         'big south': 'https://blufoxmobile.github.io/Win-The-Weekend---Big-South/'
@@ -121,7 +147,15 @@
         return m ? m[1].trim() : deck;
       }
 
-      fetch(DATA_URL).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      /* cache:'no-cache' — REVALIDATE, do not reuse. headchefs.json is served
+         with max-age=600 and is rebuilt every 30 minutes from the decks, so a
+         default fetch here can hand this page a winner ten minutes behind the
+         one the wall in the break room is showing from the same file.
+         assets/chefwall.js §refreshFrom uses exactly this option for exactly
+         this reason; the two readers of one file must not disagree.
+         'no-cache' (not 'no-store'): the conditional request still gets a 304
+         and costs nothing when the file has not moved. */
+      fetch(DATA_URL, { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (data) {
           var wall = document.getElementById('wall');
           if (!data.headchefs || !data.headchefs.length) {
@@ -136,7 +170,7 @@
             btn.className = 'frame' + (c.is_xfinity ? ' is-xfinity' : '');
             btn.setAttribute('aria-label', 'Head Chef of the Week — ' + c.name + ', ' + region);
             var media = (c.has_photo && c.photo_file)
-              ? '<img src="' + PHOTO_BASE + c.photo_file + '" alt="' + esc(c.name) + '" loading="lazy" />'
+              ? '<img src="' + photoSrc(c) + '" alt="' + esc(c.name) + '" loading="lazy" />'
               : '<div class="placeholder"><span>' + esc(initials(c.name)) + '</span><em>' + esc(region) + '</em></div>';
             btn.innerHTML = '<div class="photo">' + media + '</div>' +
               '<div class="plate"><b>' + esc(c.name) + '</b><i>' + esc(region) + '</i></div>';
@@ -153,7 +187,7 @@
         var deck = DECK_URLS[String(c.region_deck).toLowerCase()];
         var media = document.getElementById('lb-media');
         media.innerHTML = (c.has_photo && c.photo_file)
-          ? '<img src="' + PHOTO_BASE + c.photo_file + '" alt="' + esc(c.name) + '" />'
+          ? '<img src="' + photoSrc(c) + '" alt="' + esc(c.name) + '" />'
           : '<div class="placeholder" style="padding:2rem"><span style="width:80px;height:80px;font-size:1.4rem">' + esc(initials(c.name)) + '</span></div>';
         var stats = (c.stats || []).map(function (s) {
           return '<span><b>' + esc(s.value) + '</b><i>' + esc(s.label) + '</i></span>';

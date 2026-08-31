@@ -6,9 +6,53 @@
   <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
   <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
     <title>PortPro | Cook County Cooks</title>
+    <!-- ═══════════════════════════════════════════════════════════════════
+         TWO THIRD-PARTY DEPENDENCIES, NEITHER OF WHICH MAY HOLD THE PAGE
+         ═══════════════════════════════════════════════════════════════════
+         Measured 2026-08-31 with cdn.tailwindcss.com and fonts.googleapis.com
+         HUNG (connection accepted, never answered — what a store's guest wifi
+         and a captive portal do, as opposed to failing fast):
+
+             BOTH HUNG   t=1.5s / 6s / 15s   document.body MISSING, readyState
+                                             "loading". A permanently blank page.
+             FONT ONLY   t=1.5s              still blank — see the warning below
+             SCRIPT ONLY t=1.5s              the full guide, all 20+ carriers
+
+         A parser-blocking <script src> stops the parser dead, and an @import
+         inside a <style> is render- AND script-blocking for the same reason.
+         Neither of these is worth a blank page to a rep who is mid-port with a
+         customer's old carrier on speakerphone.
+
+         ONLY THE FONT IS FIXED HERE. It moved to a media="print" <link> that
+         flips to `all` on load: downloaded, never blocking. Same treatment as
+         index.html <head> and assets/theme.429a145a6a.css §00; read either for the note.
+
+         ⚠ THE TAILWIND SCRIPT IS STILL PARSER-BLOCKING AND STILL CARRIES THE
+         WHOLE HAZARD ON ITS OWN, and that is a known, deliberate gap, not an
+         oversight. Both `defer` and `async` were tried and BOTH RENDER THIS
+         PAGE COMPLETELY UNSTYLED (screenshotted against a local copy of the
+         CDN bundle): the Tailwind play CDN has to be parser-inserted to do its
+         initial scan, so taking it off the critical path with an attribute
+         takes the design with it. Shipping an unstyled porting guide to fix a
+         blank one is not a trade worth making.
+
+         THE REAL FIX, for whoever picks this up: stop using the play CDN in
+         production. Either compile the classes this page uses into a static
+         stylesheet, or vendor the bundle into assets/ so it is SAME-ORIGIN —
+         at which point it cannot hang on a third party at all, the
+         fingerprinter hashes it like everything else, and sw.js caches it for
+         offline. Until then, this page is one hung cdn.tailwindcss.com away
+         from a white screen, exactly as measured above.
+
+         (The carrier logos from cdn.simpleicons.org are <img>, so they were
+         never able to block anything, and are left alone.) -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+          media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"></noscript>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         
         body {
             font-family: 'Inter', sans-serif;

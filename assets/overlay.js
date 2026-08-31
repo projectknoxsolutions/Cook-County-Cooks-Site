@@ -32,13 +32,59 @@
 import { freshUrl } from './freshurl.js';
 export { freshUrl };
 
+/* ASK THE SERVER, DO NOT ASK THE IFRAME. preflight() is the only thing in this
+ * build that can tell a tool that loaded from a tool that 404'd — the iframe
+ * cannot, and §6 below carries the twelve-shape measurement that proves it.
+ * Its own file because screens.js needs it too and must not import this one. */
+import { preflight, preflightCopy } from './preflight.js';
+export { preflight };
+
 
 /* -----------------------------------------------------------------------------
  * 0. Constants & tiny helpers
  * -------------------------------------------------------------------------- */
 
-/** How long we wait for a framed tool before we assume it refused to frame. */
-const FRAME_TIMEOUT_MS = 6000;
+/**
+ * THE FRAME BUDGET, AND WHY IT IS THIRTY SECONDS AND NOT SIX.
+ *
+ * This was 6000, and 6000 was shorter than the tool takes to load. The 6th Gen
+ * quote sheet is 1,307,626 bytes of self-contained HTML (measured:
+ * content-length on the live URL) and it pulls html2canvas and jspdf from a CDN
+ * on top of that; an iframe's `load` waits for all of it. Document load,
+ * measured against the live URL under throttling:
+ *
+ *     LTE        12.9 s
+ *     fast 3G    13.3 s
+ *     slow 3G    26.1 s
+ *
+ * Not one of them is under six seconds. So the watchdog was firing on tools
+ * that were working — and firing it went through showFallback() -> blankStage-
+ * Frame(), which REPLACES the iframe element and throws the in-flight download
+ * away seconds from done. "Try again here" then started from zero.
+ *
+ * Two changes, and the second matters more than the first:
+ *   · 30 s, which clears the slowest measurement above with room for a cold
+ *     cellular fetch of the CDN scripts;
+ *   · the deadline is no longer a VERDICT. At SLOW_NOTE_MS the viewer says it
+ *     is a large document and OFFERS the new tab; at FRAME_TIMEOUT_MS it puts
+ *     the card up but KEEPS THE FRAME LOADING behind it, so a download that
+ *     lands at 34 s still gets shown. Nothing is discarded on a timer any more.
+ * The genuinely dead cases do not wait for either clock — preflight() answers
+ * them in a round trip.
+ */
+const FRAME_TIMEOUT_MS = 30000;
+
+/** When to stop looking like nothing is happening and say what is happening.
+ *  Six seconds was the old watchdog; it is now the point at which the viewer
+ *  admits the document is big and puts a new-tab link on screen. */
+const SLOW_NOTE_MS = 6000;
+
+/** A tool the rep opened before lunch is still the pre-lunch document: an
+ *  iframe is not reloaded by anything when a tab is merely backgrounded. After
+ *  this long out of sight, the viewer OFFERS a reload on return. It offers and
+ *  does not take: these tools are data entry (the quote sheets are half an
+ *  hour of a rep's typing) and silently reloading one would throw that away. */
+const STALE_AFTER_MS = 10 * 60 * 1000;
 
 /** Deep-link shape: #/tool/<slug> */
 const HASH_RE = /^#\/tool\/([A-Za-z0-9_-]+)\/?$/;
@@ -147,8 +193,15 @@ const state = {
   /** scroll lock bookkeeping */
   scrollY: 0,
   locked: false,
-  /** frame watchdog */
+  /** frame watchdog, and the "this is big" note that now precedes it */
   frameTimer: 0,
+  slowTimer: 0,
+  /** when the current tool was pointed at, so a return to the foreground can
+   *  tell "just opened" from "open since before lunch" — see onViewerVisible() */
+  openedAt: 0,
+  /** true once a return-to-foreground has offered a reload for this open, so
+   *  the offer is made once and does not nag on every tab switch */
+  staleOffered: false,
   /** optional access gate — see initOverlay({ canOpen, onRefused }) */
   canOpen: null,
   onRefused: null,
@@ -375,6 +428,26 @@ body.ccc-locked {
 }
 .ccc-ov__fb-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
 
+/* --- the note bar: progress and staleness, never a verdict -----------------
+   Sits ON the stage, over the skeleton or over a loaded frame, and says the one
+   true thing the viewer knows at that moment: "this is big and still coming",
+   or "you have had this open for a while". It carries its own affordances so
+   the offer is one tap away, and it NEVER covers the whole stage — a tool that
+   is working must stay usable underneath it. */
+.ccc-ov__note {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 10px; padding: 10px clamp(12px, 2vw, 20px);
+  background: var(--ccc-ov-panel, #101012);
+  border-top: 1px solid rgba(255,255,255,.10);
+  color: var(--ccc-ov-ink, #f2efe9);
+  font-size: clamp(12px, 1.2vw, 14px); line-height: 1.45;
+  box-shadow: 0 -18px 40px -24px rgba(0,0,0,.9);
+}
+.ccc-ov__note[hidden] { display: none; }
+.ccc-ov__note-text { max-width: 60ch; }
+.ccc-ov__btn--sm { padding: 6px 12px; font-size: 12px; min-height: 0; }
+
 @media (prefers-reduced-motion: reduce) {
   .ccc-ov, .ccc-ov__panel, .ccc-ov__frame { transition: none; }
   .ccc-ov__skel::after { animation: none; }
@@ -486,6 +559,11 @@ function buildUI() {
   const title = el('h2', { class: 'ccc-ov__title', id: 'ccc-ov-title' });
   const blurb = el('p', { class: 'ccc-ov__blurb', id: 'ccc-ov-blurb' });
 
+  /* THE ALWAYS-VISIBLE WAY OUT. This lives in the chrome bar, not in the
+     fallback card, so the rep never has to reach a failure state to get a real
+     link — which matters most on exactly the loads where the frame is being
+     slow or lying. Its href is (re)stamped by freshUrl on every open and on
+     every return to the foreground; see stampExits(). */
   const tabBtn = el('a', {
     class: 'ccc-ov__btn ccc-ov__btn--tab',
     target: '_blank',
@@ -536,9 +614,18 @@ function buildUI() {
     el('div', { class: 'ccc-ov__fb-actions' }, [fbOpen, fbRetry, fbBack])
   ]);
 
+  // --- the note bar (progress / staleness) ----------------------------------
+  const noteText = el('span', { class: 'ccc-ov__note-text' });
+  const noteTab = el('a', {
+    class: 'ccc-ov__btn ccc-ov__btn--sm',
+    target: '_blank', rel: 'noopener noreferrer', href: '#'
+  }, [el('span', { text: 'Open in a new tab' }), el('span', { 'aria-hidden': 'true', text: ' ↗' })]);
+  const noteAct = el('button', { class: 'ccc-ov__btn ccc-ov__btn--sm', type: 'button', text: 'Reload it' });
+  const note = el('div', { class: 'ccc-ov__note', hidden: true }, [noteText, noteTab, noteAct]);
+
   const status = el('p', { class: 'ccc-sr', role: 'status', 'aria-live': 'polite' });
 
-  const stage = el('div', { class: 'ccc-ov__stage' }, [frame, skel, fallback]);
+  const stage = el('div', { class: 'ccc-ov__stage' }, [frame, skel, fallback, note]);
   const panel = el('div', { class: 'ccc-ov__panel' }, [bar, stage, status]);
 
   const root = el('div', {
@@ -565,10 +652,16 @@ function buildUI() {
   });
   root.addEventListener('keydown', trapFocus);
 
+  noteAct.addEventListener('click', () => {
+    const tool = getTool(state.activeSlug);
+    if (tool) showFrame(tool, { force: true });
+  });
+
   state.ui = {
     root, panel, title, blurb, tabBtn, closeBtn,
     stage, frame, skel, fallback, status,
-    fbTitle, fbCopy, fbHost, fbOpen, fbRetry
+    fbTitle, fbCopy, fbHost, fbOpen, fbRetry,
+    note, noteText, noteTab, noteAct
   };
   return state.ui;
 }
@@ -631,10 +724,76 @@ function blankStageFrame(ui) {
 
 function clearFrameTimer() {
   if (state.frameTimer) { clearTimeout(state.frameTimer); state.frameTimer = 0; }
+  if (state.slowTimer) { clearTimeout(state.slowTimer); state.slowTimer = 0; }
+}
+
+/* -----------------------------------------------------------------------------
+ * 6a. The note bar — progress and staleness, never a verdict
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Put a line on the stage without taking the stage away.
+ * @param {string} text     what is true right now
+ * @param {object} tool     the tool, so the links can be stamped
+ * @param {object} [opts]   {tab:boolean, reload:boolean, reloadLabel:string}
+ */
+function showNote(text, tool, opts = {}) {
+  const ui = state.ui;
+  if (!ui) return;
+  const { tab = true, reload = false, reloadLabel = 'Reload it' } = opts;
+  ui.noteText.textContent = text;
+  ui.noteTab.hidden = !tab;
+  if (tab) {
+    ui.noteTab.href = freshUrl(tool.url);
+    ui.noteTab.setAttribute('aria-label', `Open ${tool.label} in a new browser tab`);
+  }
+  ui.noteAct.hidden = !reload;
+  if (reload) ui.noteAct.textContent = reloadLabel;
+  ui.note.hidden = false;
+}
+
+function hideNote() {
+  if (state.ui) state.ui.note.hidden = true;
 }
 
 /**
- * Did this frame actually get content, or did the server refuse us?
+ * Re-stamp every way OUT of the viewer with a fresh cache-buster.
+ *
+ * freshUrl() was only ever applied to the iframe's src. Three places handed out
+ * the RAW url — the chrome bar's "Open in new tab", the fallback card's primary
+ * button, and the external_only window.open — and GitHub Pages serves those
+ * with `cache-control: max-age=600`, so the new-tab path could open a copy up
+ * to ten minutes old. Findings 2 and 3 above make the new-tab path the COMMON
+ * path when a tool misbehaves, which is exactly when a rep is least able to
+ * afford last month's pricing. Every one of them is stamped now, and re-stamped
+ * on each open and on each return to the foreground: a stamp minted when the
+ * viewer opened is as stale as the page it was minted on.
+ */
+function stampExits(tool) {
+  const ui = state.ui;
+  if (!ui || !tool) return;
+  ui.tabBtn.href = freshUrl(tool.url);
+  ui.fbOpen.href = freshUrl(tool.url);
+  if (!ui.noteTab.hidden) ui.noteTab.href = freshUrl(tool.url);
+}
+
+/**
+ * A BACKSTOP, NOT THE ANSWER. Read preflight.js before you touch this.
+ *
+ * This used to be the whole of the failure detection, and it could not do the
+ * job: for a CROSS-ORIGIN url every one of eleven distinct failure shapes is
+ * byte-for-byte indistinguishable from success from in here (the table is in
+ * preflight.js). The `catch` below returning false — "it threw, so a real
+ * document from another origin is sitting there" — is true of a 404, a 500, a
+ * refused frame and a dead host as well, and that is how "<tool> loaded." came
+ * to be announced over a grey void.
+ *
+ * What it is still good for, and all it is now used for:
+ *   · SAME-ORIGIN tools (tools/porting-guide/, tools/printouts/). There the
+ *     document is readable and an empty body really does mean an empty body.
+ *   · the browser parking us on about:blank, which is a genuine refusal signal
+ *     and is not something preflight can see.
+ * Everything cross-origin is decided by preflight() in showFrame().
  *
  * READ THIS BEFORE CHANGING THE PROBE — the obvious version is wrong.
  *
@@ -665,7 +824,12 @@ function looksBlocked(frame, url) {
     if (!win) return true;                                   // no browsing context
     doc = win.document;                                      // throws if cross-origin
   } catch {
-    return false;                                            // threw => it really loaded
+    /* Cross-origin read refused. This means A document from another origin is
+       there — it does NOT mean the right one. Chromium commits an error page in
+       an opaque origin for a 404, a 500, an XFO refusal, a refused connection
+       and a DNS failure alike, and all five throw exactly here. So this is "not
+       provably empty", nothing more; preflight() is what has the status code. */
+    return false;
   }
 
   // Only reachable when the document is same-origin, i.e. the browser parked
@@ -676,41 +840,75 @@ function looksBlocked(frame, url) {
   return doc.body.childElementCount === 0 && !doc.body.textContent.trim();
 }
 
-/** Swap the stage over to the "can't frame this" card. */
-function showFallback(tool, reason) {
+/**
+ * Swap the stage over to the "can't show this here" card.
+ *
+ * @param {object} tool
+ * @param {string} reason  the rep-facing sentence
+ * @param {object} [opts]
+ * @param {boolean} [opts.keepFrame=false]
+ *        Leave the iframe in place and still loading. THIS IS THE DIFFERENCE
+ *        BETWEEN A SLOW TOOL AND A DEAD ONE. showFallback used to call
+ *        blankStageFrame() unconditionally, which replaces the <iframe>
+ *        element and so destroys an in-flight download — on a store's 3G that
+ *        was routinely a 1.3 MB document twenty seconds in. When the card is up
+ *        because we ran out of patience rather than because the server said no,
+ *        the download keeps going behind the card and onLoad() lifts the card
+ *        off it if it lands.
+ * @param {string} [opts.announce]  what role="status" should say
+ */
+function showFallback(tool, reason, opts = {}) {
+  const { keepFrame = false, announce = null } = opts;
   const ui = state.ui;
   clearFrameTimer();
-  ui.frame.classList.remove('is-shown');
-  blankStageFrame(ui);                  // unloads the refused document, no history entry
+  hideNote();
+  if (!keepFrame) {
+    ui.frame.classList.remove('is-shown');
+    blankStageFrame(ui);                // unloads the refused document, no history entry
+  }
   ui.skel.hidden = true;
   ui.fallback.hidden = false;
 
   ui.fbTitle.textContent = tool.label;
   ui.fbCopy.textContent = reason;
   ui.fbHost.textContent = hostLabel(tool.url);
-  ui.fbOpen.href = tool.url;
+  // STAMPED. This button is the recovery path and it was handing out the raw
+  // URL, which GitHub Pages serves with max-age=600 — see stampExits().
+  ui.fbOpen.href = freshUrl(tool.url);
   // Retrying a SharePoint/Smartsheet URL will never work — don't offer it.
   ui.fbRetry.hidden = isKnownUnframeable(tool.url);
-  ui.status.textContent = `${tool.label} can't be shown inside the site. Use "Open in a new tab".`;
+  ui.status.textContent = announce ||
+    `${tool.label} can't be shown inside the site. Use "Open in a new tab".`;
 
   // Put focus somewhere useful, but only if focus was inside the stage.
   if (!ui.panel.contains(document.activeElement)) ui.fbOpen.focus();
 }
 
-/** Point the iframe at a tool and start the watchdog. */
+/**
+ * Point the iframe at a tool, ask the server whether the tool is really there,
+ * and keep the rep informed about which of those two is taking the time.
+ *
+ * THE ORDER MATTERS. The frame is navigated FIRST and the preflight goes out
+ * beside it, not before it: a working tool must not pay a round trip for the
+ * benefit of a broken one. The preflight then either overrules the frame (the
+ * server said 404 / nothing answered — card, now, no six-second stare) or
+ * confirms it (2xx — the document exists, so anything slow after that is size
+ * or network, and is reported as progress rather than as failure).
+ */
 function showFrame(tool, { force = false } = {}) {
   const ui = state.ui;
   clearFrameTimer();
 
   ui.fallback.hidden = true;
+  hideNote();
   ui.frame.classList.remove('is-shown');
   ui.skel.hidden = false;
   ui.status.textContent = `Loading ${tool.label}…`;
 
-  // Known refusers: skip the six-second spinner entirely and go straight to
-  // the card. Nothing routes here today except SharePoint/Microsoft hosts, and
-  // `printouts` is external_only so it never even gets this far — but the list
-  // stays as cheap insurance for whatever gets added to tools.json next.
+  // Known refusers: skip the spinner entirely and go straight to the card.
+  // Nothing routes here today except SharePoint/Microsoft hosts — none of which
+  // are in data/tools.json — but the list stays as cheap insurance for whatever
+  // gets added next. It is NOT the failure detection; preflight() is.
   if (!force && isKnownUnframeable(tool.url)) {
     showFallback(
       tool,
@@ -719,12 +917,16 @@ function showFrame(tool, { force = false } = {}) {
     return;
   }
 
-  let settled = false;
+  let settled = false;          // a verdict has been reached and announced
+  let confirmed = null;         // preflight's verdict, once it lands
+  let preflightLength = -1;     // Content-Length the server reported, or -1
 
   const onLoad = () => {
-    // Give the blocked-frame error document a tick to settle before probing.
+    // Give a blocked-frame error document a tick to settle before probing.
     setTimeout(() => {
-      if (settled || frame !== ui.frame) return;   // superseded by a newer open
+      if (frame !== ui.frame) return;              // superseded by a newer open
+      // SAME-ORIGIN ONLY. See looksBlocked(): for a cross-origin URL this
+      // cannot tell success from any failure, so it is not consulted there.
       if (looksBlocked(frame, tool.url)) {
         settled = true;
         showFallback(tool, `${hostLabel(tool.url)} refused to load inside the site. Open it in a new tab instead.`);
@@ -732,11 +934,63 @@ function showFrame(tool, { force = false } = {}) {
       }
       settled = true;
       clearFrameTimer();
+      hideNote();
       ui.skel.hidden = true;
+      /* A late arrival lifts the card — which can pull the focused element out
+         from under the keyboard, because showFallback(keepFrame) may have put
+         focus on the card's "Open in a new tab". Hand it to the close button
+         before hiding, so Tab does not restart from the top of the page. */
+      if (!ui.fallback.hidden && ui.fallback.contains(document.activeElement)) {
+        try { ui.closeBtn.focus({ preventScroll: true }); } catch { ui.closeBtn.focus(); }
+      }
+      ui.fallback.hidden = true;
       frame.classList.add('is-shown');
-      ui.status.textContent = `${tool.label} loaded.`;
+      /* WHAT WE ARE ALLOWED TO CLAIM. "loaded" is only honest when the server
+         told us the document is there. With a 2xx in hand it is; without one
+         (an origin that sends no CORS header, a browser with no fetch) all we
+         know is that the frame fired `load`, and the old unconditional
+         "<tool> loaded." over a grey void is precisely the defect. */
+      ui.status.textContent = (confirmed === 'ok' || !isCrossOrigin(tool.url))
+        ? `${tool.label} loaded.`
+        : `${tool.label} is open in the viewer. If it looks empty, use "Open in a new tab".`;
+      maybeWarnRefused();
     }, 120);
   };
+
+  /**
+   * THE ONE BACKSTOP FOR A FRAME THAT WAS REFUSED, and an honest account of
+   * what it can and cannot do.
+   *
+   * X-Frame-Options and Content-Security-Policy: frame-ancestors are the two
+   * failures a preflight cannot see: neither header is on the CORS-safelisted
+   * response header list, so `res.headers.get('x-frame-options')` is null even
+   * with `access-control-allow-origin: *`, and the blocked frame itself is
+   * byte-for-byte indistinguishable from a working one (it fires `load`, and
+   * every property throws SecurityError — measured, see preflight.js).
+   *
+   * What IS readable is Content-Length. So: a document the server says is
+   * half a megabyte cannot have been fetched, parsed and fired `load` in a
+   * fifth of a second, because the frame's URL carries a fresh `_ccc` stamp and
+   * therefore CANNOT have come out of the HTTP cache. When that happens,
+   * nothing was downloaded — the browser committed an error page instead.
+   *
+   * Thresholds are deliberately far outside anything a real load reaches:
+   * 500 KB in 200 ms is 2.5 MB/s sustained, which no store connection does.
+   * And the consequence is a NOTE, never a card: if this is ever wrong the rep
+   * sees one extra line above a working tool, not a tool taken away from them.
+   * The a-priori NEVER_FRAMES list and the always-visible "Open in a new tab"
+   * in the chrome bar remain the real answer for a host that refuses framing.
+   */
+  function maybeWarnRefused() {
+    if (!isCrossOrigin(tool.url)) return;
+    if (confirmed !== 'ok') return;                 // no Content-Length to reason from
+    if (!(preflightLength >= 500 * 1024)) return;
+    if (Date.now() - startedAt > 200) return;
+    showNote(
+      `${hostLabel(tool.url)} may not allow this tool to be shown inside another site — if the panel below is blank, open it in a new tab.`,
+      tool
+    );
+  }
 
   const onError = () => {
     if (settled || frame !== ui.frame) return;
@@ -745,16 +999,83 @@ function showFrame(tool, { force = false } = {}) {
   };
 
   // A FRESH element per navigation — see navigateStageFrame() for why.
+  const startedAt = Date.now();
   const frame = navigateStageFrame(ui, tool.url);
   frame.title = `${tool.label} — live tool`;
   frame.onload = onLoad;
   frame.onerror = onError;
 
-  // Watchdog: some refusals are silent — no load, no error, just nothing.
+  /* ── the preflight ────────────────────────────────────────────────────────
+     One HEAD request, in parallel with the frame. It is the only thing in the
+     build that can tell a tool that loaded from a tool that 404'd; the twelve
+     measured shapes and the curl evidence for the CORS headers are all in
+     preflight.js. A verdict of `gone` or `unreachable` is the server's own
+     answer, so it earns an immediate card and the dead frame is discarded. */
+  preflight(tool.url).then((v) => {
+    if (frame !== ui.frame || state.activeSlug === null) return;   // superseded
+    confirmed = v.verdict;
+    preflightLength = v.length;
+    const host = hostLabel(tool.url);
+
+    /* A DEFINITE FAILURE OVERRULES A REVEALED FRAME, and it has to.
+       The failure shapes all fire `load` in 8-23 ms, which is faster than any
+       round trip, so by the time the status code comes back the frame has
+       usually already been faded in over a grey void. `settled` is not a veto
+       here: the server saying 404 outranks an iframe that cannot say anything.
+       (It cannot fight a WORKING tool: `gone` needs a real error status, or a
+       CORS refusal from a host verified to always send the header; and
+       `unreachable` needs BOTH probes refused at the network level.) */
+    if (v.verdict === 'gone' || v.verdict === 'unreachable' || v.verdict === 'empty') {
+      settled = true;
+      showFallback(tool, preflightCopy(v, tool.label, host), {
+        announce: `${tool.label} could not be opened: ${host} did not return the tool.`
+      });
+      return;
+    }
+
+    if (settled) {
+      // The frame is already up. A 2xx upgrades what we are allowed to say
+      // about it from "it is open" to "it loaded".
+      if (v.verdict === 'ok' && ui.fallback.hidden && frame.classList.contains('is-shown')) {
+        ui.status.textContent = `${tool.label} loaded.`;
+        maybeWarnRefused();     // the Content-Length only arrived now
+      }
+      return;
+    }
+
+    if (v.verdict === 'slow') {
+      /* Nothing answered inside preflight.js's PREFLIGHT_TIMEOUT_MS (8s), and
+         the frame has not fired either. That is a HANG, which is the one
+         failure the old six-second watchdog got right — so say so at eight
+         seconds rather than thirty, but KEEP the frame: a hung request can
+         still complete, and onLoad() lifts this card off it if it does. */
+      showFallback(tool, `${host} is not answering. It may be the network rather than the tool — if you are on store wifi, check you are past the sign-in page.`,
+        { keepFrame: true,
+          announce: `${tool.label} is not answering. Still trying; you can open it in a new tab.` });
+    }
+    // 'ok' and 'unknown': carry on. The frame is the one doing the work.
+  });
+
+  /* ── the two clocks ───────────────────────────────────────────────────────
+     Neither is a verdict any more. The first says the document is big; the
+     second says it has been long enough that you probably want the new tab.
+     Both leave the iframe alone, so nothing that is nearly finished is thrown
+     away — which is what firing the old 6s watchdog did. */
+  state.slowTimer = window.setTimeout(() => {
+    if (settled || frame !== ui.frame) return;
+    showNote(
+      `Still loading ${tool.label}. These sheets are large — the 6th Gen quote sheet alone is 1.3 MB, and on a store connection that is a real wait.`,
+      tool
+    );
+    ui.status.textContent = `${tool.label} is still loading. It is a large document.`;
+  }, SLOW_NOTE_MS);
+
   state.frameTimer = window.setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    showFallback(tool, `${tool.label} is taking too long to load in place — it may not allow embedding. Opening it in a new tab will work.`);
+    if (settled || frame !== ui.frame) return;
+    showFallback(tool,
+      `${tool.label} is still coming down after ${Math.round(FRAME_TIMEOUT_MS / 1000)} seconds. It is a large document on a slow connection — it is still loading behind this card and will appear if it lands. Opening it in a new tab is usually quicker.`,
+      { keepFrame: true,
+        announce: `${tool.label} is taking a long time. Still loading; you can open it in a new tab.` });
   }, FRAME_TIMEOUT_MS);
 }
 
@@ -839,7 +1160,9 @@ export function openTool(slug, opts = {}) {
   // because tools.json says so. Drop the flag when the PDFs come out of
   // SharePoint and this tool starts framing like any other, no code change.
   if (tool.external_only) {
-    const win = openNewTab(tool.url);
+    // STAMPED. This is one of the three places that handed out the raw URL
+    // against a max-age=600 cache — see stampExits().
+    const win = openNewTab(freshUrl(tool.url));
     if (win) return;                             // opened: leave the page alone
     // Popup blocked: fall through into the viewer showing the card, so the
     // user still gets a real link they can click.
@@ -852,8 +1175,13 @@ export function openTool(slug, opts = {}) {
   state.activeSlug = slug;
   ui.title.textContent = tool.label;
   ui.blurb.textContent = tool.blurb || '';
-  ui.tabBtn.href = tool.url;
+  // STAMPED, and re-stamped on every return to the foreground. This is the
+  // always-visible way out of the viewer; it must not hand out a ten-minute-old
+  // copy of a quote sheet. See stampExits().
+  ui.tabBtn.href = freshUrl(tool.url);
   ui.tabBtn.setAttribute('aria-label', `Open ${tool.label} in a new browser tab`);
+  state.openedAt = Date.now();
+  state.staleOffered = false;
 
   if (!swapping) {
     state.lastFocus = trigger || document.activeElement;
@@ -929,6 +1257,9 @@ function teardown() {
   ui.frame.onload = ui.frame.onerror = null;
   ui.frame.classList.remove('is-shown');
   ui.status.textContent = '';
+  ui.note.hidden = true;
+  state.openedAt = 0;
+  state.staleOffered = false;
 
   const finish = () => {
     if (state.activeSlug !== null) return;       // reopened mid-transition
@@ -955,6 +1286,67 @@ function restoreFocus(slug) {
     // preventScroll: the page has just been un-fixed; don't yank it again.
     try { target.focus({ preventScroll: true }); } catch { target.focus(); }
   }
+
+  /* AND A FLOOR UNDER IT. `isConnected` is not the same as "can take focus": a
+     trigger inside a panel that has closed behind the viewer is still in the
+     document and still display:none, so .focus() is a no-op and the browser
+     drops focus on <body> — where the next Tab starts the whole page again from
+     the skip link. Measured on the one route that does this: open a tool from
+     the C³ menu (which closes as it hands over) and close it again.
+     The C³ button is the honest landing place for that case — it is fixed, it
+     is always visible, and it is the control that opened the panel the trigger
+     was in. Only ever runs when focus is genuinely nowhere. */
+  if (target && document.activeElement === target) return;   // it took: done
+  /* Tested on the outcome, not on document.activeElement: setting `hidden` on
+     the viewer does not synchronously move activeElement off the close button
+     in Chromium, so "is focus on <body>?" reads false here and then true a
+     frame later. "Did the element I aimed at actually take it?" is answerable
+     now and cannot be raced. */
+  const fallback = document.getElementById('c3-button') || document.querySelector('.skip-link');
+  if (fallback && typeof fallback.focus === 'function') {
+    try { fallback.focus({ preventScroll: true }); } catch { fallback.focus(); }
+  }
+}
+
+/**
+ * The tab came back to the foreground (or was restored from the bfcache, which
+ * is what iOS does every time someone taps Back out of a tool).
+ *
+ * TWO THINGS HAPPEN, AND ONE THING DELIBERATELY DOES NOT.
+ *
+ *   1. Every way OUT of the viewer is re-stamped. A `_ccc` stamp minted when
+ *      the viewer opened is exactly as old as the page it was minted on, so
+ *      "Open in a new tab" on a viewer that has been up since this morning was
+ *      handing out this morning's stamp against a max-age=600 cache.
+ *
+ *   2. If the tool has been open longer than STALE_AFTER_MS, the note bar
+ *      OFFERS a reload. Once per open, not on every tab switch.
+ *
+ *   3. IT DOES NOT RELOAD THE FRAME BY ITSELF, and that is a decision, not an
+ *      omission. These tools are data entry: the 6th Gen quote sheet is a
+ *      customer's lines, devices and trade-ins typed in at the counter, and the
+ *      Daily Sales Report is a half-written entry. Reloading the iframe throws
+ *      all of it away with no undo, and a rep who lost a quote mid-conversation
+ *      is worse off than a rep looking at a document from before lunch — the
+ *      staleness that actually bites (pricing changing under a quote) is
+ *      carried by the freshUrl stamp on the links OUT, which is (1).
+ *      The offer is one tap; taking it is the rep's call, not ours.
+ */
+function onViewerVisible() {
+  if (state.activeSlug === null || !state.ui) return;
+  const tool = getTool(state.activeSlug);
+  if (!tool) return;
+  stampExits(tool);
+  if (state.staleOffered || !state.openedAt) return;
+  if (Date.now() - state.openedAt < STALE_AFTER_MS) return;
+  if (!state.ui.fallback.hidden) return;        // the card is already up
+  state.staleOffered = true;
+  const mins = Math.round((Date.now() - state.openedAt) / 60000);
+  showNote(
+    `You have had ${tool.label} open for about ${mins} minutes. Reload it if you need today's numbers — anything you have typed into it will be lost.`,
+    tool,
+    { reload: true, reloadLabel: 'Reload it' }
+  );
 }
 
 function onKeydown(ev) {
@@ -1078,13 +1470,35 @@ export function initOverlay(options = {}) {
     document.addEventListener('keydown', onDocumentKeydown);
     window.addEventListener('popstate', syncFromLocation);
     window.addEventListener('hashchange', syncFromLocation);
+    /* THE VIEWER HAD NO IDEA THE TAB HAD EVER GONE AWAY. This module carried no
+       visibilitychange and no pageshow handler at all, so a tool opened before
+       lunch was still, on the rep's return, the pre-lunch document with a
+       pre-lunch stamp on every link out of it. The pocket list has had this
+       since v5; the framed viewer never did. See onViewerVisible(). */
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') onViewerVisible();
+    });
+    window.addEventListener('pageshow', (ev) => { if (ev.persisted) onViewerVisible(); });
   }
+
+  /* ⚠ THE INLINE FALLBACK READ THE WRONG GLOBAL AND SO WAS NEVER A FALLBACK.
+     It looked for `window.CCC.tools` and `window.CCC_TOOLS`; index.html has
+     always written `window.__CCC_INLINE__ = { tools, freezer, headchefs }`, and
+     nothing in this build has ever set either of the other two. The branch was
+     dead, so a caller that did not pass `tools` fell straight through to a
+     fetch of data/tools.json — which is the one thing the inline payload exists
+     to avoid (fetch() against a file:// URL is refused outright, and Jeff
+     reviews builds off a USB stick). The real global is read first now; the
+     two old spellings are kept behind it in case something out there sets one,
+     and the fetch stays as the last resort. */
+  const inlineTools =
+    (window.__CCC_INLINE__ && window.__CCC_INLINE__.tools) ||
+    (window.CCC && window.CCC.tools) || window.CCC_TOOLS || null;
 
   const load = tools
     ? Promise.resolve(tools)
-    : Promise.resolve(
-        (window.CCC && window.CCC.tools) || window.CCC_TOOLS || null
-      ).then((inline) => inline || fetch(toolsUrl, { credentials: 'same-origin' })
+    : Promise.resolve(inlineTools)
+      .then((inline) => inline || fetch(toolsUrl, { credentials: 'same-origin' })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))));
 
   const ready = load

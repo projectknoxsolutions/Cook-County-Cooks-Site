@@ -46,22 +46,22 @@
  * Plain ES module. No build step, no npm, no framework, no external JS.
  * ========================================================================== */
 
-import { initEngine, scrollToRoom, onRoomChange } from './engine.e8325407a0.js';
-import { initOverlay, openTool } from './overlay.d791a31119.js';
-import { mountRoomScreens } from './screens.d3ac568901.js';
-import { initChefWall } from './chefwall.15419bd9fc.js';
-import { initLabels } from './labels.77d80a465f.js';
+import { initEngine, scrollToRoom, onRoomChange } from './engine.ffe7815af8.js';
+import { initOverlay, openTool } from './overlay.7e3a74ff05.js';
+import { mountRoomScreens } from './screens.d3f0172b89.js';
+import { initChefWall } from './chefwall.2e2da0a5e6.js';
+import { initLabels } from './labels.f1537c4fa4.js';
 import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
-import { initFreezer } from './freezer.35040b26ef.js';
+import { initFreezer } from './freezer.39bd7199fd.js';
 /* The lock is shared with the pocket list — see coldgate.js. It owns the
    sealed envelope, the session restore, the keypad and every path to
    coldstore.js's crypto; this file owns the door, the beat and the chips. */
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.c412bcc37a.js';
+} from './coldgate.7bf94d863d.js';
 import { el, fill, $ } from './dom.a199da796c.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.16e77c300d.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.0d391dfcf1.js';
 
 
 /* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the
@@ -404,11 +404,22 @@ function revealFreezerInterior() {
 function buildPlate(room, index) {
   const eager = index === 0;              // the hero, and only the hero
   const art = plateFor(room);
+  /* ⚠ srcset AND sizes BEFORE src, AND THAT ORDER IS THE POINT.
+     dom.js's el() walks Object.entries(props) — insertion order — so this
+     literal IS the order the attributes land on the element. An <img> that is
+     given `src` first has already chosen its candidate; adding `srcset`/`sizes`
+     afterwards makes it choose again, and a browser that has begun the first
+     fetch pays for both. Chromium happens to coalesce the two selections here
+     because el() sets every attribute synchronously before the node is
+     connected (measured 2026-08-31: one request per plate at 1440x900, 1180x820
+     and 393x852, with realistic cache headers) — but that is an implementation
+     detail of one engine, not a guarantee, and freezer.js §"the art probe"
+     already carries this rule in prose. Written the safe way round in both. */
   return el('img', {
     class: 'plate',
-    src: art.src,
     srcset: art.srcset,
     sizes: PLATE_SIZES,
+    src: art.src,
     width: String(PLATE_W),
     height: String(PLATE_H),
     alt: '',                              // decorative: the rail names the room
@@ -1038,8 +1049,11 @@ function buildC3Menu(data) {
 
   const list = el('div', { class: 'c3-list' });
   const menu = el('div', {
-    id: 'c3-menu', role: 'dialog', 'aria-modal': 'false',
-    'aria-labelledby': 'c3-menu-title'
+    id: 'c3-menu', role: 'dialog', 'aria-modal': 'true',
+    'aria-labelledby': 'c3-menu-title',
+    // focusable-but-not-tabbable, so the trap has somewhere to put focus if the
+    // list is ever empty — same shape as chefwall.js's .cw-dialog
+    tabindex: '-1'
   }, [
     el('div', { id: 'c3-menu-head' }, [
       el('h2', { class: 't-sub', id: 'c3-menu-title', text: 'All repositories' }),
@@ -1089,16 +1103,93 @@ function buildC3Menu(data) {
   renderList();
   onFreezerUnlock(renderList);
 
-  /* ── open / close ─────────────────────────────────────────────────────── */
+  /* ── open / close ─────────────────────────────────────────────────────────
+     THE PANEL IS A MODAL DIALOG, AND NOW BEHAVES LIKE ONE.
+
+     THE DEFECT, MEASURED. It said `role="dialog"`, moved focus in, restored it
+     on Escape — and then set no trap and left #kitchen live. Opening it and
+     pressing Tab forty times, focus left the panel on 16 of the 40 presses and
+     landed on the skip link, the brand, the seven ticket links and then straight
+     into the rooms behind the glass. This list is the one flat, reliable index
+     of all 37 tools — the fallback for exactly the visitor who cannot work the
+     hotspots — so falling out of it is the worst place on the page to fall out
+     of.
+
+     WHICH OF THE TWO HONEST ANSWERS THIS IS. A dialog that is not modal has to
+     drop role="dialog" and close on focus-out; a dialog that is modal has to
+     trap and inert. Modal is the right one here: the panel is up to 78svh of
+     backdrop-blurred glass, everything behind it is a duplicate of something
+     inside it, and Escape-closes-and-restores was already the behaviour. So the
+     ARIA now matches: aria-modal="true", the background inert, Tab cycling.
+     chefwall.js's chef modal is the model — same FOCUSABLE list, same
+     skip-already-inert bookkeeping, same restore. Measured after: 0 of 40.
+
+     #c3-button IS DELIBERATELY LEFT OUT OF THE INERT SET. It is this dialog's
+     only close affordance — there is no ✕ in the panel — and an inert button
+     ignores pointer events, so inerting it would leave a touch user who cannot
+     press Escape with nothing to tap but the background. It is outside the tab
+     cycle and aria-modal already hides it from assistive tech; what it keeps is
+     the tap that closes the thing. Click-away still works too: Chromium
+     re-targets a click on inert content to the nearest non-inert ancestor, so
+     the document listener below still sees it (verified — closing by clicking
+     the plate behind the panel works with the background inert).             */
+
+  const FOCUSABLE = [
+    'a[href]', 'button:not([disabled])', 'input:not([disabled])',
+    'select:not([disabled])', 'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
+
+  const supportsInert = typeof HTMLElement !== 'undefined' && 'inert' in HTMLElement.prototype;
+  let inerted = [];
+  let lastFocus = null;
   let open = false;
+
+  /** Everything but this panel and its own button. Anything already inert (the
+   *  tool viewer, a chef modal) is left alone and NOT un-inerted on close. */
+  function setOutsideInert(on) {
+    if (!supportsInert) return;
+    if (on) {
+      inerted = [];
+      for (const child of Array.from(document.body.children)) {
+        if (child === menu || child === button || child.inert) continue;
+        child.inert = true;
+        inerted.push(child);
+      }
+    } else {
+      inerted.forEach((n) => { n.inert = false; });
+      inerted = [];
+    }
+  }
+
+  const focusables = () => Array.from(menu.querySelectorAll(FOCUSABLE))
+    .filter((n) => n.offsetParent !== null || n === document.activeElement);
+
   const setOpen = (next) => {
+    if (next === open) return;
     open = next;
     button.setAttribute('aria-expanded', String(open));
     menu.classList.toggle('is-open', open);
+
     if (open) {
+      lastFocus = document.activeElement;
+      setOutsideInert(true);
       const first = menu.querySelector('.c3-item');
-      if (first) first.focus();
+      (first || menu).focus();
+      return;
     }
+
+    setOutsideInert(false);
+    // Only take focus back if the panel still has it. A click on a tool row has
+    // already handed the page to overlay.js by the time this runs, and yanking
+    // focus out from under the viewer would undo its own focus management.
+    if (lastFocus && lastFocus.isConnected && !menu.contains(document.activeElement)) lastFocus = null;
+    if (lastFocus && lastFocus.isConnected) {
+      try { lastFocus.focus({ preventScroll: true }); } catch (_) { lastFocus.focus(); }
+    } else if (menu.contains(document.activeElement)) {
+      button.focus();
+    }
+    lastFocus = null;
   };
 
   button.addEventListener('click', () => setOpen(!open));
@@ -1110,9 +1201,33 @@ function buildC3Menu(data) {
     setOpen(false);
   });
   document.addEventListener('keydown', (ev) => {
-    if (!open || ev.key !== 'Escape') return;
-    setOpen(false);
-    button.focus();
+    if (!open) return;
+
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      setOpen(false);
+      button.focus();
+      return;
+    }
+
+    if (ev.key !== 'Tab') return;
+
+    // THE TRAP. Belt and braces on top of the inert background: inert is not in
+    // every engine this site meets (older iPad Safari), and it is the trap, not
+    // inert, that makes the cycle wrap from the last of 37 rows back to the
+    // first instead of leaving through the top of the document.
+    const items = focusables();
+    if (!items.length) { ev.preventDefault(); menu.focus(); return; }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (ev.shiftKey) {
+      if (active === first || active === menu || !menu.contains(active)) {
+        ev.preventDefault(); last.focus();
+      }
+    } else if (active === last || !menu.contains(active)) {
+      ev.preventDefault(); first.focus();
+    }
   });
   // Choosing a tool closes the menu; the overlay takes over from here.
   menu.addEventListener('click', (ev) => {

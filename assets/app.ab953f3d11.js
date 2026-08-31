@@ -91,9 +91,9 @@ function decide() {
  * note in the header. */
 const load = {
   pocket: () =>
-    import('./pocket.js'),
+    import('./pocket.3a1dcde290.js'),
   cinema: () =>
-    import('./cinema.js')
+    import('./cinema.ff74414c9f.js')
 };
 
 /**
@@ -154,8 +154,8 @@ function normaliseToolParam() {
  *   index.html is served by GitHub Pages with `cache-control: max-age=600`. For
  *   up to ten minutes after a push, a browser holding the OLD index.html asks
  *   for the OLD hashed module names — which the new deploy has already deleted.
- *   Confirmed live on 2026-08-31: assets/app.2d8d16ff8f.js and
- *   assets/theme.f4c9abadeb.css were both 404 on cookcountycooks.com while the
+ *   Confirmed live on 2026-08-31: assets/app.js and
+ *   assets/theme.429a145a6a.css were both 404 on cookcountycooks.com while the
  *   HTML naming them was still inside its own cache lifetime.
  *
  *   What that produced: `await load.cinema()` rejected, nothing caught it, and

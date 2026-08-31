@@ -171,12 +171,24 @@ jobs:
           echo "::error::could not push headchefs after 3 attempts"
           exit 1
 
+      # `if: always()` so a FAILED pull still gets a summary — and says so at the
+      # top. The whole point of the guards in build/pull-headchefs.mjs is that a
+      # broken deck read must not look healthy; a summary that prints last run's
+      # table under a red X, with an empty "Committed:", is the same trap one
+      # screen further on. The table below is the state ON DISK, which after a
+      # failed pull is the LAST GOOD state, not this run's — say that too.
       - name: Summary
         if: always()
         run: |
           {
             echo "### Head chef pull"
             echo ""
+            if [ "${{ steps.pull.outcome }}" != "success" ]; then
+              echo "> **THE DECKS WERE NOT RE-READ** — the pull step ended \`${{ steps.pull.outcome }}\`."
+              echo "> The table below is the state already on disk (the last good read), **not** this run's."
+              echo "> Read the \`Pull the head chefs\` step for the reason; the wall is frozen until it is fixed."
+              echo ""
+            fi
             if [ -f headchefs/headchefs.json ]; then
               node -e '
                 const d = require("./headchefs/headchefs.json");
@@ -196,5 +208,5 @@ jobs:
               echo "_headchefs.json is missing._"
             fi
             echo ""
-            echo "Committed: \`${{ steps.diff.outputs.changed }}\`"
+            echo "Pull: \`${{ steps.pull.outcome }}\` · Committed: \`${{ steps.diff.outputs.changed || 'n/a' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

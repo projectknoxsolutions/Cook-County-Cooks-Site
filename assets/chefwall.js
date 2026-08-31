@@ -463,6 +463,46 @@ const CSS = `
 }
 .cw-frame:focus-visible .cw-nametag{ opacity:1; transform:translate3d(-50%,0,0); }
 
+/* ---- held entries -------------------------------------------------------
+   An entry the pipeline is HOLDING (the district's slide was absent on this
+   run, so the last chef it saw stayed in the frame) looked identical to one
+   confirmed an hour ago. It is not identical, and past a week it is news.
+
+   The treatment is a date, not an alarm: a small engraved brass tab on the
+   frame, permanently visible — unlike .cw-nametag, which is a hover reveal —
+   because the person who needs it is reading the wall from the doorway. Past
+   the pipeline's own stale_warn_days the tab goes amber and the print is
+   desaturated, which is as far as this should ever go: the chef in the frame
+   is still a real winner and the write-up under them is still true.
+   Contrast: #f0d9a4 on rgb(var(--cw-shade)/.8) is 11.4:1; the amber
+   #e8b45a on the same ground is 8.2:1. */
+.cw-heldtag{
+  position:absolute; left:6%; bottom:6%;
+  padding:.22em .5em;
+  font-family:var(--cw-sans);
+  font-size:clamp(9px, .62vw, 12px);
+  font-weight:600; letter-spacing:.12em; text-transform:uppercase;
+  white-space:nowrap; pointer-events:none;
+  color:var(--cw-accent-lit);
+  background:rgb(var(--cw-shade) / .8);
+  border-radius:var(--cw-r-xs);
+  box-shadow:inset 0 0 0 1px var(--cw-line);
+}
+.cw-frame.is-stale .cw-heldtag,
+.cw-card.is-stale .cw-heldtag{ color:#e8b45a; }
+.cw-frame.is-stale .cw-photo img,
+.cw-card.is-stale .cw-photo img{ filter:saturate(.6); }
+
+/* The modal's own line, under the store/role. */
+.cw-held{
+  margin:.45rem 0 0;
+  font-family:var(--cw-sans);
+  font-size:.78rem; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase;
+  color:var(--cw-fg-muted);
+}
+.cw-held.is-stale{ color:#e8b45a; }
+
 /* =========================================================================
    A2. THE DISTRICT PLAQUE — engraved, screwed to the wall under the frame
    -------------------------------------------------------------------------
@@ -1288,7 +1328,11 @@ function accessibleName(chef) {
   // Do not say "Xfinity Head Chef of the Week, Xfinity Head Chef of the Week".
   const lead = district && district.toLowerCase() !== award.toLowerCase()
     ? `${district}, ${award}` : award;
-  return place ? `${lead}: ${who}, ${place}` : `${lead}: ${who}`;
+  const base = place ? `${lead}: ${who}, ${place}` : `${lead}: ${who}`;
+  // A held entry says so to a screen reader too. The tag on the frame is
+  // aria-hidden precisely so this is the one place it is announced.
+  const held = heldInfo(chef);
+  return held ? `${base}. ${held.line}.` : base;
 }
 
 /**
@@ -1305,13 +1349,53 @@ function hasChef(chef) {
 /**
  * Resolve a chef's photo URL against the data root.
  * `photo_file` in headchefs.json is relative to the headchefs/ folder.
+ *
+ * ⚠ THE `?v=` IS NOT DECORATION. IT IS THE RIGHT NAME OVER THE WRONG FACE.
+ *
+ * headchefs/photos/<district>.webp is a STABLE FILENAME that is OVERWRITTEN in
+ * place every time a district's winner changes — build/pull-headchefs.mjs owns
+ * that pipeline and the fingerprinter deliberately leaves those files alone
+ * (see its "NOT fingerprinted, on purpose" note). Live cache headers,
+ * 2026-08-31:
+ *
+ *     headchefs/photos/*.webp   cache-control: max-age=14400   (4 hours)
+ *     headchefs/headchefs.json  cache-control: max-age=600     (10 minutes)
+ *
+ * and initChefWall's refreshFrom fetch asks for the JSON with cache:'no-cache',
+ * so it revalidates immediately. The name, the store, the stats and the
+ * write-up therefore change the moment the deck does, while the PHOTOGRAPH can
+ * be up to four hours behind: last week's winner's face captioned with this
+ * week's winner's name, on the break-room wall, for half a shift.
+ *
+ * The fix costs nothing because the data already carries it: every entry has
+ * `photo_sha`, the SHA-256 of the encoded WebP. Same photo, same URL, still
+ * cached for four hours; new photo, new URL, fetched at once. Where the sha is
+ * missing (an older run — the Xfinity entry has `photo_sha: null` today) fall
+ * back to last_changed, which moves whenever the entry does. If neither is
+ * there the URL is bare, exactly as it was, and nothing is worse than before.
  */
+function photoStamp(chef) {
+  if (!chef) return '';
+  const sha = chef.photo_sha;
+  if (typeof sha === 'string' && sha.length >= 8) return sha.slice(0, 12);
+  const when = chef.last_changed || chef.last_confirmed;
+  if (when) {
+    const t = Date.parse(when);
+    if (Number.isFinite(t)) return String(Math.floor(t / 1000));
+  }
+  return '';
+}
+
 function photoUrl(chef, base) {
   const f = chef && chef.photo_file;
   if (!f) return null;
-  if (/^([a-z]+:)?\/\//i.test(f) || f.charAt(0) === '/' || f.startsWith('data:')) return f;
+  const stamp = photoStamp(chef);
+  const q = stamp ? (f.indexOf('?') === -1 ? `?v=${stamp}` : `&v=${stamp}`) : '';
+  if (/^([a-z]+:)?\/\//i.test(f) || f.charAt(0) === '/' || f.startsWith('data:')) {
+    return f.startsWith('data:') ? f : f + q;
+  }
   const b = base == null ? '' : String(base);
-  return b && !b.endsWith('/') ? `${b}/${f}` : `${b}${f}`;
+  return (b && !b.endsWith('/') ? `${b}/${f}` : `${b}${f}`) + q;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1441,6 +1525,79 @@ function buildPlate(doc, chef) {
 }
 
 /** The circular Xfinity badge, or null. */
+/* ---------------------------------------------------------------------------
+ * 4b. HELD ENTRIES — saying so
+ *
+ * THE PIPELINE ALREADY KNOWS, AND THE WALL WAS THROWING IT AWAY.
+ * build/pull-headchefs.mjs polls the Win-The-Weekend decks every 30 minutes and
+ * HOLDS the last chef it saw for a district that is temporarily absent, because
+ * blanking a frame on one bad read would make the wall flicker. Its own policy
+ * block in headchefs.json says so, and gives the two clocks it keeps:
+ *
+ *     stale_warn_days: 8      past this the entry is flagged `stale: true`
+ *     stale_drop_days: 14     past this the chef is dropped for an empty mat
+ *
+ * Every entry therefore carries `last_confirmed`, `days_since_confirmed` and
+ * `stale` — and NOTHING in this file or in wallprint.js read any of the three
+ * (`grep -c stale assets/chefwall.js` found one hit, inside a comment). A chef
+ * confirmed a fortnight ago was rendered pixel-for-pixel like the four that
+ * were confirmed on this run: same frame, same plaque, same "Head Chef of the
+ * Week". The whole point of the hold is that it is a HOLD.
+ *
+ * ⚠ THE AGE IS COMPUTED FROM `last_confirmed`, NOT READ FROM
+ *   `days_since_confirmed`. That field is baked at generation time, so a
+ *   headchefs.json that is itself two days old reports two days too few — and
+ *   this is a staleness cue, which is precisely the thing that must not be
+ *   stale. (Today: the Xfinity entry's baked value is 2.4, its last_confirmed
+ *   is 2026-08-26T04:16Z, and the true age is 5.2 days.) The baked value is
+ *   only a fallback for an entry with no timestamp at all.
+ *
+ * THE THRESHOLD IS SEVEN DAYS, one below the pipeline's own warn line, because
+ * these are weekly awards: at seven days the entry has missed the Friday
+ * posting it should have been replaced at, and that is the first moment the
+ * date is news rather than noise.
+ * ------------------------------------------------------------------------ */
+
+const HELD_SHOW_DAYS = 7;
+
+/** Days since this entry was last confirmed against a deck, or null. */
+function heldDays(chef) {
+  const iso = chef && (chef.last_confirmed || chef.last_changed);
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isFinite(t)) return Math.max(0, (Date.now() - t) / 86400000);
+  const baked = chef && Number(chef.days_since_confirmed);
+  return Number.isFinite(baked) ? baked : null;
+}
+
+/** "Aug 26" — the shape the plaque and the modal both use. */
+function heldDate(chef) {
+  const iso = chef && (chef.last_confirmed || chef.last_changed);
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return '';
+  try {
+    return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch (_) { return ''; }
+}
+
+/**
+ * Should this entry say when it was confirmed, and how loudly?
+ * @returns {null | {days:number, stale:boolean, date:string, line:string}}
+ */
+function heldInfo(chef) {
+  if (!hasChef(chef)) return null;
+  const days = heldDays(chef);
+  const stale = chef && chef.stale === true;
+  // `stale` from the pipeline is honoured even when the clock disagrees: it is
+  // the generator's own verdict and it may know something this page does not.
+  if (!stale && (days === null || days < HELD_SHOW_DAYS)) return null;
+  const date = heldDate(chef);
+  const whole = days === null ? null : Math.round(days);
+  const line = date
+    ? (stale ? `Confirmed ${date} — no longer on the deck` : `Confirmed ${date}`)
+    : (whole !== null ? `Held ${whole} days` : 'Held from an earlier run');
+  return { days: days === null ? 0 : days, stale: !!stale, date, line };
+}
+
 function buildBadge(doc, chef) {
   if (!chef.is_xfinity) return null;
   const b = el(doc, 'span', 'cw-badge');
@@ -1652,6 +1809,15 @@ function createModal(win, uid, photoBase) {
     idBox.appendChild(eyebrow);
     idBox.appendChild(h2);
     if (role.textContent) idBox.appendChild(role);
+
+    /* The held line. Not an error and not styled like one: this IS last week's
+       winner and the write-up below is still theirs. It is a date, in words,
+       so nobody has to wonder whether the wall has moved on. */
+    const held = heldInfo(chef);
+    if (held) {
+      const p = el(doc, 'p', 'cw-held' + (held.stale ? ' is-stale' : ''), held.line);
+      idBox.appendChild(p);
+    }
 
     head.appendChild(portrait);
     head.appendChild(idBox);
@@ -2024,6 +2190,17 @@ export function initChefWall(opts) {
     nametag.setAttribute('aria-hidden', 'true');
     lift.appendChild(nametag);
 
+    // A held entry is marked ON THE WALL, not only inside the modal — the wall
+    // is what a district manager reads from the doorway.
+    const heldW = heldInfo(chef);
+    if (heldW) {
+      btn.classList.add('is-held');
+      if (heldW.stale) btn.classList.add('is-stale');
+      const tag = el(doc, 'span', 'cw-heldtag', heldW.date || 'held');
+      tag.setAttribute('aria-hidden', 'true');   // the aria-label carries it
+      lift.appendChild(tag);
+    }
+
     btn.appendChild(cast);
     btn.appendChild(lift);
 
@@ -2051,6 +2228,15 @@ export function initChefWall(opts) {
     art.appendChild(buildSurface(doc, chef, photoBase, false));
     const badge = buildBadge(doc, chef);
     if (badge) { badge.setAttribute('aria-hidden', 'true'); art.appendChild(badge); }
+
+    const heldC = heldInfo(chef);
+    if (heldC) {
+      btn.classList.add('is-held');
+      if (heldC.stale) btn.classList.add('is-stale');
+      const tag = el(doc, 'span', 'cw-heldtag', heldC.date || 'held');
+      tag.setAttribute('aria-hidden', 'true');
+      art.appendChild(tag);
+    }
 
     const dist = el(doc, 'span', 'cw-carddistrict', districtShort(chef));
     const name = el(doc, 'span', 'cw-cardname', squish(chef.name));
@@ -2167,7 +2353,7 @@ export function initChefWall(opts) {
   if (o.refreshFrom && typeof win.fetch === 'function') {
     const signature = (list) => (Array.isArray(list) ? list : []).map((c) => [
       districtShort(c), squish(c && c.name), squish(c && c.store_role),
-      squish(c && c.writeup), (c && c.photo_file) || '', !!(c && c.vacant)
+      squish(c && c.writeup), (c && c.photo_file) || '', photoStamp(c), !!(c && c.vacant)
     ].join('\u0001')).join('\u0002');
 
     win.fetch(o.refreshFrom, { cache: 'no-cache', credentials: 'omit' })

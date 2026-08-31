@@ -46,22 +46,22 @@
  * Plain ES module. No build step, no npm, no framework, no external JS.
  * ========================================================================== */
 
-import { initEngine, scrollToRoom, onRoomChange } from './engine.js';
-import { initOverlay, openTool } from './overlay.js';
-import { mountRoomScreens } from './screens.js';
-import { initChefWall } from './chefwall.js';
-import { initLabels } from './labels.js';
-import { buildWallPrint, revealWallPrints } from './wallprint.js';
-import { initFreezer } from './freezer.js';
+import { initEngine, scrollToRoom, onRoomChange } from './engine.ffe7815af8.js';
+import { initOverlay, openTool } from './overlay.7e3a74ff05.js';
+import { mountRoomScreens } from './screens.d3f0172b89.js';
+import { initChefWall } from './chefwall.2e2da0a5e6.js';
+import { initLabels } from './labels.77d80a465f.js';
+import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
+import { initFreezer } from './freezer.39bd7199fd.js';
 /* The lock is shared with the pocket list — see coldgate.js. It owns the
    sealed envelope, the session restore, the keypad and every path to
    coldstore.js's crypto; this file owns the door, the beat and the chips. */
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.js';
-import { el, fill, $ } from './dom.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.js';
+} from './coldgate.6142738fae.js';
+import { el, fill, $ } from './dom.a199da796c.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.16e77c300d.js';
 
 
 /* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the
@@ -145,7 +145,7 @@ async function loadData() {
 
   // Fallback for a served deployment where the inline block was removed.
   const [tools, headchefs] = await Promise.all([
-    fetch('data/tools.json').then((r) => r.json()),
+    fetch('data/tools.ac8a24642f.json').then((r) => r.json()),
     fetch('headchefs/headchefs.json').then((r) => r.json())
   ]);
   return { tools, headchefs };
@@ -354,15 +354,15 @@ const PLATE_SIZES =
  * shows `freezer-door` instead — see plateFor().)
  */
 const PLATES = {
-  hero:         { src: 'plates/hero.webp',         srcset: 'plates/hero@1400.webp 1400w, plates/hero@1800.webp 1800w, plates/hero.webp 2400w' },
-  pass:         { src: 'plates/pass.webp',         srcset: 'plates/pass@1400.webp 1400w, plates/pass@1800.webp 1800w, plates/pass.webp 2400w' },
-  host:         { src: 'plates/host.webp',         srcset: 'plates/host@1400.webp 1400w, plates/host@1800.webp 1800w, plates/host.webp 2400w' },
-  dining:       { src: 'plates/dining.webp',       srcset: 'plates/dining@1400.webp 1400w, plates/dining@1800.webp 1800w, plates/dining.webp 2400w' },
-  prep:         { src: 'plates/prep.webp',         srcset: 'plates/prep@1400.webp 1400w, plates/prep@1800.webp 1800w, plates/prep.webp 2400w' },
-  office:       { src: 'plates/office.webp',       srcset: 'plates/office@1400.webp 1400w, plates/office@1800.webp 1800w, plates/office.webp 2400w' },
-  breakroom:    { src: 'plates/breakroom.webp',    srcset: 'plates/breakroom@1400.webp 1400w, plates/breakroom@1800.webp 1800w, plates/breakroom.webp 2400w' },
-  freezer:      { src: 'plates/freezer.webp',      srcset: 'plates/freezer@1400.webp 1400w, plates/freezer@1800.webp 1800w, plates/freezer.webp 2400w' },
-  'freezer-door': { src: 'plates/freezer-door.webp', srcset: 'plates/freezer-door@1400.webp 1400w, plates/freezer-door@1800.webp 1800w, plates/freezer-door.webp 2400w' }
+  hero:         { src: 'plates/hero.197e175d93.webp',         srcset: 'plates/hero@1400.24df9e8171.webp 1400w, plates/hero@1800.e298cedad8.webp 1800w, plates/hero.197e175d93.webp 2400w' },
+  pass:         { src: 'plates/pass.96df41e5e3.webp',         srcset: 'plates/pass@1400.19e2f93c88.webp 1400w, plates/pass@1800.67a9fef62f.webp 1800w, plates/pass.96df41e5e3.webp 2400w' },
+  host:         { src: 'plates/host.77ad3dcb2d.webp',         srcset: 'plates/host@1400.9f4f7fceb0.webp 1400w, plates/host@1800.c1093ca544.webp 1800w, plates/host.77ad3dcb2d.webp 2400w' },
+  dining:       { src: 'plates/dining.e833a21953.webp',       srcset: 'plates/dining@1400.940873ea4c.webp 1400w, plates/dining@1800.f2e000e730.webp 1800w, plates/dining.e833a21953.webp 2400w' },
+  prep:         { src: 'plates/prep.e1ff2fd61f.webp',         srcset: 'plates/prep@1400.71a1c3421a.webp 1400w, plates/prep@1800.914c0511c4.webp 1800w, plates/prep.e1ff2fd61f.webp 2400w' },
+  office:       { src: 'plates/office.4e4c6d7172.webp',       srcset: 'plates/office@1400.ac0e7111c5.webp 1400w, plates/office@1800.7c45276712.webp 1800w, plates/office.4e4c6d7172.webp 2400w' },
+  breakroom:    { src: 'plates/breakroom.57d227f685.webp',    srcset: 'plates/breakroom@1400.ef37dc6807.webp 1400w, plates/breakroom@1800.b68af49648.webp 1800w, plates/breakroom.57d227f685.webp 2400w' },
+  freezer:      { src: 'plates/freezer.01697f04b3.webp',      srcset: 'plates/freezer@1400.bc3f759e61.webp 1400w, plates/freezer@1800.950d506378.webp 1800w, plates/freezer.01697f04b3.webp 2400w' },
+  'freezer-door': { src: 'plates/freezer-door.833492497b.webp', srcset: 'plates/freezer-door@1400.2c18d7f0b7.webp 1400w, plates/freezer-door@1800.5d976c9501.webp 1800w, plates/freezer-door.833492497b.webp 2400w' }
 };
 
 /**

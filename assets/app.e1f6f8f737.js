@@ -91,9 +91,9 @@ function decide() {
  * note in the header. */
 const load = {
   pocket: () =>
-    import('./pocket.c93de0baa0.js'),
+    import('./pocket.24c6c9a174.js'),
   cinema: () =>
-    import('./cinema.14cc91df0b.js')
+    import('./cinema.3adc0ad65c.js')
 };
 
 /**
@@ -145,6 +145,132 @@ function normaliseToolParam() {
   catch { location.hash = `#/tool/${encodeURIComponent(slug)}`; }
 }
 
+/* =============================================================================
+ * THE FLOOR — what the page is when a module does not arrive
+ * -----------------------------------------------------------------------------
+ * WHY THIS EXISTS, with the reproduction.
+ *   Every deploy opens a window in which one of these modules 404s. The build
+ *   emits content-hashed filenames and prunes the previous build's, while
+ *   index.html is served by GitHub Pages with `cache-control: max-age=600`. For
+ *   up to ten minutes after a push, a browser holding the OLD index.html asks
+ *   for the OLD hashed module names — which the new deploy has already deleted.
+ *   Confirmed live on 2026-08-31: assets/app.js and
+ *   assets/theme.429a145a6a.css were both 404 on cookcountycooks.com while the
+ *   HTML naming them was still inside its own cache lifetime.
+ *
+ *   What that produced: `await load.cinema()` rejected, nothing caught it, and
+ *   the page's only remaining link was "Skip to the kitchen" — pointing at an
+ *   empty <main>. A rep mid-conversation with a customer had NOTHING.
+ *
+ * WHAT THIS RENDERS INSTEAD
+ *   A plain <ul> of real <a href> — every open tool, grouped by room, in room
+ *   order. No modules, no CSS beyond what already loaded, no fetch: the whole
+ *   tool list is already in the document as window.__CCC_INLINE__.tools (the
+ *   <head> writes it inline so the site boots off a USB stick). If even that is
+ *   missing there is one honest line and a reload link.
+ *
+ *   The walk-in is NOT listed. Its thirteen labels are ciphertext and coldgate
+ *   is one of the modules that may be the one that failed, so the floor says
+ *   how many are sealed and nothing else — the same thing the pocket list's
+ *   locked row says.
+ *
+ *   Links are stamped with the same `_ccc` cache-buster the rest of the site
+ *   uses. freshUrl lives in its own module and may itself be the 404, so this
+ *   inlines the two lines rather than importing anything: a floor with a
+ *   dependency is not a floor.
+ * ========================================================================== */
+
+/** Minimal, dependency-free element builder. dom.js may be the module that 404'd. */
+function fEl(tag, props, kids) {
+  const n = document.createElement(tag);
+  for (const k in (props || {})) {
+    const v = props[k];
+    if (v === null || v === undefined || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else n.setAttribute(k, v);
+  }
+  for (const c of [].concat(kids || [])) if (c) n.append(c);
+  return n;
+}
+
+/** freshUrl(), inlined. Same rule: stamp cross-origin only, never our own
+ *  content-hashed assets. See assets/freshurl.js for the client's own words. */
+function fStamp(url) {
+  try {
+    const u = new URL(url, location.href);
+    if (u.origin === location.origin) return u.href;
+    u.searchParams.set('_ccc', String(Date.now()));
+    return u.href;
+  } catch { return url; }
+}
+
+function renderFloor(err) {
+  console.error('[app] a front-end module did not load; rendering the flat list.', err);
+  const main = document.getElementById('kitchen') || document.body;
+  if (!main) return;                                   // nothing to render into
+  document.documentElement.dataset.view = 'floor';     // theme.css may style it
+  const data = (window.__CCC_INLINE__ && window.__CCC_INLINE__.tools) || null;
+  const tools = (data && Array.isArray(data.tools)) ? data.tools : [];
+  const rooms = (data && Array.isArray(data.rooms)) ? data.rooms : [];
+
+  const head = fEl('div', { class: 'floor-head' }, [
+    fEl('p', { class: 'kicker', text: 'Cook County Cooks' }),
+    fEl('h1', { class: 't-sub', text: 'Every tool, one tap away' }),
+    fEl('p', {
+      class: 'micro',
+      text: tools.length
+        ? 'The kitchen could not be built on this load, so here is the plain list. Every link is live.'
+        : 'The kitchen could not be built on this load.'
+    }),
+    fEl('p', {}, [fEl('a', { class: 'chip', href: location.pathname + location.search, text: 'Try the full site again' })])
+  ]);
+
+  const groups = [];
+  const seen = new Set();
+  const byRoom = new Map();
+  for (const t of tools) {
+    if (!t || !t.url) continue;
+    const r = t.room || 'other';
+    if (!byRoom.has(r)) byRoom.set(r, []);
+    byRoom.get(r).push(t);
+  }
+  for (const room of rooms) {
+    const list = byRoom.get(room.id);
+    if (!list || !list.length) continue;
+    seen.add(room.id);
+    groups.push(fEl('section', {}, [
+      fEl('h2', { class: 'kicker', text: room.label || room.id }),
+      fEl('ul', {}, list.map((t) => fEl('li', {}, [
+        fEl('a', { class: 'tool-row', href: fStamp(t.url), rel: 'noopener' }, [
+          fEl('span', { class: 'tool-row-name', text: t.label || t.slug }),
+          t.blurb ? fEl('span', { class: 'tool-row-blurb', text: t.blurb }) : null
+        ])
+      ])))
+    ]));
+  }
+  // Any room the inline rooms[] did not name (or no rooms[] at all).
+  for (const [roomId, list] of byRoom) {
+    if (seen.has(roomId)) continue;
+    groups.push(fEl('section', {}, [
+      fEl('h2', { class: 'kicker', text: roomId }),
+      fEl('ul', {}, list.map((t) => fEl('li', {}, [
+        fEl('a', { class: 'tool-row', href: fStamp(t.url), rel: 'noopener',
+                   text: t.label || t.slug })
+      ])))
+    ]));
+  }
+
+  if (!groups.length) {
+    groups.push(fEl('p', { class: 'micro', text:
+      'The tool list is not in this page either. Reload to fetch a fresh copy of the site.' }));
+  }
+
+  main.replaceChildren(fEl('div', { class: 'floor' }, [head, ...groups]));
+  // The skip link points at #kitchen; it now lands on something real.
+  try { main.focus({ preventScroll: true }); } catch { /* noop */ }
+}
+
 async function start() {
   const view = decide();
   document.documentElement.dataset.view = view;
@@ -158,11 +284,28 @@ async function start() {
   return mod.boot();
 }
 
+/**
+ * ONE catch around the whole boot, and it must stay one.
+ *
+ * `start()` is an async function, so a 404 on any dynamic import() rejects the
+ * promise it returns; boot() throwing synchronously inside a module rejects it
+ * too. Both used to be unhandled — `:148-159` awaited the import with no
+ * try/catch and the call site attached no .catch — which is why ONE missing
+ * module was a blank page. Everything that can go wrong between "the router
+ * ran" and "a front end is on screen" now lands here.
+ */
+function boot() {
+  let p;
+  try { p = start(); }
+  catch (err) { renderFloor(err); return; }
+  if (p && typeof p.catch === 'function') p.catch(renderFloor);
+}
+
 /* type="module" is deferred by definition, so the parser has finished by the
    time this runs. The readyState check is there only for the case where someone
    loads this file some other way. */
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', start, { once: true });
+  document.addEventListener('DOMContentLoaded', boot, { once: true });
 } else {
-  start();
+  boot();
 }

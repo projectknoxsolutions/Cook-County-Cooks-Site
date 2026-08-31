@@ -73,7 +73,11 @@
  * -------------------------------------------------------------------------- */
 
 /** The two public, CORS-open data files behind the Host Stand and Back Office. */
-import { freshUrl } from './overlay.d791a31119.js';   // shared fresh-load cache buster
+import { freshUrl } from './overlay.7e3a74ff05.js';
+/* Same reason as overlay.js §6: an iframe's `load` fires for a 404, a 500, an
+   error page and a refused frame alike, so a live board that 404s was being
+   revealed as the board. preflight.js carries the twelve-shape measurement. */
+import { preflight, preflightCopy } from './preflight.075dfec024.js';   // shared fresh-load cache buster
 
 export const PROMO_CARD_URL =
   'https://raw.githubusercontent.com/BlufoxMobile/Daily-Sales-Report/main/data/promo-card.jpg';
@@ -262,6 +266,22 @@ const PROMO_EVERY_N = 4;
 const RETRY_EVERY_MS = 20 * 1000;
 const RETRY_LIMIT = 5;
 
+/** THE BACKOFF, and the arithmetic behind the floor.
+ *
+ *  A store iPad is parked on a room and left on all day. A retry that never
+ *  gets slower is a retry that costs 3 requests a minute for as long as the
+ *  device is awake — 4,320 a day against a URL that is not answering, which is
+ *  the shape a dead feed URL takes on that iPad. Doubling from the same 20s
+ *  start and stopping at a five-minute floor costs 20s, 40s, 80s, 160s and then
+ *  288 requests a day, and still recovers within five minutes of the network
+ *  coming back, which a hard cap does not do at all: the old RETRY_LIMIT of 5
+ *  gave up after 100 seconds and the board then stayed on its holding card for
+ *  the rest of the day even after the wifi came back. Slower AND more durable.
+ */
+const RETRY_MAX_MS = 5 * 60 * 1000;
+const retryDelay = (attempt) =>
+  Math.min(RETRY_MAX_MS, RETRY_EVERY_MS * Math.pow(2, Math.max(0, attempt)));
+
 /** The same two conditions theme.css uses for its portrait takeover. Exported
  *  so the layout owner can key off one string instead of a second copy. */
 export const NARROW_MEDIA = '(max-width: 900px), (max-aspect-ratio: 8 / 7)';
@@ -334,6 +354,12 @@ function reduceMotion() {
 
 /** 'YYYY-MM-DD' -> 'Aug 26'. Parsed by hand: `new Date('2026-08-26')` is UTC
  *  midnight and prints as the 25th anywhere west of Greenwich. */
+/** Pretty host for a board's URL, for the holding card's note. */
+function hostOf(url) {
+  try { return new URL(url, document.baseURI).hostname.replace(/^www\./, ''); }
+  catch { return String(url || ''); }
+}
+
 function shortDate(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
   if (!m) return '';
@@ -384,7 +410,7 @@ function getTool(slug) {
  * 3 · Stylesheet
  *
  * Injected once, prefixed `ccc-scr`, every colour and face read through a
- * `var(--ccc-…, fallback)` so assets/theme.177d9d3b9f.css owns the look. Nothing here
+ * `var(--ccc-…, fallback)` so assets/theme.429a145a6a.css owns the look. Nothing here
  * animates anything but transform / opacity / filter.
  * -------------------------------------------------------------------------- */
 
@@ -1034,6 +1060,20 @@ const STYLES = `
   color: #857d72;
 }
 .ccc-scr-feed__foot > :last-child { text-align: end; }
+
+/* STALE — the board is showing the last good data because the feed is not
+   answering. loadStreaks() resolves to cached data on failure on purpose
+   ("stale beats blank"), and this is the half that was missing: the age has to
+   be legible from across a break room, not inferable from a date. Amber rather
+   than red — the numbers are still the last true numbers, they are just not
+   today's — and the tiles are dimmed so the big figures stop reading as live.
+   Contrast: #e0a341 on the panel ground is 7.1:1. */
+.ccc-scr-feed__stale { color: #e0a341; }
+.ccc-scr-feed__slide.is-stale .ccc-scr-feed__grid { opacity: .72; }
+.ccc-scr-feed__slide.is-stale .ccc-scr-feed__eyebrow::after {
+  content: " · holding";
+  color: #e0a341;
+}
 .ccc-scr-feed__dots { display: flex; gap: .5em; justify-content: center; }
 .ccc-scr-feed__dots span {
   inline-size: .5em; block-size: .5em; border-radius: 50%;
@@ -2247,7 +2287,20 @@ function stationLabel(rec) {
 }
 
 function makeTitle(rec) {
-  const name = el('h3', { class: 'ccc-scr-title__name', text: rec.headline });
+  /* A <p>, NOT an <h3>, and that is a fix rather than a preference.
+     A screen host lives in `.hotspots`, which theme.css §09 puts BEFORE the
+     rail in the stage — so the three panels in the Pass emitted "6th Gen Quote
+     Sheet / Upgrade / Internet" as h3s before the room's own
+     <h2 class="rail-title"> ("The Pass") had appeared at all. A heading walk
+     therefore entered every room three levels deep and jumped h1 -> h3, which
+     is what axe reports as `heading-order`.
+     Demoting rather than re-ordering is the honest call: this caption is not a
+     section heading, it is the visible label of the one control the panel IS
+     (`.ccc-scr__hit`, whose accessible name is already "Open <the same
+     words>"). Nothing outside this function knows or cares about the tag —
+     .ccc-scr-title__name carries every style, `margin: 0` included, and
+     applyRecord() finds the node by that class. */
+  const name = el('p', { class: 'ccc-scr-title__name', text: rec.headline });
 
   /* Row 1 — the chrome. aria-hidden throughout: the button's accessible name is
      already "Open <tool>", and a screen reader has no use for set dressing. */
@@ -2499,7 +2552,10 @@ function buildSlide(district, data, index, total) {
 
   const head = el('div', { class: 'ccc-scr-feed__head' }, [
     el('p', { class: 'ccc-scr-feed__eyebrow', text: 'Days since the last bad NPS survey' }),
-    el('h3', { class: 'ccc-scr-feed__district', text: district.label }),
+    /* <p> for the same reason as .ccc-scr-title__name above: the district name
+       is the subject of one slide inside a control, not a section heading, and
+       as an h3 it landed in the outline before the Back Office's own h2. */
+    el('p', { class: 'ccc-scr-feed__district', text: district.label }),
     el('p', { class: 'ccc-scr-feed__goal', text: `Goal ${goal} days` })
   ]);
 
@@ -2514,17 +2570,33 @@ function buildSlide(district, data, index, total) {
     Array.from({ length: total }, (_, i) =>
       el('span', { class: i === index ? 'is-current' : '' })));
 
+  /* ⚠ SAY WHEN IT IS OLD. loadStreaks() resolves to the LAST GOOD DATA when a
+     fetch fails ("stale beats blank", §5) — which is right, and was silent: a
+     board that last succeeded at eight this morning sat on the Back Office wall
+     all day reading exactly like a board that succeeded a minute ago. The date
+     was already printed here, but a date on its own is not a warning; a store
+     manager reads "Aug 28" as a label, not as a problem.
+
+     streaksFresh() is the source app's own rule (more than three days old is
+     not shown at all) and it existed in this file with no caller. It is the
+     caller now: past it, the foot says so in words and the slide carries
+     .is-stale so theme.css can grey the figures. The numbers on this board are
+     "days since the last bad survey", and a counter that has stopped counting
+     is the exact failure the rule was written for. */
+  const fresh = streaksFresh(data);
+  const stamp = shortDate(data.asOf);
   const foot = el('div', { class: 'ccc-scr-feed__foot' }, [
     el('span', { text: bestLabel }),
     dots,
     el('span', {
-      text: avg !== null
-        ? `District avg ${avg} · ${shortDate(data.asOf)}`
-        : shortDate(data.asOf)
+      class: fresh ? '' : 'ccc-scr-feed__stale',
+      text: fresh
+        ? (avg !== null ? `District avg ${avg} · ${stamp}` : stamp)
+        : `Last updated ${stamp} — not today's numbers`
     })
   ]);
 
-  return el('div', { class: 'ccc-scr-feed__slide' }, [head, grid, foot]);
+  return el('div', { class: `ccc-scr-feed__slide${fresh ? '' : ' is-stale'}` }, [head, grid, foot]);
 }
 
 function makeFeed(rec) {
@@ -2604,18 +2676,32 @@ function makeFeed(rec) {
   }
 
   function stopRetry() {
-    if (retryTimer) { window.clearInterval(retryTimer); retryTimer = 0; }
+    if (retryTimer) { window.clearTimeout(retryTimer); retryTimer = 0; }
   }
 
-  /** Keep asking while the board is on screen and has still never had data. */
+  /**
+   * Keep asking while the board is on screen and has still never had data —
+   * but ask more slowly each time. See RETRY_MAX_MS for the arithmetic.
+   *
+   * A self-rescheduling setTimeout rather than a setInterval, because the
+   * delay changes every pass. A tick that lands while the tab is hidden does
+   * not spend the attempt: it reschedules at the SAME delay, so a board that
+   * was backgrounded for an hour does not come back at a five-minute cadence
+   * for something it has only tried twice.
+   */
   function startRetry() {
     if (retryTimer || loaded || !active) return;
-    retryTimer = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
-      if (loaded || retries >= RETRY_LIMIT) { stopRetry(); return; }
-      retries++;
-      pull({ force: true });
-    }, RETRY_EVERY_MS);
+    const arm = () => {
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        if (loaded || !active) return;
+        if (document.visibilityState === 'hidden') { arm(); return; }
+        retries++;
+        pull({ force: true });
+        if (!loaded) arm();
+      }, retryDelay(retries));
+    };
+    arm();
   }
 
   /**
@@ -2715,6 +2801,24 @@ function makeLive(rec) {
   let cover = null;
   let watchdog = 0;
   let revealT = 0;
+  let bucket = 0;        // which 5-minute stamp the mounted frame is carrying
+  let dead = false;      // the preflight said the board is not there
+
+  /** The board did not come back. Say so on the lid rather than lifting it off
+   *  a grey rectangle, and drop the frame — there is nothing behind it. */
+  function refuse(note) {
+    window.clearTimeout(revealT);
+    revealT = 0;
+    if (cover) {
+      const n = cover.querySelector('.ccc-scr-holding__note');
+      if (n) n.textContent = note;
+    } else {
+      node.replaceChildren(holdingCard(rec.title, note));
+      cover = null;
+    }
+    if (frame) { frame.remove(); frame = null; }
+    rec.panel.classList.add('is-live');
+  }
 
   /** Fade the lid off and take it out of the DOM. Idempotent. */
   function uncover() {
@@ -2730,6 +2834,12 @@ function makeLive(rec) {
 
   function mount() {
     if (frame) return;
+    // A fresh mount gets a fresh verdict: `dead` belongs to the frame that was
+    // refused, not to the board. Without this reset a board the preflight
+    // declared dead once stayed dead for the life of the page even after the
+    // deck came back, because the new frame's `load` listener bailed on a flag
+    // set for the old one.
+    dead = false;
     const url = rec.url;
     if (!url) {
       node.replaceChildren(holdingCard(rec.title, 'Tap to open this board full screen.'));
@@ -2747,7 +2857,7 @@ function makeLive(rec) {
     });
     frame.setAttribute('role', 'presentation');
     frame.addEventListener('load', () => {
-      if (rec.destroyed) return;
+      if (rec.destroyed || dead) return;
       window.clearTimeout(watchdog);
       // the glass powers on now — the deck behind the lid is still white.
       rec.panel.classList.add('is-live');
@@ -2764,7 +2874,26 @@ function makeLive(rec) {
     // as the room scrolls in and out, and a unique URL each time would refetch
     // the whole deck on every pass. Five minutes is well inside "today's
     // numbers" while still picking up a push within one coffee break.
-    frame.src = freshUrl(url, 5 * 60 * 1000);
+    const BUCKET = 5 * 60 * 1000;
+    bucket = Math.floor(Date.now() / BUCKET);
+    frame.src = freshUrl(url, BUCKET);
+
+    /* ⚠ ASK THE SERVER WHETHER THE BOARD IS THERE.
+       The `load` listener above is the same trap overlay.js was in: it fires
+       for a 404, a 500, an empty body and an error page exactly as it does for
+       the deck, so `is-live` went on and LIVE_REVEAL_MS lifted the branded
+       holding card off a grey rectangle 3.2 seconds later. Confirmed for 404,
+       an empty body and an error page; only the hang path (the 12s watchdog
+       below) behaved. One GET, cancelled at the headers — see preflight.js —
+       answers it, and a definite failure keeps the lid ON with the note
+       rewritten, which is the state this screen already knows how to be. */
+    preflight(url).then((v) => {
+      if (rec.destroyed || frame === null) return;
+      if (v.verdict !== 'gone' && v.verdict !== 'unreachable' && v.verdict !== 'empty') return;
+      dead = true;
+      window.clearTimeout(watchdog);
+      refuse(preflightCopy(v, rec.title, hostOf(url)) + ' Tap to open it full screen.');
+    });
 
     // A deck that never loads must not leave black glass forever. The lid is
     // already up, so this only has to say so on it and drop the dead frame.
@@ -2856,6 +2985,28 @@ function makeLive(rec) {
     deactivate: unmount,
     destroy: unmount,
     hold,
+    /**
+     * A STORE iPAD PARKED ON THE DINING ROOM SHOWED THE LEADERBOARD FROM
+     * PAGE-LOAD TIME FOR EVER. This mode exposed no refresh(), so the
+     * visibilitychange handler at the foot of this file — which asks every
+     * active screen for one — skipped it, and the only thing that ever
+     * re-navigated these frames was the room scrolling out of range and back.
+     * On a device left on one room, that never happens.
+     *
+     * Re-mount only when the 5-minute stamp has actually moved on, so a rep
+     * flicking between apps does not make the wall reload a 1.15 MB deck every
+     * time; and only when a frame is genuinely mounted, so a board holding the
+     * branded card because the live-frame ration is spent stays as it is.
+     * A board the preflight declared dead retries here too: `dead` is cleared,
+     * so a deck that comes back is picked up on the next foreground.
+     */
+    refresh() {
+      if (!frame) return;
+      if (Math.floor(Date.now() / (5 * 60 * 1000)) === bucket) return;
+      dead = false;
+      unmount();
+      mount();
+    },
     get isLive() { return !!frame; }
   };
 }
@@ -3947,7 +4098,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* =============================================================================
- * CLASS HOOKS — the contract with assets/theme.177d9d3b9f.css
+ * CLASS HOOKS — the contract with assets/theme.429a145a6a.css
  * -----------------------------------------------------------------------------
  * Structure (one per screen):
  *   .ccc-scr[data-screen-panel="<slug>"]      the panel

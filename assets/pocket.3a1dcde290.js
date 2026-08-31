@@ -73,12 +73,12 @@
 
 import { el, fill, $ } from './dom.a199da796c.js';
 import { freshUrl } from './freshurl.11f28a5de9.js';
-import { initOverlay } from './overlay.d791a31119.js';
+import { initOverlay } from './overlay.7e3a74ff05.js';
 import { ROOM_ORDER } from './roomorder.a179fcfeea.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.c412bcc37a.js';
+} from './coldgate.7bf94d863d.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -190,10 +190,20 @@ const FOX_SVG =
 function toolRow(tool) {
   const a = el('a', {
     class: 'tool-row pocket-row',
-    /* INTERNAL. overlay.js §8 owns this shape and §9 delegates the click off
-       data-tool, so this row needs no handler of its own — and because it is a
-       real href, a long-press still offers "copy link" and hands over a URL on
-       this site. The repository URL lives in data-url below. */
+    /* The deep-link shape overlay.js §8 owns, and the row needs no handler of
+       its own because §9 delegates the click off data-tool.
+
+       ⚠ IT DOES NOT STAY THIS. render() calls restamp() on the way out, which
+       rewrites this href to freshUrl(data-url) — the stamped repository URL.
+       That has always been the intent (see the doc comment above this
+       function); what was new is that it now happens on EVERY render rather
+       than only on visibilitychange, so a row is never handed out unstamped.
+       What it costs: a long-press "copy link" gives the repository URL with a
+       `_ccc` stamp on it rather than a cookcountycooks.com deep link. What it
+       buys: a ⌘-click or middle-click — which onDocumentClick deliberately
+       lets through unhandled — goes straight to a FRESH copy of the tool
+       instead of a cached one, and that is the client's stated complaint.
+       The repository URL is also in data-url, which is what restamp reads. */
     href: `#/tool/${encodeURIComponent(tool.slug)}`,
     'data-tool': tool.slug,
     'data-slug': tool.slug,
@@ -288,13 +298,33 @@ export async function boot() {
   await initColdGate();
 
   /* ---- the header ------------------------------------------------------- */
+  /* THE PLACEHOLDER IS NOT THE LABEL. It disappears the moment a character is
+     typed, which on a phone — where this field is the ONLY way to find a tool —
+     leaves an unlabelled box with text in it. The real <label> is a few lines
+     down in `bar`, visually hidden and wired with `for`, so the name survives
+     the first keystroke and a screen reader announces the field on entry. The
+     placeholder stays as the short visual hint it is good at being.
+
+     inputmode="search": the field is `type="search"` but there is no form and
+     nothing to submit, and type alone does not choose the on-screen keyboard.
+     `search` gets the plain keyboard with a search action key on both iOS and
+     Android — with `enterkeyhint="done"` overriding what that key SAYS, because
+     the list is already filtered by the time it is pressed and the useful thing
+     for it to do is dismiss the keyboard rather than promise a round trip.
+
+     autocomplete is NOT set to "off" any more, on purpose. It was doing nothing
+     it was meant to do: there is no form and no submission here, so the browser
+     has no search history to offer and nothing to suppress — while `off` is
+     also the switch some platforms read as "suppress the suggestion strip",
+     which is the row a rep using dictation or a word-prediction keyboard leans
+     on. Everything that WAS pulling its weight — autocorrect, autocapitalize
+     and spellcheck all off, so "BAPIS" and "PortPro" are not helpfully
+     rewritten — stays exactly as it was. */
   const search = el('input', {
     type: 'search', id: 'pocket-q', class: 'pocket-input',
     placeholder: 'Search tools',
-    autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false',
-    // enterkeyhint over `search`: there is nothing to submit, the list is
-    // already filtered by the time the key is pressed, so the key should
-    // dismiss the keyboard rather than promise a round trip.
+    inputmode: 'search',
+    autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false',
     enterkeyhint: 'done',
     'aria-describedby': 'pocket-count'
   });
@@ -426,6 +456,16 @@ export async function boot() {
     clear.hidden = !query;
     foot.querySelector('.pocket-colophon').textContent =
       `Cook County Cooks · ${open + sealed} tools across ${data.rooms.length} rooms · Blue Fox C³`;
+
+    /* ⚠ AND THE STAMP GOES BACK ON, EVERY TIME, BECAUSE THIS FUNCTION REBUILDS
+       THE ROWS. restamp() below rewrites every row's href on visibilitychange
+       and pageshow — and then the very next keystroke in the search box called
+       render(), which threw those rows away and built new ones carrying
+       whatever stamp toolRow() minted at build time. So the staleness fix was
+       undone by the act of searching, which is how a rep reaches a tool. The
+       call belongs HERE, at the end of the one function that creates rows, so
+       there is no path that produces an unstamped row. */
+    restamp();
   }
 
   render();
@@ -465,6 +505,9 @@ export async function boot() {
       a.href = freshUrl(a.dataset.url);
     }
   }
+  /* Hoisted note: render() calls this too. See the comment at the end of
+     render() — every rebuild of the list re-stamps, so the two events below are
+     about the list going STALE while it sits there, not about it being built. */
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') restamp();
   });

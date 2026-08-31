@@ -14,6 +14,21 @@
  *
  * This step rewrites the inline block from the file on every build. Nobody
  * hand-edits it, and the two cannot diverge.
+ *
+ * IT ALSO REWRITES THE <noscript> INDEX, for exactly the same reason.
+ *   The <noscript> block at the foot of index.html is the plain-links floor: it
+ *   is what a rep gets when JavaScript is off AND — since app.js grew its
+ *   module-failure fallback — when a module fails to load at all. It was
+ *   hand-maintained, and on 2026-08-31 it had drifted to 23 links against 24 in
+ *   tools.json: `rep-hourly-rate` and `training-pos` were MISSING, four tools
+ *   were filed under the wrong room, and a dead `tools/employee-of-week` link
+ *   was still there. A drifted floor is a rep who cannot reach a tool on the one
+ *   occasion the pretty version already failed them.
+ *
+ *   So it is generated here from the SAME parsed tools.json, grouped by the SAME
+ *   ROOM_ORDER the cinema and the pocket list walk. The markup and the copy
+ *   around it are reproduced exactly as they were written, so the diff on any
+ *   future run is data and nothing else.
  * ========================================================================== */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -25,7 +40,8 @@ const htmlPath = resolve(ROOT, 'index.html');
 
 // Compact for the same reason the head-chef block below is compacted: this is
 // spliced into a one-key-per-line object literal in index.html.
-const tools = JSON.stringify(JSON.parse(readFileSync(resolve(ROOT, 'data', 'tools.json'), 'utf8')));
+const toolsDoc = JSON.parse(readFileSync(resolve(ROOT, 'data', 'tools.json'), 'utf8'));
+const tools = JSON.stringify(toolsDoc);
 
 let html = readFileSync(htmlPath, 'utf8');
 
@@ -86,9 +102,137 @@ if (freezerLine) lines.push(`${pad}freezer: ${freezerLine}`);
 if (chefsJson)   lines.push(`${pad}headchefs: ${chefsJson}`);
 
 const rebuilt = `${OPEN}\n${lines.join(',\n')}\n${indent}}`;
-const next = html.slice(0, objStart) + rebuilt + html.slice(objEnd);
+let next = html.slice(0, objStart) + rebuilt + html.slice(objEnd);
+
+/* ---------------------------------------------------------------------------
+ * THE <noscript> INDEX — REGENERATED, NOT HAND-MAINTAINED.
+ *
+ * WHAT IS REGENERATED AND WHAT IS NOT.
+ *   Only the run of `<h3>room</h3><ul>…links…</ul>` blocks is rewritten: from
+ *   the FIRST <h3> inside the <noscript> to the LAST </ul>. The heading, the
+ *   "needs JavaScript" sentence above it and the Walk-In sentence below it are
+ *   prose, they are not derived from anything, and they are left byte-for-byte
+ *   alone. The generated span is the part that can drift, and it is the only
+ *   part this touches.
+ *
+ * THE ORDER IS ROOM_ORDER, read from assets/roomorder.js — the single
+ *   definition the cinema and the pocket list both walk (rooms.js re-exports
+ *   it). Rooms that appear in tools.json but not in ROOM_ORDER are appended,
+ *   which is exactly what pocket.js does, so a new room cannot silently fall
+ *   off the plain-links floor either.
+ *
+ *   That is a file in this repo, not a tool on a machine, so it cannot rot the
+ *   way the workflow's ImageMagick precondition did. But if it ever cannot be
+ *   read, this falls back to the order the rooms are written in tools.json
+ *   (identical today) and warns, rather than failing a build over a list order.
+ *
+ * THE WALK-IN IS NOT IN HERE, and that is load-bearing. The 14 manager tools
+ *   live encrypted in data/freezer.sealed.json and are never in tools.json;
+ *   the `freezer` room is skipped explicitly as well, so a manager tool that
+ *   ever did land in tools.json by mistake still could not leak into a block
+ *   that is served to everybody in plain text.
+ * ------------------------------------------------------------------------- */
+
+/** Text -> HTML. `&#x27;` for the apostrophe, matching the block as written. */
+const esc = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+
+/** An off-site tool opens in a new tab; the two in-repo sub-apps do not. */
+const isExternal = (url) => /^[a-z][a-z0-9+.\-]*:/i.test(url) || url.startsWith('//');
+
+/**
+ * ROOM_ORDER, lifted out of assets/roomorder.js as text.
+ *
+ * Not `await import()`: this repo has no package.json on purpose (no npm, no
+ * build tooling), so importing a bare .js file makes Node print a four-line
+ * MODULE_TYPELESS_PACKAGE_JSON warning on every single build — noise in a log
+ * whose whole job is to be read. The array is one line of literals; reading it
+ * is a two-line regex and costs nothing. assets/roomorder.js is still the ONE
+ * definition — this only reads it.
+ */
+function readRoomOrder() {
+  try {
+    const src = readFileSync(resolve(ROOT, 'assets', 'roomorder.js'), 'utf8');
+    const m = /export\s+const\s+ROOM_ORDER\s*=\s*\[([^\]]*)\]/.exec(src);
+    if (!m) throw new Error('no `export const ROOM_ORDER = [...]` in the file');
+    const ids = m[1].match(/['"]([^'"]+)['"]/g);
+    if (!ids || !ids.length) throw new Error('ROOM_ORDER parsed as empty');
+    return ids.map((q) => q.slice(1, -1));
+  } catch (err) {
+    console.warn(`! sync-inline-tools: could not read ROOM_ORDER from assets/roomorder.js ` +
+                 `(${err.message}); falling back to the room order in data/tools.json.`);
+    return [];
+  }
+}
+const ROOM_ORDER = readRoomOrder();
+
+const roomsById = new Map((toolsDoc.rooms || []).map((r) => [r.id, r]));
+const roomSpine = [
+  ...ROOM_ORDER.filter((id) => roomsById.has(id)),
+  ...[...roomsById.keys()].filter((id) => !ROOM_ORDER.includes(id))
+];
+
+const NO_OPEN = '<noscript>';
+const nsStart = next.indexOf(NO_OPEN, next.indexOf('<footer id="site-footer">'));
+const nsEnd = nsStart < 0 ? -1 : next.indexOf('</noscript>', nsStart);
+if (nsStart < 0 || nsEnd < 0) {
+  console.error('sync-inline-tools: could not find the <noscript> tool index in index.html.');
+  process.exit(1);
+}
+const block = next.slice(nsStart, nsEnd);
+const h3At = block.indexOf('<h3>');
+const ulAt = block.lastIndexOf('</ul>');
+if (h3At < 0 || ulAt < 0 || ulAt < h3At) {
+  console.error('sync-inline-tools: the <noscript> index has no <h3>…</ul> list to regenerate.');
+  process.exit(1);
+}
+
+// Indentation is taken from the block as it stands, so the generated markup
+// keeps whatever shape index.html is formatted with.
+const h3Indent = (block.slice(0, h3At).match(/\n([ \t]*)$/) || [, '        '])[1];
+const liIndent = h3Indent + '  ';
+
+const nsLines = [];
+let linkCount = 0;
+for (const id of roomSpine) {
+  if (id === 'freezer') continue;                       // sealed; see above
+  const roomTools = (toolsDoc.tools || []).filter((t) => t.room === id);
+  if (!roomTools.length) continue;                      // no empty headings
+  nsLines.push(`${h3Indent}<h3>${esc(roomsById.get(id).label)}</h3>`);
+  nsLines.push(`${h3Indent}<ul>`);
+  for (const t of roomTools) {
+    const attrs = isExternal(t.url) ? ' target="_blank" rel="noopener noreferrer"' : '';
+    nsLines.push(`${liIndent}<li><a href="${esc(t.url)}"${attrs}>${esc(t.label)}</a></li>`);
+    linkCount++;
+  }
+  nsLines.push(`${h3Indent}</ul>`);
+}
+
+const n = toolsDoc.tools.length;
+
+// EVERY tool in tools.json must reach the floor, and this is checked BEFORE
+// anything is written — a short list must not be committed and then complained
+// about. The only way to be short is a tool filed into a room that is skipped
+// (freezer) or into a room id that is not in tools.json's own rooms[]: the
+// first would be a manager tool about to be published in plain text, the second
+// a tool that is unreachable in the cinema too. Both are data errors.
+if (linkCount !== n) {
+  console.error(`sync-inline-tools: ${n} tools in data/tools.json but only ${linkCount} ` +
+                `reached the <noscript> index — a tool is filed under a room that is ` +
+                `skipped (freezer) or missing from data/tools.json's rooms[]. ` +
+                `index.html was NOT written.`);
+  process.exit(1);
+}
+
+const nextBlock = block.slice(0, h3At) + nsLines.join('\n').slice(h3Indent.length) +
+                  block.slice(ulAt + '</ul>'.length);
+const noscriptChanged = nextBlock !== block;
+next = next.slice(0, nsStart) + nextBlock + next.slice(nsEnd);
+
 if (next !== html) writeFileSync(htmlPath, next);
 
-const n = JSON.parse(tools).tools.length;
 console.log(`inline bootstrap: ${n} tools synced from data/tools.json${next === html ? ' (already current)' : ''}`);
 if (chefCount !== null) console.log(`inline bootstrap: ${chefCount} head chefs synced from headchefs/headchefs.json`);
+console.log(`noscript index:   ${linkCount} links in ${nsLines.filter((l) => l.includes('<h3>')).length} rooms` +
+            `${noscriptChanged ? ' (rewritten)' : ' (already current)'}`);

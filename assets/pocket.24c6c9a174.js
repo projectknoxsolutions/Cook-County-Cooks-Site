@@ -20,7 +20,7 @@
  * a tool, a URL or a room: this module reads the same inline __CCC_INLINE__
  * bootstrap the cinema reads, through the same fallback fetch of the same file,
  * groups by the same ROOM_ORDER, and opens the same sealed envelope through the
- * same coldgate.js. Adding a tool to data/tools.json and rebuilding puts it on
+ * same coldgate.js. Adding a tool to data/tools.ac8a24642f.json and rebuilding puts it on
  * the phone with no other edit. If you find yourself typing a tool's name into
  * this file, stop — you are about to build the thing we decided not to build.
  *
@@ -71,14 +71,14 @@
  * viewer's "open in a new tab" control uses.
  * ========================================================================== */
 
-import { el, fill, $ } from './dom.js';
-import { freshUrl } from './freshurl.js';
-import { initOverlay } from './overlay.js';
-import { ROOM_ORDER } from './roomorder.js';
+import { el, fill, $ } from './dom.a199da796c.js';
+import { freshUrl } from './freshurl.11f28a5de9.js';
+import { initOverlay } from './overlay.7e3a74ff05.js';
+import { ROOM_ORDER } from './roomorder.a179fcfeea.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.js';
+} from './coldgate.6142738fae.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ import {
 async function loadTools() {
   const inline = window.__CCC_INLINE__;
   if (inline && inline.tools) return inline.tools;
-  const res = await fetch('data/tools.json');
+  const res = await fetch('data/tools.ac8a24642f.json');
   return res.json();
 }
 
@@ -103,7 +103,7 @@ async function loadTools() {
  *
  * ROOM_ORDER is the spine because it is the order of the restaurant and the
  * order every other surface on this site uses. But it is NOT the room registry
- * — data/tools.json is — so any room that appears there and not in ROOM_ORDER
+ * — data/tools.ac8a24642f.json is — so any room that appears there and not in ROOM_ORDER
  * is appended in file order rather than dropped. That matters for the one rule
  * above: a new room added to tools.json must reach the phone without a second
  * edit, even before anyone updates the walk-through's geometry.

@@ -108,10 +108,19 @@ export function sealedCount() {
 /** "This session unlocked once" — the v3 signal, kept verbatim. It is a HINT
  *  used to decide whether to look for a stored payload, never an authorisation
  *  on its own. */
+/* ⚠ BOTH READS ARE INSIDE THE try, AND THAT IS THE FIX.
+ *  `document.cookie` is not the safe sibling of sessionStorage it looks like:
+ *  reading it THROWS a SecurityError in a sandboxed iframe without
+ *  allow-same-origin, and returns nothing useful (or throws, in some embedded
+ *  webviews) where cookies are disabled outright. It sat on the line AFTER the
+ *  catch, in the boot path, so a browser that made the storage read throw was
+ *  handed straight to an unguarded one. Every other storage call site in this
+ *  build is wrapped; this one was the hole. */
 function freezerSessionHint() {
   try { if (sessionStorage.getItem(FREEZER_SESSION_KEY) === '1') return true; }
   catch { /* private mode / storage disabled — fall through to the cookie */ }
-  return document.cookie.split('; ').some((c) => c.startsWith(FREEZER_COOKIE));
+  try { return document.cookie.split('; ').some((c) => c.startsWith(FREEZER_COOKIE)); }
+  catch { return false; }        // no cookies either: treat as locked, never throw
 }
 
 export function onFreezerUnlock(cb) { unlockListeners.push(cb); }
