@@ -91,9 +91,9 @@ function decide() {
  * note in the header. */
 const load = {
   pocket: () =>
-    import('./pocket.120b7021a5.js'),
+    import('./pocket.c0a7bcb154.js'),
   cinema: () =>
-    import('./cinema.2ad93aa8b7.js')
+    import('./cinema.fae5417af0.js')
 };
 
 /**
@@ -155,7 +155,7 @@ function normaliseToolParam() {
  *   up to ten minutes after a push, a browser holding the OLD index.html asks
  *   for the OLD hashed module names — which the new deploy has already deleted.
  *   Confirmed live on 2026-08-31: assets/app.js and
- *   assets/theme.429a145a6a.css were both 404 on cookcountycooks.com while the
+ *   assets/theme.2d7c2c8824.css were both 404 on cookcountycooks.com while the
  *   HTML naming them was still inside its own cache lifetime.
  *
  *   What that produced: `await load.cinema()` rejected, nothing caught it, and

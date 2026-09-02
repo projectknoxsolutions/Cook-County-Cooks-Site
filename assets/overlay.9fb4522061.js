@@ -310,7 +310,7 @@ function getTool(slug) {
 /* -----------------------------------------------------------------------------
  * 2. Stylesheet
  *    Injected once. Everything is prefixed `ccc-` and every colour is a
- *    custom property with a fallback, so assets/theme.429a145a6a.css (Agent D) can
+ *    custom property with a fallback, so assets/theme.2d7c2c8824.css (Agent D) can
  *    retheme the viewer without touching this file.
  * -------------------------------------------------------------------------- */
 

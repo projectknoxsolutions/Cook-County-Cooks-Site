@@ -1007,13 +1007,14 @@ function buildTicketRail(data) {
 
        On a phone this would be dead code anyway: theme.css §17 puts all seven
        tickets on two rows below 560px, so there is no overflow to scroll and
-       the current room is visible because every room is. The 34px shear at
-       1180x820 is real and is NOT fixed by this pass — it is outside the phone
-       band this work is gated on, and every candidate fix (a smaller C³
-       reserve, tighter ticket padding, the two-row menu) repaints an iPad
-       layout that was signed off and that this pass was required to leave
-       pixel-identical. It is written down here rather than left to be
-       rediscovered. */
+       the current room is visible because every room is. The 1180x820 shear
+       was real and was left for a later pass because every candidate fix
+       repainted a signed-off iPad layout; that constraint was lifted on
+       2026-09-02 and it is FIXED IN theme.css ("THE COURSE MENU ON AN iPAD IN
+       LANDSCAPE"): a C³ reserve sized to the button, --sp-3 tickets, and the
+       wordmark off the bar below 1120px. Measured after: 700px of tickets in
+       a 790px box at 1180x820, 694 in 855 at 1024x768 — nothing overflows on
+       any iPad in landscape, so there is still nothing here to scroll. */
   });
 
   return header;

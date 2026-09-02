@@ -73,7 +73,7 @@
  * -------------------------------------------------------------------------- */
 
 /** The two public, CORS-open data files behind the Host Stand and Back Office. */
-import { freshUrl } from './overlay.35fa3071c9.js';
+import { freshUrl } from './overlay.9fb4522061.js';
 /* Same reason as overlay.js §6: an iframe's `load` fires for a 404, a 500, an
    error page and a refused frame alike, so a live board that 404s was being
    revealed as the board. preflight.js carries the twelve-shape measurement. */
@@ -409,7 +409,7 @@ function getTool(slug) {
  * 3 · Stylesheet
  *
  * Injected once, prefixed `ccc-scr`, every colour and face read through a
- * `var(--ccc-…, fallback)` so assets/theme.429a145a6a.css owns the look. Nothing here
+ * `var(--ccc-…, fallback)` so assets/theme.2d7c2c8824.css owns the look. Nothing here
  * animates anything but transform / opacity / filter.
  * -------------------------------------------------------------------------- */
 
@@ -4151,7 +4151,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* =============================================================================
- * CLASS HOOKS — the contract with assets/theme.429a145a6a.css
+ * CLASS HOOKS — the contract with assets/theme.2d7c2c8824.css
  * -----------------------------------------------------------------------------
  * Structure (one per screen):
  *   .ccc-scr[data-screen-panel="<slug>"]      the panel

@@ -1979,6 +1979,86 @@ a { color: inherit; text-decoration: none; }
    and --overscan-k returns to the default with it. */
 .room[data-room="office"] { --art-x: .5; }
 
+/* THE CLIPBOARD WALL, 2026-09-02 — the office gets its own bleed again, and
+   a crop that leans toward the brick.
+
+   The two clipboards (`exception-report` 85.6-90.0, `fall-off` 91.5-97.5 in
+   plate-x; the boards themselves are traced at 85.4-90.8 and 91.3-98.8) hang
+   1.2% of the plate from its right-hand edge. Measured at --art-x .5 and the
+   site's 1.10 bleed, at the room's arrival frame (--p 0):
+
+       1180x820  iPad landscape   exception x 1182-1253, fall-off 1277-1374
+                                  — both ENTIRELY past the 1180px edge
+       1366x768                   fall-off 40% in frame, centre off-screen
+       1440x900  store desktop    exception 88%, fall-off 0%
+       2560x1440                  fall-off 39%
+
+   Two different causes, and --art-x only reaches one of them.
+
+   AT 16:9 (1366x768, 1920x1080, 2560x1440) THE CROP IS NOT THE PROBLEM. The
+   plate is 1.791:1 and a 16:9 frame is 1.778:1, so the cover box is within
+   1% of the stage and --art-x moves the picture by a few pixels whatever it
+   is set to. What hides the clipboard is the 1.10 bleed alone: it scales
+   about the frame's centre, so 4.5% of the plate goes off EACH side and the
+   right-hand 4.5% is exactly where the clipboards are. :root's own note says
+   1.036 is the floor that cannot expose an edge under the ±1.4cqw / ±1.8svh
+   drift; 1.04 keeps 0.2svh of headroom over that, and the model of the full
+   scrub (push-in 1 → 1.085 with the drift folded in, 200 steps, every aspect
+   from 4:3 to 21:9) shows 0.0px of stage exposed on any edge at any --p.
+   fall-off goes 0.39-0.45 → 0.87 visible at every 16:9 width, and its centre
+   is inside the frame across the WHOLE runway, so it is clickable, not just
+   present. The commission sheet (9.0-21.0) is untouched at 16:9.
+
+   AT 1180x820 — THE CLIENT'S iPADS — THE CROP IS THE PROBLEM AND IT HAS NO
+   FULL SOLUTION. 1180/820 = 1.44:1 shows 80.3% of the plate's width at a bleed
+   of exactly 1, 77.3% at 1.04; the room's tools run from the sheet's left
+   edge at 9.0 to the last clipboard's right edge at 97.5 = 88.5%. No --art-x
+   fits 88.5 into 77.3. Bringing fall-off fully in needs --art-x ≥ .98 AND a
+   bleed ≤ 1.029, and leaves the sheet ≤ 13% visible with its centre off-screen
+   — it trades one unreachable tool for another and drags the reshoot's
+   centred monitor 128px left of centre. The sheet stays: it is the page the
+   client asked for by name, and the monitor is the room.
+
+   So .70, which is the most the crop can lean toward the brick while the
+   sheet is still clickable at the arrival frame: window 14.1 → 91.3 at
+   1180x820. exception-report (right edge 90.0) is in frame for the entire
+   scrub (91.3 at --p 0, 90.1 at --p 1), the sheet is 58% in frame with its
+   centre 14px inside the left edge, and the monitor (36-64) sits 42px left of
+   the frame's centre — 3.6% of the width. fall-off stays out at this aspect
+   and is not being pretended otherwise: it is a chip in the rail and a row in
+   the footer here, as it always was. At 1024x768 and 1366x1024 (4:3, 71.6%
+   of the plate) the same numbers give exception 93% and the sheet 24%; both
+   were unreachable there before.
+
+   ⚠ WIDE LAYOUTS ONLY. §17's phone/portrait block sets the office's --art-x
+   to .55 and :root's bleed to 1.06, and hides the object hotspots outright —
+   nothing here has a job to do there. The guard is the same pair §17 uses for
+   the Host Stand and the Break Room. A custom property on .room beats one on
+   :root whatever the source order, which is why the bleed below MUST live
+   inside this guard and not beside the --art-x above. §18's reduced-motion
+   block restates the office's bleed as 1 (later in the sheet, same
+   specificity), and the rooms.js office entry carries the matching note. */
+@media (min-width: 901px) and (min-aspect-ratio: 8 / 7) {
+  .room[data-room="office"] { --art-x: .70; --overscan-k: 1.04; }
+}
+/* AT 16:10 AND WIDER THE CROP HAS LESS TO LOSE, SO IT LEANS HARDER. From
+   aspect 1.6 up the window is ≥ 86.2% of the plate at --p 0, only 2.3% short
+   of the 88.5% the five tools span, and the shortfall can be split so that
+   EVERY tool's centre is inside the frame at the arrival frame. Measured at
+   1440x900, the store desktop, at .90: window 9.9 → 95.8 — the sheet 93% in
+   frame (its centre 15.0 stays inside until --p ≈ 0.9), exception-report
+   100%, fall-off 72% with its centre inside through --p 0.9. At .70 the same
+   frame had fall-off at 38% with its centre 25px off the edge — the one tool
+   in the room that could not be clicked from the room. At 16:9 (1366x768,
+   1920x1080, 2560x1440) the cover box is within 1% of the stage and this
+   moves the picture by 2-4px; the bleed above is what does the work there.
+   8/5 is 1440x900 exactly, and 1680x1050 / 1920x1200 with it; the iPads in
+   landscape (1.33-1.44) stay on .70 above, where leaning this far would cost
+   the sheet outright. */
+@media (min-width: 901px) and (min-aspect-ratio: 8 / 5) {
+  .room[data-room="office"] { --art-x: .90; }
+}
+
 /* THE BREAK ROOM'S VERTICAL ANCHOR — why the television kept getting clipped.
    The client, twice: "the TV is still cut off at the top... the header of the
    website covers the tv." It was never the panel: the plate is cover-cropped,
@@ -4264,6 +4344,61 @@ dialog#c3-menu[open],
   .ticket { padding-inline: var(--sp-4); }
 }
 
+/* ── THE COURSE MENU ON AN iPAD IN LANDSCAPE, 2026-09-02 ──────────────────
+   WHAT WAS WRONG. §11's strip is sized for a store desktop: a 195px wordmark,
+   a 16px gap, seven tickets, and 8.5rem of padding reserved for the C³ button.
+   On the client's own iPads that sum does not fit. Measured, coarse pointer
+   (which is what puts the tickets at --sp-4), strip at scrollLeft 0:
+
+       1180x820   tickets 756px in a 738px box  →  "07 FREEZE" cut, and the
+                  whole last ticket under the strip's 22px end-fade
+       1024x768   tickets 750px in a 596px box  →  06 and 07 off the edge,
+                  05 cut through its name; the CURRENT room invisible
+       1366x768   tickets 759px in a 908px box  →  fits, 148px to spare
+
+   A menu that hides the room you are standing in is not a menu, and the
+   cinema.js note beside onRoomChange() says why scrolling the strip was
+   tried and taken out: it moves the cut from one end to the other.
+
+   THREE NUMBERS, EACH MEASURED, WORST WIDTH FIRST.
+
+   1. THE C³ RESERVE WAS 68px TOO WIDE. 8.5rem (136px) was sized to the
+      button's `max-inline-size: 8rem` cap, but the button as built — fox,
+      gap, "C³", --sp-3/--sp-4 padding — measures 68px at every width, i.e.
+      4.25rem, which is the figure §17's phone band already reserves for it.
+      4.25rem plus a 1rem gap is 84px; the strip gets 52px back and the button
+      still cannot touch a ticket: the strip is an overflow:hidden box that
+      ends 16px before the button's left edge at any width.
+
+   2. THE TICKETS GO BACK TO --sp-3, the same padding a store desktop uses.
+      The coarse-pointer rule above widens them to --sp-4 for a fingertip,
+      but the target is the ticket's whole box — 81-134px wide and 44px tall
+      either way — so the extra 4px a side buys nothing a finger can feel and
+      costs 56px across seven tickets. This block is placed AFTER the coarse
+      rule on purpose: same specificity, later wins.
+
+   3. BELOW 1120px THE WORDMARK STEPS OFF THE BAR. With 1 and 2 the strip fits
+      from 1120px up (1180x820: 700px of tickets in a 790px box, 68px clear of
+      the end-fade). At 1024 and 1080 it still does not — 694px in 647 — and
+      nothing else on the bar is 47px + 22px of fade wide except the 195px
+      wordmark and its gap. Solved for the crossover: box − tickets ≥ 22px
+      needs W − 2·gut(W) − 84 − 211 − 700 ≥ 22, i.e. W ≥ 1107; the 10.5" iPad
+      Pro is 1112 and lands 5px inside that, so the line is drawn at 1120.
+      Below it the bar reads exactly as §17's phone band does — seven courses
+      and the C³ button — and the name is still the first thing in the hero
+      and the last thing in the footer. 1024x768: 694px in an 855px box.
+
+   Desktop is untouched: the guard is the same iPad-landscape pair §17 uses
+   above, so nothing here reaches 1440 and up, and a 1366x768 LAPTOP (fine
+   pointer, tickets already at --sp-3) changes by the C³ reserve only. */
+@media (min-width: 901px) and (max-width: 1366px) and (orientation: landscape) {
+  #ticket-rail { padding-inline-end: calc(var(--gut) + 4.25rem + var(--sp-4)); }
+  .ticket { padding-inline: var(--sp-3); }
+}
+@media (min-width: 901px) and (max-width: 1120px) and (orientation: landscape) {
+  #ticket-rail .brand { display: none; }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    THE ≤900px / PORTRAIT TAKEOVER
    ═══════════════════════════════════════════════════════════════════════════
@@ -5145,12 +5280,14 @@ dialog#c3-menu[open],
   /* one static plate per screen, no runway, no overlap, no dissolve */
   /* no dissolve, so no pin-lead: the stage is a plain sticky pane again */
   :root { --room-run: 100svh; --dissolve-run: 0px; --overscan-k: 1; --pin-lead: 0px; }
-  /* §06d gives the Back Office its own, smaller bleed so its wall monitor keeps
-     a margin. A per-room custom property is set on a CLOSER ancestor than
-     :root, so it wins here whatever the cascade says — and the plate below is
-     `transform: none`, i.e. not scaled at all. Left alone, §08a's anchor would
-     go on solving itself against a 6% scale that no longer exists and slide the
-     type ~17px off the composition. It is restated rather than removed. */
+  /* §06d gives the Back Office its own, smaller bleed (1.04, so the clipboard
+     wall is in frame). A per-room custom property is set on a CLOSER ancestor
+     than :root, so it wins here whatever the cascade says — and the plate
+     below is `transform: none`, i.e. not scaled at all. Left alone, anything
+     solving against the bleed (wallprint.js's sheet, §08a's anchors) would go
+     on solving against a scale that no longer exists. It is restated rather
+     than removed; this rule is later in the sheet than §06d's and wins on
+     source order. */
   .room[data-room="office"] { --overscan-k: 1; }
   .room, .hero { scroll-snap-align: start; }
   :is(.room, .hero) + .room { margin-block-start: 0; }

@@ -156,6 +156,15 @@ export const HOTSPOTS = {
     { slug:'commission-payouts', kind:'print', x:9.0, y:25.0, w:12.0, h:17.0,
       label:'Commission Payouts 2026', rotate:-1.4 },
 
+    /* ⚠ THE TWO CLIPBOARDS ARE 1.2% FROM THE PLATE'S RIGHT EDGE AND THAT IS
+       NOT A MEASURING ERROR. Traced against plates/office.4e4c6d7172.webp: board 1 spans
+       x 85.4 → 90.8, board 2 spans 91.3 → 98.8. The boxes below sit on them.
+       Whether they are ON SCREEN is the room's framing, not these numbers —
+       theme.css §06d ("THE CLIPBOARD WALL") gives the office a 1.04 bleed and
+       an --art-x of .70 / .90 for exactly this, with the measurements. If a
+       width still cannot show `fall-off` (1180x820 cannot: the tools span
+       88.5% of the plate and that frame shows 77%), fix the crop or accept
+       the chip — do not slide this box off its clipboard to make it fit. */
     { slug:'printouts',        kind:'tool', x:78.1, y:35.0, w:7.9, h:17.2, label:'Print Outs', edge:'right' },
     { slug:'exception-report', kind:'tool', x:85.6, y:36.8, w:4.4, h:20.0, label:'Exception Report', edge:'right' },
     { slug:'fall-off',         kind:'tool', x:91.5, y:34.4, w:6.0, h:24.2, label:'Fall-Off Summary', edge:'right' },
@@ -232,7 +241,7 @@ export const HOTSPOTS = {
        ⚠ NO slug AND NO label, ON PURPOSE, AND DO NOT ADD THEM.
        This tool lives behind the walk-in's lock, which means it is not in the
        deployed tree at all — it is AES-256-GCM ciphertext in
-       data/freezer.sealed.64c7221a97.json (see build/seal-freezer.mjs and the gate note
+       data/freezer.sealed.deaff5d10a.json (see build/seal-freezer.mjs and the gate note
        in app.js §2). Writing its slug, its name or its URL here would put in
        plaintext exactly the three strings the seal exists to remove, and
        build/seal-freezer.mjs's own leak check would fail the next build.

@@ -7,7 +7,7 @@
   <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
     <title>PortPro | Cook County Cooks</title>
     <!-- ═══════════════════════════════════════════════════════════════════
-         TWO THIRD-PARTY DEPENDENCIES, NEITHER OF WHICH MAY HOLD THE PAGE
+         NOTHING IN THIS <head> CAN HOLD THE PAGE BLANK
          ═══════════════════════════════════════════════════════════════════
          Measured 2026-08-31 with cdn.tailwindcss.com and fonts.googleapis.com
          HUNG (connection accepted, never answered — what a store's guest wifi
@@ -15,7 +15,7 @@
 
              BOTH HUNG   t=1.5s / 6s / 15s   document.body MISSING, readyState
                                              "loading". A permanently blank page.
-             FONT ONLY   t=1.5s              still blank — see the warning below
+             FONT ONLY   t=1.5s              still blank — the @import problem
              SCRIPT ONLY t=1.5s              the full guide, all 20+ carriers
 
          A parser-blocking <script src> stops the parser dead, and an @import
@@ -23,34 +23,68 @@
          Neither of these is worth a blank page to a rep who is mid-port with a
          customer's old carrier on speakerphone.
 
-         ONLY THE FONT IS FIXED HERE. It moved to a media="print" <link> that
-         flips to `all` on load: downloaded, never blocking. Same treatment as
-         index.html <head> and assets/theme.429a145a6a.css §00; read either for the note.
+         THE FONT was fixed first: it moved to a media="print" <link> that
+         flipped to `all` on load — downloaded, never render-blocking, the
+         same treatment as index.html <head> and assets/theme.2d7c2c8824.css §00. It has
+         since moved again, to a <link> appended AFTER `load` (the script
+         below says why: a pending stylesheet still holds `load`, and the
+         viewer waits on `load`).
 
-         ⚠ THE TAILWIND SCRIPT IS STILL PARSER-BLOCKING AND STILL CARRIES THE
-         WHOLE HAZARD ON ITS OWN, and that is a known, deliberate gap, not an
-         oversight. Both `defer` and `async` were tried and BOTH RENDER THIS
-         PAGE COMPLETELY UNSTYLED (screenshotted against a local copy of the
-         CDN bundle): the Tailwind play CDN has to be parser-inserted to do its
-         initial scan, so taking it off the critical path with an attribute
-         takes the design with it. Shipping an unstyled porting guide to fix a
-         blank one is not a trade worth making.
+         THE TAILWIND PLAY CDN IS GONE (2026-09-02). It could not be deferred —
+         `defer` and `async` both render this page completely unstyled, because
+         the play CDN generates the CSS at runtime by scanning the DOM and has
+         to be parser-inserted to do it — so it was replaced, not moved: the
+         classes this page uses are compiled by build/porting-guide-css.mjs
+         (Tailwind CLI, pinned to the 3.4.17 the CDN was serving) into
+         assets/porting-guide.af372c18d0.css, one same-origin file that build/fingerprint.mjs
+         hashes like every other asset and sw.js caches for offline. A/B'd
+         against the CDN render at 390x844, 820x1180, 1180x820 and 1440x900:
+         0 differing pixels. Re-measured with cdn.tailwindcss.com hung: the full
+         guide at t=1.5s. There is no third-party request on the critical path
+         any more, so there is nothing left here to hang.
 
-         THE REAL FIX, for whoever picks this up: stop using the play CDN in
-         production. Either compile the classes this page uses into a static
-         stylesheet, or vendor the bundle into assets/ so it is SAME-ORIGIN —
-         at which point it cannot hang on a third party at all, the
-         fingerprinter hashes it like everything else, and sw.js caches it for
-         offline. Until then, this page is one hung cdn.tailwindcss.com away
-         from a white screen, exactly as measured above.
+         ⚠ THE <link> IS BELOW THE INLINE <style>, AND MUST STAY THERE. The play
+         CDN appended its sheet to <head>, after that <style>, so on equal
+         specificity the utilities won — every .carrier-card carries both
+         `border-slate-100` and the inline `border: 1px solid #e2e8f0`, and the
+         border the page has always shown is the utility's #f1f5f9. Moving the
+         link above the <style> flips that. The script has the full note.
 
-         (The carrier logos from cdn.simpleicons.org are <img>, so they were
-         never able to block anything, and are left alone.) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+         If a class is added to this page, re-run build/porting-guide-css.mjs
+         and then build/fingerprint.mjs, or the new class will not be styled.
+
+         THE CARRIER LOGOS from cdn.simpleicons.org are <img>, so they never
+         blocked the parser — but an eager <img> that never answers does hold
+         this document's `load` event, and that is what the site's viewer
+         (overlay.js) waits on before showing a framed tool. They are
+         loading="lazy" now; the note beside them in the script has the
+         measurement. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-          media="print" onload="this.media='all'">
+    <script>
+      /* INTER IS ASKED FOR AFTER `load`, NOT BEFORE IT. The media="print"
+         trick this replaced kept the font off the RENDER path, but a pending
+         <link rel="stylesheet"> — print media or not — still holds the
+         document's `load` event, and `load` is the signal the site's viewer
+         (overlay.js) waits on before it fades a framed tool in. Measured
+         2026-09-02 with fonts.googleapis.com hung: this page rendered in full,
+         readyState stuck at "interactive", and the viewer sat on "PortPro is
+         still loading" over it until its 30 s card. Appending the <link> once
+         `load` has fired costs nothing visible — with the logos lazy, `load`
+         is at ~40 ms, and display=swap was already swapping Inter in late — and
+         means no third-party host can hold this document's `load` at all. The
+         <noscript> copy is for the browser with scripts off, which is also
+         the browser that never runs the viewer. */
+      (function () {
+        var add = function () {
+          var l = document.createElement('link');
+          l.rel = 'stylesheet';
+          l.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap';
+          document.head.appendChild(l);
+        };
+        if (document.readyState === 'complete') add(); else addEventListener('load', add);
+      })();
+    </script>
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"></noscript>
     <style>
         
@@ -81,6 +115,8 @@
 
         details summary::-webkit-details-marker { display:none; }
     </style>
+    <!-- compiled utilities — see the note at the top of <head>; stays BELOW the <style> above -->
+    <link rel="stylesheet" href="../../assets/porting-guide.af372c18d0.css">
 </head>
 <body class="text-slate-900">
 
@@ -486,8 +522,18 @@
 
             grid.innerHTML = filtered.map(c => {
                 // Determine if we should show an image or an initial
+                /* loading="lazy" IS NOT A PERFORMANCE NICETY HERE. These 18 logos
+                   come from cdn.simpleicons.org, and an eager <img> that never
+                   answers holds this document's `load` event open — which is the
+                   event overlay.js waits on before it fades the viewer in. So a
+                   hung logo host meant "Still loading PortPro…" over a page that
+                   had in fact rendered, then the 30 s card. Measured 2026-09-02
+                   with cdn.simpleicons.org hung: eager, the viewer never showed;
+                   lazy, it showed in 370 ms, because a lazy image does not
+                   delay `load` (the page itself fired it at 39 ms). Above the
+                   fold they still fetch immediately; the rest fetch on scroll. */
                 const logoHtml = c.logoSlug 
-                    ? `<img src="https://cdn.simpleicons.org/${c.logoSlug}/${c.logoColor || '334155'}" 
+                    ? `<img loading="lazy" src="https://cdn.simpleicons.org/${c.logoSlug}/${c.logoColor || '334155'}" 
                              alt="${c.name}" class="w-full h-full object-contain" 
                              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                        <span class="hidden w-full h-full items-center justify-center text-xl font-black text-slate-400 bg-slate-50 uppercase">${c.name[0]}</span>`

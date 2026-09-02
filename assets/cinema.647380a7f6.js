@@ -47,10 +47,10 @@
  * ========================================================================== */
 
 import { initEngine, scrollToRoom, onRoomChange } from './engine.cccb8d066e.js';
-import { initOverlay, openTool } from './overlay.35fa3071c9.js';
-import { mountRoomScreens } from './screens.20698f46a0.js';
+import { initOverlay, openTool } from './overlay.9fb4522061.js';
+import { mountRoomScreens } from './screens.bfbe8d00d4.js';
 import { initChefWall } from './chefwall.2e2da0a5e6.js';
-import { initLabels } from './labels.f1537c4fa4.js';
+import { initLabels } from './labels.004e6bcaaf.js';
 import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
 import { initFreezer } from './freezer.39bd7199fd.js';
 /* The lock is shared with the pocket list — see coldgate.js. It owns the
@@ -59,9 +59,9 @@ import { initFreezer } from './freezer.39bd7199fd.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.7bf94d863d.js';
+} from './coldgate.a0693d1e74.js';
 import { el, fill, $ } from './dom.a199da796c.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.0d391dfcf1.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.3f8fbb069b.js';
 
 
 /* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the
@@ -1007,13 +1007,14 @@ function buildTicketRail(data) {
 
        On a phone this would be dead code anyway: theme.css §17 puts all seven
        tickets on two rows below 560px, so there is no overflow to scroll and
-       the current room is visible because every room is. The 34px shear at
-       1180x820 is real and is NOT fixed by this pass — it is outside the phone
-       band this work is gated on, and every candidate fix (a smaller C³
-       reserve, tighter ticket padding, the two-row menu) repaints an iPad
-       layout that was signed off and that this pass was required to leave
-       pixel-identical. It is written down here rather than left to be
-       rediscovered. */
+       the current room is visible because every room is. The 1180x820 shear
+       was real and was left for a later pass because every candidate fix
+       repainted a signed-off iPad layout; that constraint was lifted on
+       2026-09-02 and it is FIXED IN theme.css ("THE COURSE MENU ON AN iPAD IN
+       LANDSCAPE"): a C³ reserve sized to the button, --sp-3 tickets, and the
+       wordmark off the bar below 1120px. Measured after: 700px of tickets in
+       a 790px box at 1180x820, 694 in 855 at 1024x768 — nothing overflows on
+       any iPad in landscape, so there is still nothing here to scroll. */
   });
 
   return header;
@@ -1043,7 +1044,7 @@ const FOX_SVG =
 function buildC3Menu(data) {
   const button = el('button', {
     type: 'button', id: 'c3-button', 'aria-expanded': 'false',
-    'aria-controls': 'c3-menu', 'aria-label': 'Blue Fox C³ — all repositories'
+    'aria-controls': 'c3-menu', 'aria-label': 'Blue Fox C³ — every tool'
   });
   button.innerHTML = FOX_SVG + '<span class="c3-mark">C³</span>';
 
@@ -1056,7 +1057,7 @@ function buildC3Menu(data) {
     tabindex: '-1'
   }, [
     el('div', { id: 'c3-menu-head' }, [
-      el('h2', { class: 't-sub', id: 'c3-menu-title', text: 'All repositories' }),
+      el('h2', { class: 't-sub', id: 'c3-menu-title', text: 'Every tool' }),
       el('span', { class: 'kicker', 'data-c3-count': '', text: `${totalToolCount(data)} tools` })
     ]),
     el('hr', { class: 'rule' }),
