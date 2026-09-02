@@ -66,19 +66,24 @@
  *
  * The href is the INTERNAL deep link, not the repository URL, so "copy link"
  * hands someone a cookcountycooks.com address that opens the tool in the site
- * rather than a bare github.io one. The repository URL stays on the row in
- * data-url, which is what the freshUrl stamp is computed from and what the
- * viewer's "open in a new tab" control uses.
+ * rather than a bare github.io one. v15: THAT IS NOW TRUE, AND STAYS TRUE.
+ * For two builds the paragraph above was the intent and restamp() was the
+ * fact: it rewrote every row's href to freshUrl(data-url) — the stamped
+ * repository URL — on every render, so a long-press on a phone copied the
+ * repository after all. The client has since asked that reps never see where
+ * the tools are hosted, so the rewrite is gone, data-url is gone with it, and
+ * the stamp is minted where it has always mattered: on the viewer's frame,
+ * on every open. A ⌘-click on a row opens cookcountycooks.com with the tool
+ * framed — a fresh copy, because that open stamps its own frame.
  * ========================================================================== */
 
 import { el, fill, $ } from './dom.a199da796c.js';
-import { freshUrl } from './freshurl.11f28a5de9.js';
-import { initOverlay } from './overlay.7e3a74ff05.js';
+import { initOverlay } from './overlay.35fa3071c9.js';
 import { ROOM_ORDER } from './roomorder.a179fcfeea.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.7bf94d863d.js';
+} from './coldgate.a0693d1e74.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -178,36 +183,23 @@ const FOX_SVG =
 /**
  * One row.
  *
- * The href carries the cache-busting stamp the rest of the site uses, because
- * the client's complaint was specifically that a rep opens a quote sheet and
- * gets an hour-old copy of it: "essentially, it would be a fresh load every
- * time we pull up the repository." The stamp is written into the ATTRIBUTE, not
- * bolted on at click time, so the URL a rep long-presses and sends to someone
- * else is the same URL the row opens. It is re-stamped whenever the page comes
- * back to the foreground — see restamp() — so a list left open on a locked
- * phone for an hour does not hand out an hour-old stamp.
+ * The href is the site's own deep link and nothing ever rewrites it. The
+ * freshness the client asked for ("essentially, it would be a fresh load every
+ * time we pull up the repository") is delivered by the viewer, which stamps
+ * its frame's src with freshUrl() on every open — including the open that a
+ * ⌘-click or a pasted link produces, since both land on `#/tool/<slug>` and
+ * go through the same openTool(). There is no path from this row to the
+ * repository address: not the href, not a data attribute (data-url is gone),
+ * not a long-press.
  */
 function toolRow(tool) {
   const a = el('a', {
     class: 'tool-row pocket-row',
-    /* The deep-link shape overlay.js §8 owns, and the row needs no handler of
-       its own because §9 delegates the click off data-tool.
-
-       ⚠ IT DOES NOT STAY THIS. render() calls restamp() on the way out, which
-       rewrites this href to freshUrl(data-url) — the stamped repository URL.
-       That has always been the intent (see the doc comment above this
-       function); what was new is that it now happens on EVERY render rather
-       than only on visibilitychange, so a row is never handed out unstamped.
-       What it costs: a long-press "copy link" gives the repository URL with a
-       `_ccc` stamp on it rather than a cookcountycooks.com deep link. What it
-       buys: a ⌘-click or middle-click — which onDocumentClick deliberately
-       lets through unhandled — goes straight to a FRESH copy of the tool
-       instead of a cached one, and that is the client's stated complaint.
-       The repository URL is also in data-url, which is what restamp reads. */
+    // The deep-link shape overlay.js §8 owns, and the row needs no handler of
+    // its own because §9 delegates the click off data-tool.
     href: `#/tool/${encodeURIComponent(tool.slug)}`,
     'data-tool': tool.slug,
     'data-slug': tool.slug,
-    'data-url': tool.url,
     // AN EXPLICIT NAME, because the computed one was wrong. The name and the
     // blurb are two sibling <span>s with no text node between them, and the
     // accessible-name algorithm concatenates element children with NO
@@ -457,15 +449,6 @@ export async function boot() {
     foot.querySelector('.pocket-colophon').textContent =
       `Cook County Cooks · ${open + sealed} tools across ${data.rooms.length} rooms · Blue Fox C³`;
 
-    /* ⚠ AND THE STAMP GOES BACK ON, EVERY TIME, BECAUSE THIS FUNCTION REBUILDS
-       THE ROWS. restamp() below rewrites every row's href on visibilitychange
-       and pageshow — and then the very next keystroke in the search box called
-       render(), which threw those rows away and built new ones carrying
-       whatever stamp toolRow() minted at build time. So the staleness fix was
-       undone by the act of searching, which is how a rep reaches a tool. The
-       call belongs HERE, at the end of the one function that creates rows, so
-       there is no path that produces an unstamped row. */
-    restamp();
   }
 
   render();
@@ -494,24 +477,12 @@ export async function boot() {
   onFreezerUnlock(() => render());
 
   /* ---- keeping the links fresh ------------------------------------------
-   * The stamp in every href is fixed at render time. A phone that has had this
-   * list open in a background tab since this morning would hand out this
-   * morning's stamp, which is the exact staleness the client reported. Re-stamp
-   * on the two events that mean "the rep is looking at this again": the tab
-   * coming to the foreground, and a restore out of the back/forward cache —
-   * which is what iOS does every time someone taps Back out of a tool. */
-  function restamp() {
-    for (const a of results.querySelectorAll('a[data-url]')) {
-      a.href = freshUrl(a.dataset.url);
-    }
-  }
-  /* Hoisted note: render() calls this too. See the comment at the end of
-     render() — every rebuild of the list re-stamps, so the two events below are
-     about the list going STALE while it sits there, not about it being built. */
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') restamp();
-  });
-  window.addEventListener('pageshow', (ev) => { if (ev.persisted) restamp(); });
+   * There is nothing to keep fresh any more. v12–v14 re-stamped every row's
+   * href with freshUrl() at render, on visibilitychange and on pageshow, so a
+   * list left open since the morning would not hand out the morning's stamp.
+   * The rows no longer carry a stamped URL at all (see toolRow()), so the
+   * staleness lives in exactly one place — the viewer's frame — and the viewer
+   * mints its stamp at the moment of each open. Nothing here to do. */
 
   /* The sealed thirteen. While the walk-in is shut coldTools() is empty and
      every unknown slug is gated, which is what keeps a typed deep link from

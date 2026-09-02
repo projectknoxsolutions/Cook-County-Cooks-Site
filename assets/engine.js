@@ -258,6 +258,16 @@ const state = {
   lastVvSig: '',          // visual-viewport size fingerprint (iOS toolbar detector)
   lastMeasureAt: 0,       // nowMs() of the last measure(), for the leading-edge throttle
   lastPaintRefresh: 0,    // nowMs() of the last forced re-observation
+  measureDeferred: false, // measure() ran while the rooms were out of the scroll
+                          // flow (the viewer's scroll lock) and kept the old table;
+                          // a real pass is owed. See roomsOutOfFlow().
+
+  // Focus bookkeeping for the FOCUS OWNERSHIP block: the last in-room element
+  // to take focus, and where the page was when it did. Together they tell a
+  // focus RESTORE (the viewer handing focus back to the hotspot that opened it)
+  // from the reader moving. See onFocusIn().
+  lastRoomFocus: null,
+  lastRoomFocusY: -1,
 
   // scrollToRoom tween
   tween: null,          // { from, to, start, dur, resolve, cancelled }
@@ -297,7 +307,79 @@ function offAll() {
  * performs at most one layout flush for the whole pass regardless of how many
  * rooms exist. Called on init, on debounced resize, on orientationchange, on
  * visualViewport resize, and when the page becomes visible again.
+ *
+ * It can also DECLINE. A pass taken while the rooms are out of the document's
+ * scroll flow (the tool viewer's scroll lock) is kept out of the table and
+ * retaken at the next event after the unlock — see roomsOutOfFlow() below.
  * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A MEASUREMENT IS ONLY A MEASUREMENT IF THE ROOMS ARE IN THE DOCUMENT.
+ *
+ * THE DEFECT, MEASURED. The tool viewer (overlay.js §3) locks background scroll
+ * the only way that holds on iOS: `body { position: fixed; top: -<scrollY>px }`.
+ * While that is on, the rooms are still drawn exactly where they were, but the
+ * document has no idea they exist — a fixed body contributes nothing to the
+ * scrollable overflow — so `scrollY` reads 0 and `scrollHeight` collapses to one
+ * viewport. Every geometry event that fires in that window (a tab switch to the
+ * POS and back, an iPad rotation, the on-screen keyboard coming up under a quote
+ * sheet, a Split View drag) lands in measure(), and measure() faithfully cached
+ * the VISUAL offsets as if they were document offsets. Reproduced at 1440x900,
+ * office room open at scrollY 7920: one measure() during the lock and the
+ * office's cached top went 7920 -> 0, and every other room's moved by the same
+ * -7920. Nothing re-measures on close, so the table stayed wrong.
+ *
+ * What the rep then saw when the viewer closed:
+ *     · every stage on screen at --enter 0, opacity 0 — lit pixels 0.0% of the
+ *       viewport, and 0.0% after scrolling, because every scroll position is
+ *       being read against the wrong table;
+ *     · 0 of 16 hotspots hit-testable, so no tool would open;
+ *     · the ticket rail still lit for the room they had been in;
+ *     · and, since the focus-ownership block below reads the same table, the
+ *       page teleported to scrollY 0 as focus returned to the hotspot.
+ *   The main thread was healthy throughout (0 long tasks, rAF at 58 fps): it was
+ *   not a hang, it was a page confidently painting nothing. To the rep that is
+ *   "the whole site locking up and freezing", and a reload is the only way out.
+ *   The v6 build showed the same black page (no scroll jump; the focus block
+ *   did not exist yet), so this predates last night's changes.
+ *
+ * THE RULE. A room cannot lie outside the document that contains it: not above
+ * its top, not below its `scrollHeight`. If the pass just read a room top at a
+ * negative document offset, or a room bottom past the end, the rooms are not in
+ * the scroll flow
+ * right now, and the pass is not a measurement of the page — it is a
+ * measurement of the lock. Keep the table we have (it was right when the lock
+ * went on, and the page is put back exactly where it was when it comes off),
+ * remember that a measurement is owed, and take it at the first event after
+ * the rooms are back in the flow: the unlock's own scrollTo(), the focus
+ * returning to the hotspot, the next geometry event, or the tab becoming
+ * visible. Each of those is an event handler, so the layout read stays out of
+ * the loop.
+ *
+ * BOTH HALVES ARE NEEDED. The bottom test alone catches the common case (the
+ * viewer opened deep in the page: the freezer's bottom read 5328 against a
+ * 900px document). It misses a resize INSIDE the lock that makes the rooms
+ * shorter than the stashed offset: 1440x900 -> 1100x700 with the office open
+ * shrank the eight rooms to 8470px, so with the body still held at -7920px
+ * every room sat entirely above the viewport — bottom 550, document 700 — and
+ * the pass went through and wrote the table. The hero's top read -7920 in that
+ * same pass, which no in-flow layout can produce: the rail is fixed, nothing
+ * above the hero is in flow, and no room carries a negative margin.
+ *
+ * Tested on the invariant rather than on overlay.js's class name so the engine
+ * still knows nothing about the viewer, and so any future lock that takes the
+ * rooms out of the flow — whatever it is called — is caught by the same line.
+ * `html` and `body` clip on x only, and the page's height IS the rooms.
+ */
+function roomsOutOfFlow(docScrollHeight, firstRoomTop, lastRoomBottom) {
+  return firstRoomTop < -1 || lastRoomBottom > docScrollHeight + 1;
+}
+
+/** measure() found the rooms out of the scroll flow and kept the old table. A
+ *  fresh pass is owed the moment they are back. */
+function retryDeferredMeasure() {
+  if (state.measureDeferred && !state.destroyed) measure();
+}
 
 function measure() {
   const rooms = state.rooms;
@@ -309,7 +391,17 @@ function measure() {
   const scrollY = window.scrollY || window.pageYOffset || 0;
 
   // --- READ PHASE (no writes below this line until the loop ends) ---
-  for (let i = 0; i < rooms.length; i++) {
+  // Read into locals, not into M: the pass may turn out not to be a measurement
+  // of the page at all (see roomsOutOfFlow), and a half-written table is worse
+  // than the old one.
+  const docH = document.documentElement.scrollHeight;
+  const n = rooms.length;
+  const tops = new Float64Array(n);
+  const heights = new Float64Array(n);
+  const stageHs = new Float64Array(n);
+  let firstTop = Infinity;
+  let lastBottom = -Infinity;
+  for (let i = 0; i < n; i++) {
     const r = rooms[i];
     const roomRect = r.el.getBoundingClientRect();
     const stageRect = r.stage.getBoundingClientRect();
@@ -321,18 +413,33 @@ function measure() {
     // runway from it (instead of window.innerHeight) is what makes iOS Safari's
     // collapsing address bar a non-event: svh does not change when the chrome
     // hides, so neither does any number we cache here.
-    const stageH = stageRect.height || height;
-
-    const o = i * M_STRIDE;
-    M[o + M_TOP] = top;
-    M[o + M_HEIGHT] = height;
-    M[o + M_STAGE_H] = stageH;
-    // Guard against a room shorter than its stage (mis-authored CSS): a zero or
-    // negative runway would produce Infinity/NaN progress.
-    M[o + M_RUNWAY] = Math.max(1, height - stageH);
-    M[o + M_DIR_X] = (i % 2 === 0) ? 1 : -1;
+    tops[i] = top;
+    heights[i] = height;
+    stageHs[i] = stageRect.height || height;
+    if (top < firstTop) firstTop = top;
+    if (top + height > lastBottom) lastBottom = top + height;
   }
   // --- END READ PHASE ---
+
+  if (roomsOutOfFlow(docH, firstTop, lastBottom)) {
+    // Not the page. Keep the table, owe a measurement, touch nothing else — the
+    // curtain and the loop are left exactly as they are, because whatever is
+    // covering the rooms right now is not something this engine can see past.
+    state.measureDeferred = true;
+    return;
+  }
+  state.measureDeferred = false;
+
+  for (let i = 0; i < n; i++) {
+    const o = i * M_STRIDE;
+    M[o + M_TOP] = tops[i];
+    M[o + M_HEIGHT] = heights[i];
+    M[o + M_STAGE_H] = stageHs[i];
+    // Guard against a room shorter than its stage (mis-authored CSS): a zero or
+    // negative runway would produce Infinity/NaN progress.
+    M[o + M_RUNWAY] = Math.max(1, heights[i] - stageHs[i]);
+    M[o + M_DIR_X] = (i % 2 === 0) ? 1 : -1;
+  }
 
   state.measures++;
   state.lastMeasureAt = nowMs();
@@ -1853,8 +1960,49 @@ function onFocusIn(ev) {
   const i = state.byId.get(roomEl.id);
   if (i === undefined) return;            // a section the engine skipped
 
+  /* THE STAGE IS NOT A SCROLLER, and the browser has just scrolled it. Focus
+     scrolls the new element into view through EVERY scrollable ancestor before
+     this handler runs, and `.stage { overflow: hidden }` counts: it cannot be
+     scrolled by a finger, but it can by focus. The note on revealWithinRoom()
+     records the hand-rolled reveal being written to avoid exactly that, and it
+     does — but the browser's own pass had already happened. Measured, this
+     build, 1440x900: Tab onto the Back Office's Fall-Off hotspot (39% of it past
+     the right edge of the plate, §17) and `.stage.scrollLeft` read 187. The
+     plate, the light layers, the hotspot layer and the rail all panned 187px
+     left and stayed there for the rest of the session: Commission Payouts
+     landed at x -174, off the left edge, and no longer took a click. Put the
+     composition back before anything else reads a rect off it. One property
+     read per focus event, a write only when it moved. */
+  const stage = state.rooms[i].stage;
+  if (stage.scrollLeft || stage.scrollTop) { stage.scrollLeft = 0; stage.scrollTop = 0; }
+
+  // Everything below reads M. If the last geometry event landed while the
+  // viewer's scroll lock had the rooms out of the flow, the table is owed a
+  // pass and this is the first event after the unlock that can take it — the
+  // unlock's own scroll event is queued behind us. See roomsOutOfFlow().
+  retryDeferredMeasure();
+
+  /* A FOCUS RESTORE IS NOT THE READER MOVING. When the tool viewer closes it
+     hands focus back to the hotspot that opened it (overlay.js restoreFocus),
+     and that hotspot is, by construction, in the room the reader was already
+     in: they activated it there, the page has been locked in place since, and
+     the unlock puts scrollY back to the pixel. The ownership rule below exists
+     for focus ARRIVING somewhere — Tab walking into a clipped room — and has
+     nothing to say about focus coming home. It is told apart by the two facts
+     that are true of a restore and false of navigation: the same element that
+     last held focus in the rooms, at the same scroll position it held it at.
+     Tab-Tab-Tab moves to a new element every press; a wheel scroll and a
+     Shift+Tab back to the old one changes scrollY; both still get the rule.
+     syncNow() still runs so the first frame painted after the viewer lifts is
+     computed for THIS scroll position, not the 0 the lock left behind. */
+  const y = window.scrollY || window.pageYOffset || 0;
+  const restore = t === state.lastRoomFocus && Math.abs(y - state.lastRoomFocusY) < 2;
+  state.lastRoomFocus = t;
+  state.lastRoomFocusY = y;
+
   if (state.reduceMotion) return;         // §18 un-clips everything; nothing to do
   syncNow();
+  if (restore) return;
   if (!roomOwnsPage(state.rooms[i])) bringRoomToReadingPosition(i);
   revealWithinRoom(t, state.rooms[i].stage);
 }
@@ -1953,6 +2101,11 @@ function revealWithinRoom(el, stage) {
 const JUMP_FRACTION = 0.5;
 
 function onScroll() {
+  // The viewer's unlock is a scrollTo() back to where the page was, and it is
+  // the one event guaranteed to follow the rooms returning to the scroll flow.
+  // A measurement owed from inside the lock is taken here, once; on a healthy
+  // page this is a boolean test. See roomsOutOfFlow().
+  retryDeferredMeasure();
   const y = window.scrollY || window.pageYOffset || 0;
   if (state.lastScrollY >= 0 &&
       Math.abs(y - state.lastScrollY) > (window.innerHeight || 800) * JUMP_FRACTION) {
@@ -1979,7 +2132,9 @@ const MEASURE_THROTTLE_MS = 80;
  *  Every geometry event goes through here. */
 function measureThrottled() {
   if (state.destroyed) return;
-  if (nowMs() - state.lastMeasureAt >= MEASURE_THROTTLE_MS) measure();
+  // A deferred pass bypasses the throttle: nothing was measured last time, so
+  // there is nothing to be throttling against.
+  if (state.measureDeferred || nowMs() - state.lastMeasureAt >= MEASURE_THROTTLE_MS) measure();
   scheduleRemeasure();
 }
 
@@ -2218,6 +2373,9 @@ export function initEngine(root) {
   clearTimeout(state.dwellTimer);   state.dwellTimer = 0;
   state.byStage.clear();
   state.lastVvSig = visualViewportSignature();
+  state.measureDeferred = false;
+  state.lastRoomFocus = null;
+  state.lastRoomFocusY = -1;
 
   state.byName.clear();
   state.byId.clear();
@@ -2331,6 +2489,7 @@ function publicApi() {
         settles: state.settles,
         repairs: state.repairs,
         measures: state.measures,
+        measureDeferred: state.measureDeferred,
         live: state.rooms.map((r, i) => !!state.liveFlags[i]),
         curtainArmed: state.curtainArmed,
         resident: state.rooms.map((r, i) => ((state.residentMask >> i) & 1) === 1),
@@ -2369,6 +2528,9 @@ export function destroyEngine() {
   state.byName.clear();
   state.byId.clear();
   state.roomChangeCbs.clear();
+  state.measureDeferred = false;
+  state.lastRoomFocus = null;
+  state.lastRoomFocusY = -1;
   state.inited = false;
   state.activeIndex = -1;
   state.promoA = -1;

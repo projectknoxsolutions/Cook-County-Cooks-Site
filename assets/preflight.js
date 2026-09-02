@@ -166,8 +166,8 @@ function bodyLength(res) {
  *                readable cross-origin — so this is "it is there", not "it
  *                will show".)
  *   gone         the server answered, and the answer was an error status, or
- *                it refused CORS on a host we have verified always allows it.
- *                A card, immediately.
+ *                it refused CORS TWICE (400 ms apart) on a host we have
+ *                verified always allows it. A card, immediately.
  *   unreachable  nothing answered at all: DNS, refused, TLS, a redirect to a
  *                dead host, or the machine is offline. A card, immediately.
  *   slow         no answer inside timeoutMs. Not a failure — a hang. The
@@ -229,48 +229,92 @@ export function preflight(url, opts = {}) {
     (err) => {
       first.done();
       if (first.aborted() || (err && err.name === 'AbortError')) return verdict('slow');
-      // The cors probe was refused. Was anything there at all? A no-cors HEAD
-      // resolves (opaquely) whenever the network transaction succeeded, and
-      // rejects only when it did not — which is the discriminator.
-      const second = withTimeout({ mode: 'no-cors' });
-      return second.promise.then(
-        (res2) => {
-          second.done();
-          cancelBody(res2);
-          // Something answered, but would not say what. On a host we have
-          // verified always sends the header, "no header" means the origin-wide
-          // 404 page — there is no site there.
-          return truthful
-            ? verdict('gone', 0, 'no CORS header from a host that always sends one')
-            : verdict('unknown', 0, 'no CORS header');
+      /* ONE FAILED fetch() IS NOT A CORS REFUSAL. The cors probe rejecting is a
+         TypeError whether the server withheld the header or a store's wifi
+         dropped the connection — Safari reports both as "Load failed", and
+         Chromium's "Failed to fetch" is no more specific. The original code
+         took that rejection plus an opaque success from the no-cors probe as
+         proof of the origin-wide 404 page, and on a lossy link that pair is
+         exactly what a WORKING tool produces a few percent of the time: probe
+         one dies, probe two (a fresh request, milliseconds later) gets through.
+         The verdict was `gone`, the card said the page "is gone", and the
+         frame that was mid-download was discarded — so the rep closed it and
+         reopened, and the second time it worked. That is the client's report,
+         word for word ("I have to close it out and reopen several times").
+
+         So the cors probe is tried TWICE before the no-cors discriminator is
+         consulted. A Pages site that really is not there refuses CORS on both
+         (it is a property of the response, not the network); a dropped packet
+         has to happen twice in a row to fool it. The retry waits 400 ms so it
+         is not the same congested instant. Cost on a healthy tool: nothing —
+         the first probe succeeds and this branch never runs. Verified in the
+         harness by aborting the first cors probe only: v13 returned `gone`
+         (card, frame discarded); this returns `ok` on the retry. */
+      const retry = withTimeout({ mode: sameOrigin ? 'same-origin' : 'cors' });
+      const retryAfter = new Promise((r) => setTimeout(r, 400)).then(() => retry.promise);
+      return retryAfter.then(
+        (res) => {
+          retry.done();
+          cancelBody(res);
+          if (res.status === 405 || res.status === 501) return verdict('unknown', res.status, 'method refused');
+          const len = bodyLength(res);
+          if (res.ok && len === 0) return verdict('empty', res.status, 'content-length: 0', len);
+          if (res.ok || (res.status >= 200 && res.status < 400)) return verdict('ok', res.status, 'on retry', len);
+          return verdict('gone', res.status, '', len);
         },
-        (err2) => {
-          second.done();
-          if (second.aborted() || (err2 && err2.name === 'AbortError')) return verdict('slow');
-          return verdict('unreachable', 0, (err2 && err2.message) || 'network error');
+        (errR) => {
+          retry.done();
+          if (retry.aborted() || (errR && errR.name === 'AbortError')) return verdict('slow');
+          // The cors probe was refused twice. Was anything there at all? A
+          // no-cors GET resolves (opaquely) whenever the network transaction
+          // succeeded, and rejects only when it did not — the discriminator.
+          const second = withTimeout({ mode: 'no-cors' });
+          return second.promise.then(
+            (res2) => {
+              second.done();
+              cancelBody(res2);
+              // Something answered, but would not say what. On a host we have
+              // verified always sends the header, "no header" means the
+              // origin-wide 404 page — there is no site there.
+              return truthful
+                ? verdict('gone', 0, 'no CORS header from a host that always sends one')
+                : verdict('unknown', 0, 'no CORS header');
+            },
+            (err2) => {
+              second.done();
+              if (second.aborted() || (err2 && err2.name === 'AbortError')) return verdict('slow');
+              return verdict('unreachable', 0, (err2 && err2.message) || 'network error');
+            }
+          );
         }
       );
     }
   ).catch(() => verdict('unknown'));
 }
 
-/** A short, honest, rep-facing sentence for a verdict. `host` is the pretty
- *  hostname; `label` is the tool's own name. */
-export function preflightCopy(v, label, host) {
+/** A short, honest, rep-facing sentence for a verdict. `label` is the tool's
+ *  own name. The third argument used to be the pretty hostname and every
+ *  sentence led with it ("blufoxmobile.github.io says this tool is not there
+ *  any more"). It is accepted and ignored now: the client wants the tools to
+ *  read as part of cookcountycooks.com, and a hostname in an error message is
+ *  the one place a rep would otherwise learn where they are hosted. Callers
+ *  that still pass it need no change. */
+export function preflightCopy(v, label, _host) {
+  const name = label || 'This tool';
   switch (v.verdict) {
     case 'empty':
-      return `${host} answered, but the page it returned is empty. The tool may be mid-deploy — try again in a minute.`;
+      return `${name} answered, but the page that came back is empty. It may be mid-update — try again in a minute.`;
     case 'gone':
       return v.status === 404
-        ? `${host} says this tool is not there any more (404). It may have been renamed or moved.`
+        ? `${name} is not at its usual address any more (404). It may have been renamed or moved.`
         : v.status
-          ? `${host} answered with an error (HTTP ${v.status}) instead of the tool.`
-          : `${host} has nothing at this address any more — the page it points at is gone.`;
+          ? `${name} answered with an error (HTTP ${v.status}) instead of the tool.`
+          : `${name} has nothing at its address any more — the page it points at is gone.`;
     case 'unreachable':
-      return `${host} could not be reached. If you are on store wifi, check you are past the sign-in page.`;
+      return `${name} could not be reached. If you are on store wifi, check you are past the sign-in page.`;
     case 'slow':
-      return `${host} is not answering. It may be the network rather than the tool.`;
+      return `${name} is not answering. It may be the network rather than the tool.`;
     default:
-      return `${label} could not be shown inside the site.`;
+      return `${name} could not be shown inside the site.`;
   }
 }

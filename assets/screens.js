@@ -354,11 +354,10 @@ function reduceMotion() {
 
 /** 'YYYY-MM-DD' -> 'Aug 26'. Parsed by hand: `new Date('2026-08-26')` is UTC
  *  midnight and prints as the 25th anywhere west of Greenwich. */
-/** Pretty host for a board's URL, for the holding card's note. */
-function hostOf(url) {
-  try { return new URL(url, document.baseURI).hostname.replace(/^www\./, ''); }
-  catch { return String(url || ''); }
-}
+/* hostOf() is gone. It put the board's hostname into the holding card's note
+ * on a failed preflight ("blufoxmobile.github.io says this tool is not there
+ * any more"); the client wants reps never to see where the boards are hosted,
+ * and preflightCopy() names the board instead now. */
 
 function shortDate(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
@@ -2856,27 +2855,51 @@ function makeLive(rec) {
       referrerpolicy: 'no-referrer-when-downgrade'
     });
     frame.setAttribute('role', 'presentation');
+    /* ⚠ THE FIRST `load` AN INSERTED IFRAME FIRES IS FOR about:blank, AND IT
+       FIRES SYNCHRONOUSLY ON INSERTION. This listener used to be `{ once:
+       true }` and was attached BEFORE the frame went into the DOM with no src,
+       so the about:blank load consumed it: `is-live` went on 7 ms after mount
+       (measured in Chromium, deck still in flight), the reveal timer lifted
+       the lid 3.2 s later off a frame whose deck had not arrived, and the 12 s
+       watchdog — which checks for `is-live` — never fired at all. On a slow
+       store connection that is the deck's own white loading screen on the
+       Dining Room wall: the exact photograph this cover was built to end.
+
+       Two defences. The src is set BEFORE insertion, so the first navigation
+       is the deck's and no about:blank load is fired (measured: no load event
+       within 4 s on a 2 Mbps link, then the real one); and the listener is
+       persistent and IGNORES any load whose document is still readable and
+       still about:blank — a cross-origin deck throws on that read, which is
+       the "a real document from another origin is here" signal overlay.js's
+       looksBlocked() is built on. */
+    const mounted = frame;                        // this element, not whatever `frame` is later
     frame.addEventListener('load', () => {
-      if (rec.destroyed || dead) return;
+      if (rec.destroyed || dead || mounted !== rec.liveFrame) return;
+      let blank = false;
+      try { blank = mounted.contentWindow && mounted.contentWindow.location.href === 'about:blank'; }
+      catch { blank = false; }                    // cross-origin: the deck is there
+      if (blank) return;
       window.clearTimeout(watchdog);
+      rec.deckArrived = true;                     // read by liveWanted(), not by CSS
       // the glass powers on now — the deck behind the lid is still white.
       rec.panel.classList.add('is-live');
       window.clearTimeout(revealT);
       revealT = window.setTimeout(uncover, LIVE_REVEAL_MS);
-    }, { once: true });
-    // The lid goes on WITH the frame, not instead of it. See the
-    // .ccc-scr-holding--cover note in the sheet above for the defect this is.
-    cover = holdingCard(rec.title, 'Tap to open this board full screen.');
-    cover.classList.add('ccc-scr-holding--cover');
-    node.replaceChildren(frame, cover);
-    fit();
+    });
+    rec.liveFrame = frame;
     // 5-minute bucket, not a per-mount stamp: these boards mount and unmount
     // as the room scrolls in and out, and a unique URL each time would refetch
     // the whole deck on every pass. Five minutes is well inside "today's
     // numbers" while still picking up a push within one coffee break.
     const BUCKET = 5 * 60 * 1000;
     bucket = Math.floor(Date.now() / BUCKET);
-    frame.src = freshUrl(url, BUCKET);
+    frame.src = freshUrl(url, BUCKET);            // before insertion — see above
+    // The lid goes on WITH the frame, not instead of it. See the
+    // .ccc-scr-holding--cover note in the sheet above for the defect this is.
+    cover = holdingCard(rec.title, 'Tap to open this board full screen.');
+    cover.classList.add('ccc-scr-holding--cover');
+    node.replaceChildren(frame, cover);
+    fit();
 
     /* ⚠ ASK THE SERVER WHETHER THE BOARD IS THERE.
        The `load` listener above is the same trap overlay.js was in: it fires
@@ -2892,22 +2915,28 @@ function makeLive(rec) {
       if (v.verdict !== 'gone' && v.verdict !== 'unreachable' && v.verdict !== 'empty') return;
       dead = true;
       window.clearTimeout(watchdog);
-      refuse(preflightCopy(v, rec.title, hostOf(url)) + ' Tap to open it full screen.');
+      refuse(preflightCopy(v, rec.title) + ' Tap to open it full screen.');
     });
 
-    // A deck that never loads must not leave black glass forever. The lid is
-    // already up, so this only has to say so on it and drop the dead frame.
+    /* A deck that has not arrived by now gets a truer sentence on its lid —
+       and KEEPS ITS FRAME. This used to drop the frame at 12 s, and until v15
+       that was harmless because the about:blank bug above meant it never ran.
+       Now that it can run, dropping the frame would throw away a 5.6 MB deck
+       at second 12 of a 22-second download (4 Mbps) — the same mistake
+       overlay.js's old 6 s watchdog made with the quote sheets. A genuinely
+       dead board is the preflight's call (refuse(), above); this clock only
+       ever changes the words. The lid stays on, the frame stays behind it,
+       and the load listener uncovers the deck whenever it lands. */
     watchdog = window.setTimeout(() => {
-      if (rec.destroyed || rec.panel.classList.contains('is-live')) return;
+      if (rec.destroyed || rec.deckArrived) return;
+      const words = 'This board is taking a while to load. Tap to open it full screen.';
       if (cover) {
         const note = cover.querySelector('.ccc-scr-holding__note');
-        if (note) note.textContent =
-          'This board is not reachable right now. Tap to open it full screen.';
+        if (note) note.textContent = words;
       } else {
-        node.replaceChildren(holdingCard(rec.title,
-          'This board is not reachable right now. Tap to open it full screen.'));
+        node.replaceChildren(holdingCard(rec.title, words));
       }
-      if (frame) { frame.remove(); frame = null; }
+      // The glass "powers on" so the lid reads as a lit card, not black glass.
       rec.panel.classList.add('is-live');
     }, 12000);
   }
@@ -2941,6 +2970,8 @@ function makeLive(rec) {
       frame.remove();
       frame = null;
     }
+    rec.liveFrame = null;
+    rec.deckArrived = false;
     node.replaceChildren();
   }
 
@@ -3834,9 +3865,31 @@ function reconcile() {
  */
 function liveWanted(rec) {
   if (!rec.wantsMount) return false;
+  /* WHILE THE TOOL VIEWER IS UP, A DECK THAT HAS NOT ARRIVED YET IS NOT
+     WANTED. The viewer's scrim hides the whole room, and a 5 MB deck still
+     coming down behind it is on the same HTTP/2 connection — same host — as
+     the tool the rep is now waiting for. Measured at a 4 Mbps shared link,
+     opening Win the Weekend from the Dining Room while its boards were still
+     loading: 33.6 s to the deck's slides (v14), 12.4 s once the in-flight
+     boards were dropped for the duration; the Daily Sales Report from the same
+     spot, 15.7 s to its first slide (v14), 7.3 s. A board that HAS arrived is
+     left alone: it costs no network to keep and 5 MB to bring back, and it is
+     showing again the instant the viewer closes. The dropped ones re-mount on `ccc:viewer-close` through
+     the ordinary reconcile(), from the HTTP cache when the same 5-minute
+     bucket is still current.
+     `deckArrived`, not the `is-live` class: hold() puts is-live on a board
+     that is showing its holding card with no frame at all, and reading the
+     class here re-mounted every dropped board on the next observer callback
+     — measured as the decks downloading TWICE under the scrim (26 MB). */
+  if (viewerOpen && !rec.deckArrived) return false;
   if (!isPhone || !rec.roomEl) return true;
   return !rec.roomEl.classList.contains('is-dormant');
 }
+
+/** True between overlay.js's `ccc:viewer-open` and `ccc:viewer-close`. */
+let viewerOpen = false;
+document.addEventListener('ccc:viewer-open', () => { viewerOpen = true; reconcile(); });
+document.addEventListener('ccc:viewer-close', () => { viewerOpen = false; reconcile(); });
 
 /* liveWanted() reads a class that nothing in this module writes, so nothing in
  * this module would ever notice it change: reconcile() runs on observer

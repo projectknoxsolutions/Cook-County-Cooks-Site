@@ -46,11 +46,11 @@
  * Plain ES module. No build step, no npm, no framework, no external JS.
  * ========================================================================== */
 
-import { initEngine, scrollToRoom, onRoomChange } from './engine.ffe7815af8.js';
-import { initOverlay, openTool } from './overlay.7e3a74ff05.js';
-import { mountRoomScreens } from './screens.d3f0172b89.js';
+import { initEngine, scrollToRoom, onRoomChange } from './engine.cccb8d066e.js';
+import { initOverlay, openTool } from './overlay.35fa3071c9.js';
+import { mountRoomScreens } from './screens.20698f46a0.js';
 import { initChefWall } from './chefwall.2e2da0a5e6.js';
-import { initLabels } from './labels.77d80a465f.js';
+import { initLabels } from './labels.f1537c4fa4.js';
 import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
 import { initFreezer } from './freezer.39bd7199fd.js';
 /* The lock is shared with the pocket list — see coldgate.js. It owns the
@@ -59,9 +59,9 @@ import { initFreezer } from './freezer.39bd7199fd.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.6142738fae.js';
+} from './coldgate.7bf94d863d.js';
 import { el, fill, $ } from './dom.a199da796c.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.16e77c300d.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.0d391dfcf1.js';
 
 
 /* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the

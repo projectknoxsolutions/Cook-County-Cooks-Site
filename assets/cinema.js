@@ -1043,7 +1043,7 @@ const FOX_SVG =
 function buildC3Menu(data) {
   const button = el('button', {
     type: 'button', id: 'c3-button', 'aria-expanded': 'false',
-    'aria-controls': 'c3-menu', 'aria-label': 'Blue Fox C³ — all repositories'
+    'aria-controls': 'c3-menu', 'aria-label': 'Blue Fox C³ — every tool'
   });
   button.innerHTML = FOX_SVG + '<span class="c3-mark">C³</span>';
 
@@ -1056,7 +1056,7 @@ function buildC3Menu(data) {
     tabindex: '-1'
   }, [
     el('div', { id: 'c3-menu-head' }, [
-      el('h2', { class: 't-sub', id: 'c3-menu-title', text: 'All repositories' }),
+      el('h2', { class: 't-sub', id: 'c3-menu-title', text: 'Every tool' }),
       el('span', { class: 'kicker', 'data-c3-count': '', text: `${totalToolCount(data)} tools` })
     ]),
     el('hr', { class: 'rule' }),
