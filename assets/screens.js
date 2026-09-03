@@ -2776,7 +2776,10 @@ function makeFeed(rec) {
  *  own content before the branded holding card is lifted off it.
  *
  *  IT IS A SETTLE, NOT A SIGNAL, AND THAT IS NOT A SHORTCUT — it is the whole
- *  of what a cross-origin frame will tell you. `load` fires when the deck's
+ *  of what a cross-origin frame will tell you UNLESS THE DECK SPEAKS: the
+ *  Daily Sales Report now posts its own `ready`, and for it this settle is
+ *  retired the moment it does — see BOARD_READY_CAP_MS below. For every
+ *  board that stays silent, what follows is still true. `load` fires when the deck's
  *  document is done, which for every one of these boards is before it has
  *  fetched its workbook and drawn a slide; nothing after that is observable
  *  from out here (no same-origin DOM, no resource timing for its subresources,
@@ -2794,6 +2797,46 @@ function makeFeed(rec) {
  *  on this same card instead of swapping the card for another one. */
 const LIVE_REVEAL_MS = 3200;
 
+/* ── THE READY HANDSHAKE — a board that says when it has drawn ─────────────
+   LIVE_REVEAL_MS above is a guess about a deck we cannot see into, and the
+   Break Room TV showed what a guess costs. Observed in the client's own
+   Chrome (2026-09-03): the lid lifted 3.2 s after the Daily Sales Report's
+   `load`, but the report only draws after ITS OWN workbook fetch + parse —
+   5-15 s on store wifi, never when the fetch stalls — so the rep saw the
+   report's white "Loading Sales Report…" screen for that whole window
+   (white at 8:12 PM, real data at 8:22 PM). `load` is a poor proxy in BOTH
+   directions: it is held back by a 365 KB promo-card probe and a Google
+   Fonts sheet, so on a fast link it fires before the content and on a slow
+   one after it.
+
+   So the report now tells us. From inside the frame it posts
+     { source:'ccc-board', board:'daily-sales', state:'loading'|'ready'|'error' }
+   `loading` when its spinner goes up (every load, retries included), `ready`
+   at the exact line that hides that spinner after the first slide is drawn,
+   `error` when its "Failed to fetch — Retry" screen shows. Trust is by
+   IDENTITY, not by origin string: a message is taken only when
+   `event.source === frame.contentWindow` — the element we mounted is the
+   only thing that can speak for it, whatever origin it was served from.
+
+   A board that never posts (both Win-the-Weekend decks, anything older) is
+   not changed at all: nothing above disarms the `load` + LIVE_REVEAL_MS
+   reveal until the first ccc-board message arrives, and the report posts
+   `loading` from its inline script — during parse, before `load` can fire —
+   so the two paths never race on the one board that speaks.
+
+   BOARD_READY_CAP_MS is for the third case: a board that said `loading` and
+   then went quiet (the workbook request hung with no error — the shape the
+   8:12-to-8:22 stall took). The lid HOLDS — the alternative is the white
+   screen this exists to end — and after the cap the note becomes the same
+   "not reachable" sentence the preflight uses, and the frame is re-mounted
+   with a fresh stamp on the retryDelay() backoff (20 s, 40 s… five-minute
+   floor; see RETRY_MAX_MS for the arithmetic). 45 s is the report's OWN cap
+   on its slowest feed (loadTSheetCounts: normal answers take 12.7-16.7 s,
+   measured 2026-09-02), so anything that has not drawn by then is not slow,
+   it is stuck, and a fresh request is the only thing that will move it. */
+const BOARD_READY_CAP_MS = 45 * 1000;
+const BOARD_UNREACHABLE = 'This board is not reachable right now. It will try again on its own — or tap to open it full screen.';
+
 function makeLive(rec) {
   const node = el('div', { class: 'ccc-scr-live' });
   let frame = null;
@@ -2802,12 +2845,25 @@ function makeLive(rec) {
   let revealT = 0;
   let bucket = 0;        // which 5-minute stamp the mounted frame is carrying
   let dead = false;      // the preflight said the board is not there
+  let speaks = false;    // THIS frame has posted a ccc-board message — it owns the reveal
+  let failed = false;    // the board said `error`, or BOARD_READY_CAP_MS ran out
+  let capT = 0;          // the ready cap, armed by the first `loading`
+  let retryT = 0;        // the backoff re-mount after a failure
+  let attempt = 0;       // consecutive failures, drives retryDelay(); reset by `ready`
+  let onMessage = null;  // the window listener for the mounted frame
+  let wantFresh = false; // retry() asks the next mount() for a unique stamp
 
   /** The board did not come back. Say so on the lid rather than lifting it off
    *  a grey rectangle, and drop the frame — there is nothing behind it. */
   function refuse(note) {
     window.clearTimeout(revealT);
     revealT = 0;
+    // The preflight's word is final for this mount: no ready cap and no
+    // backoff re-mount on top of it. A dead board comes back the way it
+    // always has — refresh() when the 5-minute stamp moves, or the room
+    // scrolling out of range and back.
+    window.clearTimeout(capT); capT = 0;
+    window.clearTimeout(retryT); retryT = 0;
     if (cover) {
       const n = cover.querySelector('.ccc-scr-holding__note');
       if (n) n.textContent = note;
@@ -2831,8 +2887,99 @@ function makeLive(rec) {
     window.setTimeout(() => { if (lid.parentNode) lid.remove(); }, 700);
   }
 
+  /** Put the lid back on (or leave it on) over the frame with these words.
+   *  The frame stays behind it: this is the branded card as a LID, exactly as
+   *  mount() lays it, so a board that goes back to `loading` after it has
+   *  been uncovered gets the same card the next viewer would. */
+  function armLid(words) {
+    if (cover) {
+      const n = cover.querySelector('.ccc-scr-holding__note');
+      if (n) n.textContent = words;
+      return;
+    }
+    cover = holdingCard(rec.title, words);
+    cover.classList.add('ccc-scr-holding--cover');
+    node.append(cover);
+  }
+
+  /** `ready`: the deck has drawn. Every clock that was waiting for it stops,
+   *  and the lid comes off NOW rather than on a timer. */
+  function arrived() {
+    window.clearTimeout(watchdog);
+    window.clearTimeout(capT); capT = 0;
+    window.clearTimeout(retryT); retryT = 0;
+    window.clearTimeout(revealT); revealT = 0;
+    attempt = 0;
+    failed = false;
+    rec.deckArrived = true;                       // read by liveWanted(), not by CSS
+    rec.panel.classList.add('is-live');
+    uncover();
+  }
+
+  /** `error`, or the cap ran out: keep the lid, change its words, and put a
+   *  fresh request on the backoff clock. deckArrived goes false on purpose —
+   *  a board with nothing drawn is the one liveWanted() is allowed to drop
+   *  while the viewer is up, because it has nothing to lose. */
+  function fail(words) {
+    failed = true;
+    window.clearTimeout(watchdog);
+    window.clearTimeout(capT); capT = 0;
+    window.clearTimeout(revealT); revealT = 0;
+    rec.deckArrived = false;
+    armLid(words);
+    rec.panel.classList.add('is-live');           // a lit card, not black glass
+    window.clearTimeout(retryT);
+    retryT = window.setTimeout(retry, retryDelay(attempt));
+    attempt += 1;
+  }
+
+  /** Re-mount with a fresh stamp — a unique URL, not the 5-minute bucket, so
+   *  a request the network left hanging cannot be handed back from cache. */
+  function retry() {
+    retryT = 0;
+    if (rec.destroyed || !frame) return;         // held or unmounted: nothing to redo
+    dead = false;
+    unmount();
+    wantFresh = true;
+    mount();
+  }
+
+  function handleBoard(d) {
+    if (!speaks) {
+      speaks = true;
+      // the board owns its own reveal from here: the settle timer is a guess
+      // it has just made unnecessary.
+      window.clearTimeout(revealT); revealT = 0;
+    }
+    if (d.state === 'ready') { arrived(); return; }
+    if (d.state === 'error') {
+      // the reason is for the console, never for the rep — see hostOf()'s
+      // epitaph above: nothing on the glass names where the boards come from.
+      console.warn(`[screens] ${rec.slug}: board reported an error:`, typeof d.reason === 'string' ? d.reason.slice(0, 120) : '');
+      fail(BOARD_UNREACHABLE);
+      return;
+    }
+    if (d.state === 'loading') {
+      failed = false;
+      rec.deckArrived = false;
+      window.clearTimeout(retryT); retryT = 0;
+      armLid('Tap to open this board full screen.');
+      if (!capT) {
+        capT = window.setTimeout(() => {
+          capT = 0;
+          if (rec.destroyed || rec.deckArrived) return;
+          fail(BOARD_UNREACHABLE);
+        }, BOARD_READY_CAP_MS);
+      }
+    }
+  }
+
   function mount() {
     if (frame) return;
+    const fresh = wantFresh;
+    wantFresh = false;
+    speaks = false;
+    failed = false;
     // A fresh mount gets a fresh verdict: `dead` belongs to the frame that was
     // refused, not to the board. Without this reset a board the preflight
     // declared dead once stayed dead for the life of the page even after the
@@ -2879,6 +3026,14 @@ function makeLive(rec) {
       try { blank = mounted.contentWindow && mounted.contentWindow.location.href === 'about:blank'; }
       catch { blank = false; }                    // cross-origin: the deck is there
       if (blank) return;
+      /* A board that has already spoken (see BOARD_READY_CAP_MS) owns its own
+         reveal: its document being here says nothing about whether it has
+         drawn, so `load` lights the glass behind the lid and does nothing
+         else. deckArrived stays false until `ready` — a deck still pulling
+         its workbook IS the download liveWanted() wants to drop under the
+         viewer's scrim — and the 12 s watchdog keeps its clock, because
+         "taking a while" is the true sentence for a report on store wifi. */
+      if (speaks) { rec.panel.classList.add('is-live'); return; }
       window.clearTimeout(watchdog);
       rec.deckArrived = true;                     // read by liveWanted(), not by CSS
       // the glass powers on now — the deck behind the lid is still white.
@@ -2887,13 +3042,34 @@ function makeLive(rec) {
       revealT = window.setTimeout(uncover, LIVE_REVEAL_MS);
     });
     rec.liveFrame = frame;
+    /* THE HANDSHAKE LISTENER — see BOARD_READY_CAP_MS. One per mounted frame,
+       on window (postMessage targets the parent window, not the element),
+       attached BEFORE the src is set so the report's `loading` — posted from
+       its inline script, during parse — cannot be missed. The identity test
+       is `event.source === mounted.contentWindow`: not the origin string,
+       which any page can claim and which changes if the client moves the
+       tool, but the WindowProxy of the element THIS mount put in the DOM.
+       `contentWindow` is null once the frame is out of the document, so a
+       message from a torn-down frame can never match a live one. */
+    if (onMessage) window.removeEventListener('message', onMessage);   // never two for one board
+    onMessage = (event) => {
+      if (rec.destroyed || dead || mounted !== rec.liveFrame) return;
+      if (!mounted.contentWindow || event.source !== mounted.contentWindow) return;
+      const d = event.data;
+      if (!d || typeof d !== 'object' || d.source !== 'ccc-board') return;
+      handleBoard(d);
+    };
+    window.addEventListener('message', onMessage);
     // 5-minute bucket, not a per-mount stamp: these boards mount and unmount
     // as the room scrolls in and out, and a unique URL each time would refetch
     // the whole deck on every pass. Five minutes is well inside "today's
     // numbers" while still picking up a push within one coffee break.
+    // The one exception is a retry() after the board failed: that mount asks
+    // for a unique stamp, because the bucket URL is the one the network just
+    // left hanging and the cache would hand it straight back.
     const BUCKET = 5 * 60 * 1000;
     bucket = Math.floor(Date.now() / BUCKET);
-    frame.src = freshUrl(url, BUCKET);            // before insertion — see above
+    frame.src = fresh ? freshUrl(url) : freshUrl(url, BUCKET);   // before insertion — see above
     // The lid goes on WITH the frame, not instead of it. See the
     // .ccc-scr-holding--cover note in the sheet above for the defect this is.
     cover = holdingCard(rec.title, 'Tap to open this board full screen.');
@@ -2960,6 +3136,10 @@ function makeLive(rec) {
     window.clearTimeout(watchdog);
     window.clearTimeout(revealT);
     revealT = 0;
+    window.clearTimeout(capT); capT = 0;
+    window.clearTimeout(retryT); retryT = 0;
+    if (onMessage) { window.removeEventListener('message', onMessage); onMessage = null; }
+    speaks = false;
     cover = null;
     rec.panel.classList.remove('is-live');
     if (frame) {
@@ -3030,12 +3210,28 @@ function makeLive(rec) {
      * branded card because the live-frame ration is spent stays as it is.
      * A board the preflight declared dead retries here too: `dead` is cleared,
      * so a deck that comes back is picked up on the next foreground.
+     *
+     * A board that FAILED the handshake (said `error`, or never said `ready`
+     * inside BOARD_READY_CAP_MS) does not wait for the bucket: it is showing
+     * a "not reachable" card with nothing behind it worth keeping, and a tab
+     * coming to the foreground is the best moment to ask again — with a
+     * fresh stamp, for the reason retry() gives.
+     *
+     * THE LID IS RE-ARMED BY THIS RE-MOUNT, not merely restored: mount() lays
+     * a new cover WITH the new frame and, for a board that speaks, keeps it
+     * there until `ready` — so the 5-minute refresh never flashes the
+     * report's loading screen either. Measured: a refresh is a full workbook
+     * fetch on the report's side (it stamps its own `?t=`), i.e. the same
+     * 5-15 s the first load takes.
      */
     refresh() {
       if (!frame) return;
-      if (Math.floor(Date.now() / (5 * 60 * 1000)) === bucket) return;
+      const stale = Math.floor(Date.now() / (5 * 60 * 1000)) !== bucket;
+      if (!stale && !failed) return;
+      const wasFailed = failed;
       dead = false;
       unmount();
+      wantFresh = wasFailed;
       mount();
     },
     get isLive() { return !!frame; }

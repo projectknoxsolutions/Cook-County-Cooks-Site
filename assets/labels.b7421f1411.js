@@ -89,7 +89,7 @@
  * Plain ES module. No build step, no npm, no framework.
  * ========================================================================== */
 
-import { HOTSPOTS } from '../rooms.3f8fbb069b.js';
+import { HOTSPOTS } from '../rooms.762fff5b92.js';
 
 
 /* ─────────────────────────────────────────────────────────────────────────────

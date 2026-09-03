@@ -48,7 +48,7 @@
 
 import { initEngine, scrollToRoom, onRoomChange } from './engine.cccb8d066e.js';
 import { initOverlay, openTool } from './overlay.9fb4522061.js';
-import { mountRoomScreens } from './screens.bfbe8d00d4.js';
+import { mountRoomScreens } from './screens.6fa9ffc569.js';
 import { initChefWall } from './chefwall.2e2da0a5e6.js';
 import { initLabels } from './labels.1962f33a06.js';
 import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';

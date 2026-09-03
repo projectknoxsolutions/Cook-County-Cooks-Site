@@ -48,9 +48,9 @@
 
 import { initEngine, scrollToRoom, onRoomChange } from './engine.cccb8d066e.js';
 import { initOverlay, openTool } from './overlay.9fb4522061.js';
-import { mountRoomScreens } from './screens.bfbe8d00d4.js';
+import { mountRoomScreens } from './screens.6fa9ffc569.js';
 import { initChefWall } from './chefwall.2e2da0a5e6.js';
-import { initLabels } from './labels.004e6bcaaf.js';
+import { initLabels } from './labels.b7421f1411.js';
 import { buildWallPrint, revealWallPrints } from './wallprint.ed39d9a0c5.js';
 import { initFreezer } from './freezer.39bd7199fd.js';
 /* The lock is shared with the pocket list — see coldgate.js. It owns the
@@ -59,9 +59,9 @@ import { initFreezer } from './freezer.39bd7199fd.js';
 import {
   initColdGate, setAdopt, coldTools, isFreezerUnlocked, sealedCount,
   onFreezerUnlock, openKeypad
-} from './coldgate.a0693d1e74.js';
+} from './coldgate.bcf2063709.js';
 import { el, fill, $ } from './dom.a199da796c.js';
-import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.3f8fbb069b.js';
+import { ROOM_ORDER, HOTSPOTS, CHEF_FRAMES, FREEZER_DOOR } from '../rooms.762fff5b92.js';
 
 
 /* §0 · TINY DOM HELPERS — el(), fill() and $() now live in dom.js, because the
