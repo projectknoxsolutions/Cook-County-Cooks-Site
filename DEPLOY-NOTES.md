@@ -44,3 +44,55 @@ relative and there is no build step — the repo root is served as-is.
 ## Do not
 - Add a C³ logo. The brand mark on this site is the full name "Cook County Cooks".
 - Commit the freezer password, or any hash of it, to this public repo.
+
+## The break-room chef wall, and how it follows the decks
+`headchefs/headchefs.json` and `headchefs/photos/*.webp` are GENERATED. Nothing
+here is hand-edited. `.github/workflows/headchefs.yml` re-reads the two
+Win-The-Weekend decks with `build/pull-headchefs.mjs` and commits `headchefs/`
+only when a VISITOR could see the difference. A quiet week produces no commits.
+
+It is woken three ways, and they are deliberately independent:
+- **The clock.** Every 30 minutes all week, and on Friday mornings every 5
+  minutes from 12:00–17:59 UTC (covers 8–11am Chicago in both CST and CDT).
+- **A deck push.** Each deck repo has `.github/workflows/tell-the-break-room.yml`,
+  which rings this repo the moment a deck goes up. See the key below.
+- **By hand.** Actions → Head chefs → Run workflow.
+
+If the key is missing or dead the wall is not broken — it just goes back to
+waiting for the clock. That is why the clock stays.
+
+### The key: BREAK_ROOM_TOKEN
+The decks live under **BlufoxMobile** and this site lives under
+**projectknoxsolutions**, so a deck cannot ring this repo without a credential.
+
+Make it signed in as the account that owns THIS repo:
+avatar → Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → Generate new token.
+- Name `break-room-wall-dispatch`, resource owner **projectknoxsolutions**
+- Repository access → Only select repositories → **Cook-County-Cooks-Site**
+- Permissions → Repository permissions → **Contents: Read and write**. Nothing
+  else. (Metadata: Read-only switches itself on and cannot be removed.)
+- Copy the token — GitHub never shows it again.
+
+Then, signed in as the account with admin on **BlufoxMobile**, add it to BOTH
+deck repos: repo → Settings → Secrets and variables → Actions → New repository
+secret → name exactly `BREAK_ROOM_TOKEN`.
+
+If fine-grained tokens are blocked for the org, a classic token with ONLY the
+`public_repo` scope works and needs no approval — wider blast radius, same job.
+
+**When it expires** the deck workflow goes red on your own next deck push and
+says so in plain English. The wall keeps working on the clock. Remake the token
+and replace the secret; the name never changes.
+
+### When the wall looks wrong
+`.github/workflows/headchefs-watchdog.yml` opens ONE issue titled "The
+break-room wall may be showing last week's chefs" when the pull is disabled,
+has not SUCCEEDED in 4 hours, failed its last run, or a deck was pushed and
+never read. It keeps that one issue up to date rather than commenting, and
+closes it on recovery. If there is no such issue, the pipeline believes it is
+healthy — so a wrong wall with no issue open means the deck itself, not the job.
+
+Prove the whole pipeline end to end without waiting for a deck edit:
+`node build/pull-headchefs.mjs`. It reaches raw.githubusercontent.com even
+where headless Chromium cannot reach blufoxmobile.github.io.
