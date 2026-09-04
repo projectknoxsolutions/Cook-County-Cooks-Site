@@ -74,6 +74,11 @@
  *   node build/pull-headchefs.mjs              # fetch, extract, write
  *   node build/pull-headchefs.mjs --dry-run    # everything except the writes
  *   node build/pull-headchefs.mjs --verbose    # per-slide extraction report
+ *
+ *   HEADCHEFS_ACCEPT_SHORT_DECK=chicago node build/pull-headchefs.mjs
+ *       "Yes, the client really did post fewer head chefs this week." Needed
+ *       only when a run has stopped with the partial-harvest message, and only
+ *       once — see SHORT_DECK_TOLERANCE in section 1.
  * ========================================================================== */
 
 import {
@@ -246,9 +251,70 @@ const PHOTO_MAX_W = 384;
 const PHOTO_MAX_H = 576;
 const PHOTO_QUALITY = 78;
 
+/**
+ * THE QUALITY FLOOR — REPORTED, NEVER ENFORCED.
+ *
+ * `-resize 384x576>` only ever SHRINKS. A source that arrives smaller than the
+ * frame passes straight through untouched and is then recorded as a perfectly
+ * valid portrait, because nothing in here ever looked at how big it was. Two of
+ * those are on the break-room wall right now: a 246x164 landscape web thumbnail,
+ * and a 190x265 piece of clip-art (a road map of Illinois) in a portrait frame.
+ *
+ * THE DECK AUTHOR IS ENTITLED TO POST WHAT HE POSTS. This job's whole contract
+ * is that the wall follows the decks, so a small photograph is NOT a reason to
+ * fail a run, drop a chef, or blank a frame — that would be this script quietly
+ * overruling him. It is, however, a fact worth recording, so the wall (or he)
+ * can tell "that is the photo he chose" from "that is a scrape gone wrong".
+ * So: warn in the log, and set `photo_low_quality` on the entry. Nothing else.
+ *
+ * "Low quality" is either of two things a picture frame actually notices:
+ *   · LANDSCAPE (w > h) in a frame that is 105x160 — it letterboxes, and the
+ *     face ends up a third of the height it was drawn to be.
+ *   · SMALLER THAN HALF the target box in either direction, i.e. under
+ *     192 x 288, which is below the wall frame's own device-pixel size and so
+ *     is genuinely upscaled on screen rather than merely un-downscaled.
+ */
+const PHOTO_MIN_W = Math.round(PHOTO_MAX_W / 2);
+const PHOTO_MIN_H = Math.round(PHOTO_MAX_H / 2);
+
 /** Network. Two attempts per deck; a 5 MB file over a cold runner is not fast. */
 const FETCH_TIMEOUT_MS = 45000;
 const FETCH_ATTEMPTS   = 3;
+
+/**
+ * HOW MANY SLIDES ONE DECK MAY LOSE BETWEEN TWO RUNS WITHOUT IT BEING A BUG.
+ *
+ * One. The client edits these decks in place, one slide at a time, so catching
+ * him mid-edit with a single slide momentarily gone is ordinary — and a week in
+ * which one district genuinely has no head chef is ordinary too. Two districts
+ * disappearing from one deck inside a thirty-minute window is not either of
+ * those things; it is the exporter. See "THE PARTIAL HARVEST" in section 6.
+ */
+const SHORT_DECK_TOLERANCE = 1;
+
+/**
+ * THE DELIBERATE "yes, this week really is shorter" SWITCH.
+ *
+ * Set HEADCHEFS_ACCEPT_SHORT_DECK to a deck key (`chicago`, `big-south`), a
+ * comma-separated list of them, or `all`, and the partial-harvest guard stands
+ * down for that run. ONE such run is enough: it records the new, lower slide
+ * count in headchefs.json's `sources[]`, and every run after it is happy with
+ * the shorter deck without the switch. That is why this is an environment
+ * variable and not a constant in this file — it is a statement about one
+ * week, not a permanent lowering of the bar.
+ */
+function acceptShortDeck(deck) {
+  const raw = String(process.env.HEADCHEFS_ACCEPT_SHORT_DECK || '').trim().toLowerCase();
+  if (!raw) return false;
+  const list = raw.split(/[\s,]+/).filter(Boolean);
+  return list.includes('all') || list.includes('1') || list.includes('true') || list.includes(deck.key);
+}
+
+/**
+ * Are we running inside GitHub Actions? Only used to decide whether the run
+ * should also speak Actions' own annotation language — see `annotate()`.
+ */
+const IN_ACTIONS = !!process.env.GITHUB_ACTIONS;
 
 const DAY_MS = 86400000;
 
@@ -260,6 +326,35 @@ class PullError extends Error {}
 
 /** Abort the whole run. Nothing has been written by the time this can fire. */
 function fail(msg) { throw new PullError(msg); }
+
+/**
+ * SAY IT WHERE SOMEBODY WILL SEE IT.
+ *
+ * A successful run's most important output is the list of districts that are
+ * being HELD — showing last week's winner because this week's deck did not
+ * carry them — and the list that has gone STALE. Both were printed with
+ * console.log, which on a GitHub runner means: buried in the middle of a
+ * collapsed log, on a job with a green tick, that nobody opens. The wall can
+ * therefore sit on a fortnight-old chef with nothing anywhere saying so.
+ *
+ * GitHub Actions has a first-class channel for exactly this — a `::warning::`
+ * line is surfaced on the run summary page, on the commit, and in the Actions
+ * e-mail, WITHOUT failing the job. That is precisely the register these belong
+ * in: not an error (holding is correct behaviour), but not silence either.
+ *
+ * Outside Actions this does nothing at all beyond the console.warn the run
+ * already prints, so a local `node build/pull-headchefs.mjs` is unchanged.
+ */
+function annotate(title, message) {
+  if (!IN_ACTIONS) return;
+  // Actions reads a bare newline as the end of the annotation, so the payload
+  // has to be escaped or a multi-line message is silently truncated.
+  const esc = (v) => String(v).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  // A comma would start a new annotation property and a colon would close the
+  // property block early, so neither can survive in the title.
+  const safeTitle = esc(title).replace(/[,:]/g, ' ').replace(/\s+/g, ' ').trim();
+  console.log(`::warning title=${safeTitle}::${esc(message)}`);
+}
 
 /* ---------------------------------------------------------------------------
  * 3. TEXT
@@ -331,6 +426,42 @@ function titleCase(s) {
 }
 
 function sha256(buf) { return createHash('sha256').update(buf).digest('hex'); }
+
+/**
+ * IS THIS AWARD A STORE, OR A PERSON?
+ *
+ * A STORE CAN LEGITIMATELY WIN — the client confirmed it, and one is on the wall
+ * right now ("Calumet City", West Side). So this is NOT a filter and nothing is
+ * ever dropped because of it. It is a SIGNAL, because without it the wall has a
+ * frame captioned with a town name and no way to tell that apart from a scrape
+ * that has grabbed the wrong line — which is exactly what it looks like.
+ *
+ * The deck itself makes the distinction, in the `hsb` line under the name:
+ *
+ *   person   "Greeneville • Senior Lead Sales"     <store> • <job title>
+ *   store    "Store • National Rank #125"          the word Store, then a rank
+ *
+ * So: the first bullet-separated segment being the word "Store" is the tell.
+ * The second clause is a safety net for the day the first segment is reworded
+ * ("Store Of The Week", "Location") while the rank half stays as it is — a
+ * national rank where a job title belongs is not a person either way.
+ */
+function deriveIsStore(storeRole) {
+  const seg = String(storeRole || '').split(/\s*[\u2022\u00b7|]\s*/).map((x) => x.trim()).filter(Boolean);
+  if (!seg.length) return false;
+  return /^stores?\b/i.test(seg[0]) || (seg.length > 1 && /^national\s+rank\b/i.test(seg[1]));
+}
+
+/**
+ * The frame's own opinion of a photograph — see PHOTO_MIN_W/H for the argument.
+ * Reported on the entry as `photo_low_quality`; never acted on.
+ */
+function isLowQualityPhoto(w, h) {
+  const width = Number(w) || 0;
+  const height = Number(h) || 0;
+  if (!width || !height) return false;          // no dimensions is not a verdict
+  return width > height || width < PHOTO_MIN_W || height < PHOTO_MIN_H;
+}
 
 const nowIso = () => new Date().toISOString();
 
@@ -408,6 +539,27 @@ function findAllByClass(html, cls) {
     re.lastIndex = el.end;
   }
   return out;
+}
+
+/**
+ * The OPENING TAG of the first element carrying `cls` — attributes and all, with
+ * no length limit on them.
+ *
+ * Deliberately NOT sliceElement(): `.hcbg` keeps its entire photograph inside
+ * its own `style` attribute, and sliceElement only reads the first 8 KB of an
+ * opening tag. A slide whose blurred backdrop is a 400 KB data URI would come
+ * back from sliceElement as "no such element", and the photo fallback would
+ * then report a missing background on a slide that plainly has one.
+ */
+function openTagWithClass(html, cls) {
+  const re = /<([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
+  const want = new RegExp(`(^|\\s)${cls}(\\s|$)`);
+  let m;
+  while ((m = re.exec(html))) {
+    const cm = /(?:^|\s)class\s*=\s*"([^"]*)"/.exec(m[2]);
+    if (cm && want.test(cm[1])) return m[0];
+  }
+  return null;
 }
 
 /** First `<tag>` element's inner HTML. */
@@ -528,8 +680,38 @@ function extractSlides(html, deck, history) {
     const hcw = findByClass(scope, 'hcw');
     const writeup = hcw ? toText(hcw.inner, true) : '';
 
-    /* -- the photograph -- */
+    /* -- the photograph -- *
+     * A SLIDE THAT NAMES A CHEF AND YIELDS NO PHOTOGRAPH IS A DECK-SHAPE CHANGE,
+     * and it has to stop the run here, before anything is written.
+     *
+     * It used to be waved through: extractPhoto returned null, the entry was
+     * written `has_photo: false`, and then — this is the part that made it
+     * expensive — the orphan sweep at the end of section 10e saw a committed
+     * portrait that nothing referenced any more and DELETED it. So the failure
+     * did not merely publish a faceless frame, it destroyed the picture that
+     * would have let the next run recover. Reproduced 2026-09-01 by making the
+     * exporter link photographs instead of inlining them: five committed
+     * portraits deleted, six faceless frames published, exit 0, no warning.
+     *
+     * There is no legitimate "chef with no photograph" in these decks — the
+     * portrait is the point of the slide, and it is carried twice (see
+     * extractPhoto). So the honest reading of "we found a name and no face" is
+     * "we no longer know where the face is kept", and that is a stop.           */
     const photo = extractPhoto(slide);
+    if (!photo || photo.error) {
+      fail(`${deck.key}: head-chef slide "${title}" names ${name}, but no photograph came out ` +
+           `of it — ${(photo && photo.error) || 'extractPhoto returned nothing'}.\n` +
+           `  Every head-chef slide carries the same portrait twice: the sharp ` +
+           `<img class="hcfg"> and the blurred .hcbg behind it, both inside .hcp. Neither one ` +
+           `yielded an image here, so this is the exporter's markup changing rather than a ` +
+           `chef who happens to have no photograph.\n` +
+           `  This is NOT written through as "chef, no photo". That would publish a faceless ` +
+           `frame AND make this district's committed portrait an orphan, which the sweep at the ` +
+           `end of this script then deletes — so the next run could not put the face back either.\n` +
+           `  Nothing has been written; headchefs.json and headchefs/photos/ are untouched. Fix ` +
+           `the photo selectors against the deck's new markup — see "THE DECK SHAPE" in this ` +
+           `file's header for the shape they were written against.`);
+    }
 
     out.push({
       deck: deck.key,
@@ -587,6 +769,68 @@ function extractSlides(html, deck, history) {
                  `run either — reading that as a genuinely empty deck, not a shape change.`);
   }
 
+  /* ── THE PARTIAL HARVEST ──────────────────────────────────────────────────
+   * The guard above only ever fires on ZERO. A deck that yields SOME of its
+   * slides is the same failure wearing a disguise, and it is the one that
+   * actually got out. Reproduced 2026-09-01 by breaking four of Chicago's five
+   * `hcs` classes: one slide came through, four districts fell back to HOLD
+   * LAST-SEEN — which is not a fallback at all, it is the documented, correct
+   * behaviour for a district that is mid-edit — and so they were written out as
+   * `stale: false, days_since_confirmed: 0.1`, exit 0, green tick, four
+   * frames quietly showing last week's winners as though they were this week's.
+   *
+   * Holding is right for ONE district and wrong for four at once, and the only
+   * thing that can tell those apart is the count from the last run, which is
+   * already on file in headchefs.json's `sources[]`. So the bar is: a deck may
+   * shed SHORT_DECK_TOLERANCE slides between two reads without comment (the
+   * client edits in place, one slide at a time, and a genuinely quiet district
+   * is a real thing); shedding more than that is the exporter, not the manager.
+   *
+   * The override exists because a genuinely shorter week must not need a code
+   * change — see HEADCHEFS_ACCEPT_SHORT_DECK in section 1.
+   */
+  const lastCount = history ? Number(history.slides) || 0 : 0;
+  const lastDistricts = (history && Array.isArray(history.districts)) ? history.districts : [];
+  if (out.length && lastCount && out.length < lastCount) {
+    const here = new Set(out.map((o) => o.district.district));
+    const missing = lastDistricts.filter((d) => !here.has(d));
+    const missingText = missing.length ? missing.join(', ') : '(last run recorded no district names)';
+
+    if (out.length < lastCount - SHORT_DECK_TOLERANCE && !acceptShortDeck(deck)) {
+      fail(`${deck.key}: this deck yielded ${out.length} head-chef slide` +
+           `${out.length === 1 ? '' : 's'}, but the last run got ${lastCount}` +
+           `${history.when ? ` at ${history.when}` : ''}. ${lastCount - out.length} have gone.\n` +
+           `  Missing since the last run: ${missingText}\n` +
+           `  Still in the deck this run : ${out.map((o) => `${o.district.district} / ${o.name}`).join('; ')}\n` +
+           `  WHY THIS IS A FAILURE AND NOT A SHRUG: a district that is missing from its deck ` +
+           `keeps the chef already on file — that is deliberate, because the client edits these ` +
+           `decks in place and a district can be absent for a few minutes while he rebuilds a ` +
+           `slide. But that same rule, applied to several districts at once, is how last week's ` +
+           `winners get republished as this week's with "stale: false" written next to them and ` +
+           `a green tick on the run. One district going quiet is inside the tolerance and passes ` +
+           `with a warning. This many at once is the deck's markup changing.\n` +
+           `  IF THE DECK'S MARKUP CHANGED (most likely): the slides are still in the file but ` +
+           `this script can no longer see them. Fix the extraction against the new markup — see ` +
+           `"THE DECK SHAPE" in this file's header.\n` +
+           `  IF THIS REALLY IS A SHORTER WEEK — the client genuinely posted fewer head chefs — ` +
+           `say so deliberately and run it once more:\n` +
+           `      HEADCHEFS_ACCEPT_SHORT_DECK=${deck.key} node build/pull-headchefs.mjs\n` +
+           `  That one run records the new, lower count in headchefs.json's sources[], and every ` +
+           `run after it is content with the shorter deck without the switch.\n` +
+           `  Nothing has been written; the wall keeps its last good state either way.`);
+    }
+
+    const why = out.length < lastCount - SHORT_DECK_TOLERANCE
+      ? 'past the tolerance, but HEADCHEFS_ACCEPT_SHORT_DECK says this shorter week is deliberate'
+      : `inside the tolerance of ${SHORT_DECK_TOLERANCE}`;
+    console.warn(`  ! ${deck.key}: ${out.length} head-chef slides this run against ${lastCount} ` +
+                 `last run — missing: ${missingText}. That is ${why}, so those districts hold ` +
+                 `last-seen and the run continues.`);
+    annotate(`${deck.key}: fewer head chefs than last run`,
+             `${out.length} head-chef slides against ${lastCount} on the last run. ` +
+             `Missing: ${missingText}. Those districts are holding last week's winner.`);
+  }
+
   return out;
 }
 
@@ -594,52 +838,196 @@ function extractSlides(html, deck, history) {
  * The slide carries the same picture twice: `img.hcfg` is the sharp foreground
  * and `.hcbg` the blurred fill behind it. Prefer the foreground; fall back to
  * the background so a slide built without the <img> still yields a face.
- * @returns {{buf:Buffer, mime:string, sha:string}|null}
+ *
+ * BOTH LOOKUPS ARE ANCHORED TO A NAMED ELEMENT, NOT TO "SOMEWHERE ON THE SLIDE".
+ *   The background fallback used to be a bare `background-image:url(data:…)`
+ *   regex run over the whole `.hcp` block — and over the WHOLE SLIDE whenever
+ *   there was no `.hcp`. It therefore took the first inlined background image
+ *   ANYWHERE in range, which is the portrait only for as long as the portrait
+ *   happens to be the first thing the exporter draws. Reproduced 2026-09-01: a
+ *   decorative gold award ribbon added just above `.hcbg` put the same 300x120
+ *   ribbon into all five Chicago frames, exit 0, no warning.
+ *   So the fallback now reads the `.hcbg` element and nothing else, and a slide
+ *   with no `.hcp` block SAYS SO rather than guessing at the rest of the slide.
+ *
+ * FAILURE IS DESCRIBED, NOT SWALLOWED. Every return path that used to be `null`
+ * now says which of the two pictures was looked for and what was wrong with it,
+ * because the caller turns that straight into the message a non-developer reads.
+ *
+ * @returns {{buf:Buffer, mime:string, sha:string, via:string}|{error:string}}
  */
 function extractPhoto(slide) {
   const hcp = findByClass(slide, 'hcp');
-  const scope = hcp ? hcp.outer : slide;
+  if (!hcp) {
+    return { error: 'the slide has no .hcp photo block at all. There is nothing on it that is ' +
+                    'KNOWN to be the portrait, and the first inlined image found elsewhere on a ' +
+                    'slide is as likely to be a logo or an award ribbon as it is to be a face' };
+  }
 
-  const fg = /<img\b[^>]*\bclass\s*=\s*"[^"]*\bhcfg\b[^"]*"[^>]*\bsrc\s*=\s*"(data:image\/([a-z+]+);base64,([A-Za-z0-9+/=\s]+))"/i.exec(scope)
-          || /<img\b[^>]*\bsrc\s*=\s*"(data:image\/([a-z+]+);base64,([A-Za-z0-9+/=\s]+))"[^>]*\bclass\s*=\s*"[^"]*\bhcfg\b/i.exec(scope);
-  const bg = /background-image\s*:\s*url\(\s*(?:&quot;|["'])?data:image\/([a-z+]+);base64,([A-Za-z0-9+/=\s]+?)(?:&quot;|["'])?\s*\)/i.exec(scope);
+  const fg = /<img\b[^>]*\bclass\s*=\s*"[^"]*\bhcfg\b[^"]*"[^>]*\bsrc\s*=\s*"(data:image\/([a-z+]+);base64,([A-Za-z0-9+/=\s]+))"/i.exec(hcp.outer)
+          || /<img\b[^>]*\bsrc\s*=\s*"(data:image\/([a-z+]+);base64,([A-Za-z0-9+/=\s]+))"[^>]*\bclass\s*=\s*"[^"]*\bhcfg\b/i.exec(hcp.outer);
 
-  let mime = null; let b64 = null;
-  if (fg) { mime = fg[2]; b64 = fg[3]; }
-  else if (bg) { mime = bg[1]; b64 = bg[2]; }
-  if (!b64) return null;
+  let mime = null; let b64 = null; let via = '';
+  if (fg) {
+    mime = fg[2]; b64 = fg[3]; via = 'img.hcfg';
+  } else {
+    // The blurred backdrop, and ONLY the blurred backdrop. Its data URI lives in
+    // its own style attribute, so the search is scoped to that element's tag.
+    const hcbg = openTagWithClass(hcp.inner, 'hcbg');
+    if (!hcbg) {
+      return { error: 'the slide has no <img class="hcfg"> and no .hcbg element inside its .hcp ' +
+                      'block — neither of the two places the portrait is ever kept' };
+    }
+    const bg = /background-image\s*:\s*url\(\s*(?:&quot;|["'])?data:image\/([a-z+]+);base64,([A-Za-z0-9+/=\s]+?)(?:&quot;|["'])?\s*\)/i.exec(hcbg);
+    if (!bg) {
+      return { error: 'the slide has no <img class="hcfg">, and its .hcbg element carries no ' +
+                      'inlined background-image (the exporter may have stopped inlining the ' +
+                      'photographs and started linking them instead)' };
+    }
+    mime = bg[1]; b64 = bg[2]; via = '.hcbg';
+  }
 
   let buf;
-  try { buf = Buffer.from(b64.replace(/\s+/g, ''), 'base64'); } catch { return null; }
-  if (!buf || buf.length < 512) return null;              // not a photograph
-  return { buf, mime: `image/${mime}`, sha: sha256(buf) };
+  try { buf = Buffer.from(b64.replace(/\s+/g, ''), 'base64'); } catch {
+    return { error: `the ${via} image is not decodable base64` };
+  }
+  if (!buf || buf.length < 512) {
+    return { error: `the ${via} image decoded to ${buf ? buf.length : 0} bytes, which is too ` +
+                    'small to be a photograph' };
+  }
+  return { buf, mime: `image/${mime}`, sha: sha256(buf), via };
 }
 
 /* ---------------------------------------------------------------------------
  * 7. NETWORK
  * ------------------------------------------------------------------------ */
 
+/**
+ * THE CDN, AND WHY THE URL IS DELIBERATELY MISSPELT.
+ *
+ * raw.githubusercontent.com is fronted by Fastly and serves these decks with
+ * `cache-control: max-age=300`. For five minutes after any read, a Fastly edge
+ * will hand this job THE COPY FROM BEFORE THE CLIENT'S PUSH — and this job,
+ * being honest, compares that against what it already has, correctly concludes
+ * nothing changed, writes nothing, and goes green. The wall then stays a week
+ * stale, which is the exact bug this whole file exists to kill. The instant
+ * push trigger makes it the NORMAL case rather than a rare one: a run fired by
+ * the push itself lands inside that five-minute window every single time.
+ *
+ * WHAT WAS ACTUALLY MEASURED (2026-09-04, against the live Chicago deck, using
+ * Fastly's own `Fastly-Debug: 1` diagnostics rather than guesswork):
+ *
+ *   the plain URL, six times running     x-cache: HIT, hit count climbing 1→6,
+ *                                        `fastly-debug-ttl` reporting 286 s
+ *                                        still to run on the object. The bug.
+ *   + `cache-control: no-cache` and
+ *     `pragma: no-cache` on the request  HIT, and the hit count carried right
+ *                                        on climbing. Fastly does not honour a
+ *                                        client's no-cache here.
+ *   + `?cb=<unique>` on the URL          HIT — and `fastly-debug-digest` came
+ *                                        back IDENTICAL to the plain URL's.
+ *                                        raw.githubusercontent.com strips the
+ *                                        query string out of its cache key, so
+ *                                        a cache-buster parameter is decoration.
+ *   percent-encoding letters of the
+ *   filename ("i%6Edex.html")            MISS. Five different spellings, five
+ *                                        misses, a different digest each time,
+ *                                        and the same sha256 over the body as
+ *                                        the plain URL returns.
+ *
+ * So that last one is what is used. `%6E` and `n` ARE the same character — RFC
+ * 3986 defines an unreserved character and its percent-encoding as equivalent,
+ * and GitHub decodes the path and serves the identical file — but Fastly keys
+ * its cache on the path AS WRITTEN, so a spelling nobody has asked for before
+ * is a new object and has to be fetched from origin. A fresh spelling is rolled
+ * for every attempt, so a retry cannot land on the key the last try just made.
+ *
+ * IF GITHUB EVER STOPS ACCEPTING THE ENCODED PATH the response will not be a
+ * 200, and the plain URL is tried immediately afterwards with a warning: a wall
+ * that might be five minutes behind is a far better failure than a pipeline
+ * that has stopped. The no-cache request headers are kept even though Fastly
+ * ignores them — they cost nothing, and they are the correct instruction to any
+ * OTHER cache between here and Fastly (a runner-side or corporate proxy).
+ *
+ * NOT api.github.com: it is rate-limited per runner IP, and this job polls.
+ */
+function cacheBustUrl(raw) {
+  const cut = String(raw).lastIndexOf('/');
+  if (cut < 0) return null;
+  const name = raw.slice(cut + 1);
+  const first = name.search(/[A-Za-z0-9]/);
+  if (first < 0) return null;              // nothing in the name is safe to re-spell
+
+  let out = ''; let encoded = 0;
+  for (const ch of name) {
+    // ONLY unreserved alphanumerics are re-spelt. Percent-encoding one of those
+    // is defined to mean the same thing; re-spelling a '/' or a '.' is not.
+    if (/[A-Za-z0-9]/.test(ch) && Math.random() < 0.45) {
+      out += '%' + ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');
+      encoded++;
+    } else {
+      out += ch;
+    }
+  }
+  // A coin-flip that came up tails every time would hand back the plain URL,
+  // which is the one thing this function must never return.
+  if (!encoded) {
+    out = name.slice(0, first) +
+          '%' + name.charCodeAt(first).toString(16).toUpperCase().padStart(2, '0') +
+          name.slice(first + 1);
+  }
+  return raw.slice(0, cut + 1) + out;
+}
+
 async function fetchDeck(deck) {
   let lastErr = null;
   for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const res = await fetch(deck.raw, {
-        signal: ctl.signal,
-        redirect: 'follow',
-        headers: { 'user-agent': 'ccc-headchefs-bot', 'accept': 'text/html,text/plain' }
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      const text = await res.text();
-      if (!text || text.length < 4096) throw new Error(`response was ${text.length} bytes`);
-      clearTimeout(timer);
-      return text;
-    } catch (err) {
-      lastErr = err;
-      if (VERBOSE) console.error(`  attempt ${attempt}/${FETCH_ATTEMPTS} failed: ${err.message}`);
-    } finally {
-      clearTimeout(timer);
+    const busted = cacheBustUrl(deck.raw);
+    // Two goes per attempt: the cache-defeating spelling first, and the plain
+    // URL only if that did not come back with a deck. Stale-but-served beats
+    // not-served, but it is never the first choice and it is never silent.
+    const tries = busted ? [[busted, 'cache-bust'], [deck.raw, 'plain']] : [[deck.raw, 'plain']];
+
+    for (const [url, kind] of tries) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, {
+          signal: ctl.signal,
+          redirect: 'follow',
+          headers: {
+            'user-agent': 'ccc-headchefs-bot',
+            'accept': 'text/html,text/plain',
+            'cache-control': 'no-cache, no-store, max-age=0',
+            'pragma': 'no-cache'
+          }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        const text = await res.text();
+        if (!text || text.length < 4096) throw new Error(`response was ${text.length} bytes`);
+        clearTimeout(timer);
+        if (kind === 'plain' && busted) {
+          console.warn(`  ! ${deck.key}: the cache-defeating URL (${busted}) did not serve ` +
+                       `(${lastErr && lastErr.message}); read the plain URL instead, which ` +
+                       `Fastly may have answered from a copy up to five minutes old. If this ` +
+                       `keeps happening, GitHub has changed how it handles percent-encoded ` +
+                       `paths and cacheBustUrl() in this file needs a new trick.`);
+          annotate(`${deck.key}: read without defeating the CDN`,
+                   `The cache-defeating URL did not serve, so this deck was read from the plain ` +
+                   `URL and may be up to five minutes behind the client's last push.`);
+        }
+        if (VERBOSE) {
+          console.log(`  attempt ${attempt} ${kind}: HTTP ${res.status}, ` +
+                      `x-cache: ${res.headers.get('x-cache') || 'n/a'}, ` +
+                      `${text.length} bytes`);
+        }
+        return text;
+      } catch (err) {
+        lastErr = err;
+        if (VERBOSE) console.error(`  attempt ${attempt}/${FETCH_ATTEMPTS} (${kind}) failed: ${err.message}`);
+      } finally {
+        clearTimeout(timer);
+      }
     }
   }
   fail(`${deck.key}: could not read ${deck.raw} — ${lastErr && lastErr.message}. ` +
@@ -664,7 +1052,9 @@ function imagemagick() {
 
 /**
  * Re-encode one deck photograph down to the frame it lands in.
- * @returns {{bytes:Buffer, w:number, h:number}}
+ * `sha` is over the WebP that comes out, not over the JPEG that went in — see
+ * `photoFileStamp` below for why that distinction is the whole point.
+ * @returns {{bytes:Buffer, w:number, h:number, sha:string}}
  */
 function encodePhoto(srcBuf, key) {
   const im = imagemagick();
@@ -702,9 +1092,45 @@ function encodePhoto(srcBuf, key) {
       w = Number(parts[0]) || 0; h = Number(parts[1]) || 0;
     }
     if (!w || !h) fail(`${key}: could not read the re-encoded photo's dimensions.`);
-    return { bytes, w, h };
+    return { bytes, w, h, sha: sha256(bytes) };
   } finally {
     for (const f of [tmpIn, tmpOut]) { try { if (existsSync(f)) unlinkSync(f); } catch {} }
+  }
+}
+
+/**
+ * THE HASH OF THE FILE THE WEBSITE ACTUALLY DOWNLOADS.
+ *
+ * `photo_sha` — which stays exactly as it is, because the website reads it
+ * today — is the hash of the DECK'S SOURCE image: the 1024x1536 JPEG that came
+ * out of the slide. The file the browser fetches is the WebP this script wrote,
+ * and those are two different sets of bytes. Verified 2026-09-04: not one
+ * committed photo's sha256 equals its recorded `photo_sha`. Every one of them.
+ *
+ * That matters because the website appends the stamp as `?v=` to cache-bust a
+ * filename that never changes (photos/big-south.webp is always that name). A
+ * stamp that does not track the served bytes cannot do that job, and there are
+ * two ordinary paths that rewrite a photograph WITHOUT moving `photo_sha` at
+ * all: the file going missing from disk (which re-encodes from an unchanged
+ * source), and any change to PHOTO_MAX_W / PHOTO_MAX_H / PHOTO_QUALITY (which
+ * re-encodes every photograph in the repo from unchanged sources). In both, the
+ * browser keeps serving the old picture out of its cache indefinitely.
+ *
+ * So `photo_file_sha` is added ALONGSIDE `photo_sha`, never in place of it: the
+ * website is not being changed in this pass, and a field it does not know about
+ * cannot hurt it. It is read straight off the bytes on disk rather than
+ * remembered from the last run, because the point of it is to describe what is
+ * THERE — including the case where the last run's record is the thing that is
+ * wrong.
+ *
+ * @returns {{sha:string, bytes:number}|null}
+ */
+function photoFileStamp(name) {
+  try {
+    const buf = readFileSync(join(PHOTO_DIR, name));
+    return { sha: sha256(buf), bytes: buf.length };
+  } catch {
+    return null;
   }
 }
 
@@ -755,11 +1181,22 @@ function readPrevious() {
   return { districtOrder: order, districts, chefs, sources };
 }
 
-/** Everything that decides whether an entry actually CHANGED. */
+/**
+ * Everything that decides whether an entry actually CHANGED.
+ *
+ * `photo_file_sha` is in here as well as `photo_sha` deliberately: the two
+ * answer different questions. `photo_sha` moves when the CLIENT changes the
+ * photograph; `photo_file_sha` moves when the bytes the visitor downloads
+ * change for any reason at all, including a re-encode from an unchanged source
+ * after PHOTO_QUALITY was tuned. The second is the one a browser cache can see,
+ * so leaving it out would mean an entry whose served picture changed being
+ * stamped "last_changed: <last week>".
+ */
 function contentFingerprint(chef) {
   return sha256(Buffer.from(JSON.stringify([
     chef.name, chef.store_role, chef.writeup, chef.stats,
-    chef.is_xfinity, chef.slide_title, chef.photo_sha || null
+    chef.is_xfinity, chef.slide_title, chef.photo_sha || null,
+    chef.photo_file_sha || null, !!chef.is_store, !!chef.photo_low_quality
   ]), 'utf8'));
 }
 
@@ -784,7 +1221,10 @@ async function run() {
     const slides = extractSlides(html, deck, {
       had: !!((prevSrc && Number(prevSrc.head_chef_slides) > 0) || prevFromDeck > 0),
       slides: prevSrc ? Number(prevSrc.head_chef_slides) || 0 : prevFromDeck,
-      when: prevSrc ? prevSrc.fetched_at : null
+      when: prevSrc ? prevSrc.fetched_at : null,
+      // The district NAMES from the last run, so the partial-harvest guard can
+      // tell somebody WHICH districts vanished rather than only how many.
+      districts: (prevSrc && Array.isArray(prevSrc.districts)) ? prevSrc.districts : []
     });
     process.stdout.write(
       `  ${(html.length / 1048576).toFixed(2)} MB, ${slides.length} head-chef slide` +
@@ -895,7 +1335,7 @@ async function run() {
     if (slide) {
       const photoName = slide.photo ? `${key}.webp` : null;
       let photoFile = null; let photoW = 0; let photoH = 0; let photoBytes = 0;
-      let photoSha = null;
+      let photoSha = null; let photoFileSha = null;
 
       if (slide.photo) {
         photoSha = slide.photo.sha;
@@ -909,17 +1349,39 @@ async function run() {
           photoFile = `photos/${photoName}`;
           photoW = Number(prevChef.photo_w) || 0;
           photoH = Number(prevChef.photo_h) || 0;
-          try { photoBytes = statSync(join(PHOTO_DIR, photoName)).size; } catch { photoBytes = 0; }
+          // Read the size and the hash off the FILE rather than carrying last
+          // run's numbers forward. It costs one ~15 KB read and it is the only
+          // way `photo_file_sha` can describe the bytes that are really there —
+          // including on the run after PHOTO_QUALITY was changed, where the
+          // source is identical and the served picture is not.
+          const stamp = photoFileStamp(photoName);
+          photoBytes = stamp ? stamp.bytes : 0;
+          photoFileSha = stamp ? stamp.sha : null;
         } else {
           const enc = encodePhoto(slide.photo.buf, key);
           photos.set(photoName, enc.bytes);
           photoFile = `photos/${photoName}`;
           photoW = enc.w; photoH = enc.h; photoBytes = enc.bytes.length;
+          photoFileSha = enc.sha;
           if (VERBOSE) {
             console.log(`    photo ${key}: ${slide.photo.buf.length}B source -> ` +
                         `${enc.bytes.length}B webp ${enc.w}x${enc.h}`);
           }
         }
+      }
+
+      // Reported, never enforced — see PHOTO_MIN_W / PHOTO_MIN_H.
+      const lowQuality = !!photoFile && isLowQualityPhoto(photoW, photoH);
+      if (lowQuality) {
+        console.warn(`  ! ${slide.district.district}: the photograph on this slide is ` +
+                     `${photoW}x${photoH}, below the ${PHOTO_MAX_W}x${PHOTO_MAX_H} the picture ` +
+                     `frame is drawn for` + (photoW > photoH ? ' and landscape in a portrait frame' : '') +
+                     `. That is what the deck carries, so it is published as-is and flagged ` +
+                     `photo_low_quality — it is not an error and nothing is dropped for it.`);
+        annotate(`${slide.district.district}: low-resolution portrait`,
+                 `${slide.name}'s photograph is ${photoW}x${photoH}` +
+                 (photoW > photoH ? ' (landscape, in a portrait frame)' : '') +
+                 `. Published as-is and flagged photo_low_quality.`);
       }
 
       const entry = {
@@ -934,13 +1396,20 @@ async function run() {
         stats: slide.stats,
         writeup: slide.writeup,
         is_xfinity: slide.isXfinity,
+        // A store can legitimately win — see deriveIsStore. This is a signal for
+        // the wall, not a filter, and nothing downstream has to read it.
+        is_store: deriveIsStore(slide.storeRole),
         vacant: false,
         has_photo: !!photoFile,
         photo_file: photoFile,
         photo_w: photoW,
         photo_h: photoH,
         photo_bytes: photoBytes,
-        photo_sha: photoSha
+        photo_sha: photoSha,
+        // The hash of the WebP that is actually served, next to (never instead
+        // of) the hash of the deck's source image — see photoFileStamp.
+        photo_file_sha: photoFileSha,
+        photo_low_quality: lowQuality
       };
 
       const fp = contentFingerprint(entry);
@@ -985,6 +1454,12 @@ async function run() {
         district: label,
         district_key: key,
         district_short: shortLabel,
+        // Held entries predate these fields, so they are derived rather than
+        // carried: an entry that has been holding since before this change would
+        // otherwise be the only one on the wall missing its store flag.
+        is_store: prevChef.is_store === undefined
+          ? deriveIsStore(prevChef.store_role)
+          : !!prevChef.is_store,
         vacant: false,
         days_since_confirmed: Math.round(ageDays * 10) / 10,
         stale: ageDays >= STALE_WARN_DAYS,
@@ -1000,6 +1475,7 @@ async function run() {
          budget. Runs once: after the first migration the name already matches
          and nothing happens. */
       const want = `photos/${key}.webp`;
+      let justEncoded = false;
       if (heldEntry.photo_file && heldEntry.photo_file !== want) {
         const from = join(PHOTO_DIR, String(heldEntry.photo_file).replace(/^photos\//, ''));
         if (existsSync(from)) {
@@ -1009,6 +1485,8 @@ async function run() {
           heldEntry.photo_w = enc.w; heldEntry.photo_h = enc.h;
           heldEntry.photo_bytes = enc.bytes.length;
           heldEntry.photo_sha = null;   // the deck source is gone; nothing to match
+          heldEntry.photo_file_sha = enc.sha;   // but the SERVED bytes are right here
+          justEncoded = true;
           if (VERBOSE) console.log(`    photo ${key}: migrated legacy ${from} -> ${enc.w}x${enc.h} webp`);
         } else {
           heldEntry.photo_file = null; heldEntry.has_photo = false;
@@ -1016,6 +1494,20 @@ async function run() {
       } else if (heldEntry.photo_file && !existsSync(join(PHOTO_DIR, `${key}.webp`))) {
         heldEntry.photo_file = null; heldEntry.has_photo = false;
       }
+
+      // A held entry's picture is not re-read from a deck, but the file on disk
+      // is still the file the visitor downloads, so its stamp is taken the same
+      // way everyone else's is. Skipped when the bytes were just made above and
+      // are still only in memory — photoFileStamp would read the old file.
+      if (heldEntry.photo_file && !justEncoded) {
+        const stamp = photoFileStamp(`${key}.webp`);
+        if (stamp) { heldEntry.photo_bytes = stamp.bytes; heldEntry.photo_file_sha = stamp.sha; }
+      } else if (!heldEntry.photo_file) {
+        heldEntry.photo_file_sha = null;
+      }
+      heldEntry.photo_low_quality = !!heldEntry.photo_file &&
+        isLowQualityPhoto(heldEntry.photo_w, heldEntry.photo_h);
+
       chefs.push(heldEntry);
       // Provenance survives the hold: if the districts map has no record (the
       // hand-made snapshot had none), recover the deck from the entry's own
@@ -1055,9 +1547,12 @@ async function run() {
       stats: [],
       writeup: '',
       is_xfinity: key === 'xfinity',
+      is_store: false,
       vacant: true,
       has_photo: false,
       photo_file: null,
+      photo_file_sha: null,
+      photo_low_quality: false,
       last_confirmed: lastConfirmed,
       days_since_confirmed: Number.isFinite(ageDays) ? Math.round(ageDays * 10) / 10 : null,
       stale: false
@@ -1117,6 +1612,14 @@ async function run() {
 
   // `generated_at` and the per-run clocks move every run, so a raw diff is
   // always non-empty. Compare only what a visitor could see.
+  //
+  // `photo_file_sha`, `is_store` and `photo_low_quality` count as visible even
+  // though the website does not read them yet: the first is the stamp that
+  // decides whether a browser re-downloads a photograph whose filename never
+  // changes, and the other two are the difference between a frame captioned
+  // "Calumet City" reading as an award and reading as a mis-scrape. Leaving them
+  // out would mean a photograph's served bytes changing with no commit to carry
+  // it — the same silent staleness this file exists to prevent, one level down.
   const visible = (raw) => {
     try {
       const d = JSON.parse(raw);
@@ -1124,7 +1627,8 @@ async function run() {
         order: d.district_order,
         chefs: (d.headchefs || []).map((c) => [
           c.district, c.district_short, c.name, c.store_role, c.writeup,
-          c.stats, c.is_xfinity, c.photo_file, c.photo_w, c.photo_h, !!c.vacant
+          c.stats, c.is_xfinity, c.photo_file, c.photo_w, c.photo_h, !!c.vacant,
+          c.photo_file_sha || null, !!c.is_store, !!c.photo_low_quality
         ])
       });
     } catch { return null; }
@@ -1138,6 +1642,49 @@ async function run() {
     orphans = readdirSync(PHOTO_DIR).filter((n) => !keep.has(n) && !n.startsWith('.'));
   } catch { orphans = []; }
 
+  /* ── NO RUN MAY DELETE MORE PHOTOGRAPHS THAN IT WRITES ────────────────────
+   * The orphan sweep is housekeeping: a district that dropped past the stale
+   * cap, or a legacy filename replaced by this script's own. Housekeeping is
+   * one file at a time. When it is suddenly SIX files at once and this run has
+   * written none, that is not housekeeping — it is the deck having changed
+   * shape underneath us and every chef losing their portrait in the same pass.
+   * Reproduced 2026-09-01: an exporter change that stopped inlining photographs
+   * deleted five committed portraits and published six faceless frames, exit 0.
+   *
+   * The photo failure in section 6 now stops that particular run long before it
+   * gets here. This is the second lock on the same door, and it is the one that
+   * covers the cases nobody has thought of yet, because it does not care WHY
+   * the portraits became unreferenced. The rule is simply: a run may retire one
+   * photograph on its own account, and beyond that it must have written at
+   * least as many as it is removing.
+   *
+   * When the guard trips the files are KEPT. Unreferenced bytes in the repo are
+   * harmless — nothing links to them — whereas a deleted portrait is gone, and
+   * the deck may no longer be able to supply it. The JSON is still written: it
+   * is correct, and blocking it would only add a second failure to the first.
+   */
+  const deleteAllowance = Math.max(1, photos.size);
+  let orphansKept = [];
+  if (orphans.length > deleteAllowance) {
+    orphansKept = orphans;
+    console.warn(
+      `\n  ! REFUSING TO DELETE ${orphans.length} PHOTOGRAPHS: ${orphans.join(', ')}\n` +
+      `    This run wrote ${photos.size} photo${photos.size === 1 ? '' : 's'}, so removing ` +
+      `${orphans.length} is not tidying up after one district — it is every portrait becoming ` +
+      `unreferenced at once, which means something upstream changed shape.\n` +
+      `    The files have been LEFT ON DISK. They are unreferenced, so nothing on the wall ` +
+      `points at them and they cost a visitor nothing; a deleted portrait, by contrast, cannot ` +
+      `be got back if the deck has stopped carrying it.\n` +
+      `    Check headchefs.json's headchefs[] for entries with has_photo:false. If the wall is ` +
+      `right and these files really are finished with, delete them by hand — that is one ` +
+      `deliberate commit, which is what a deletion should be.`);
+    annotate('Refused to delete unreferenced photographs',
+             `${orphans.length} photographs became unreferenced in a run that wrote ` +
+             `${photos.size}. They have been left on disk rather than deleted: ` +
+             `${orphans.join(', ')}. Check headchefs.json for entries with has_photo:false.`);
+    orphans = [];
+  }
+
   console.log('');
   console.log(`  districts on the wall : ${order.length} (${order.join(', ')})`);
   console.log(`  chefs present in deck : ${found.size}`);
@@ -1146,7 +1693,31 @@ async function run() {
   if (changed.length) console.log(`  changed this run      : ${changed.join('; ')}`);
   if (photos.size)    console.log(`  photos re-encoded     : ${[...photos.keys()].join(', ')}`);
   if (orphans.length) console.log(`  orphan photos removed : ${orphans.join(', ')}`);
+  if (orphansKept.length) console.log(`  orphan photos KEPT    : ${orphansKept.join(', ')} (see the refusal above)`);
   console.log(`  wall content changed  : ${wallChanged ? 'YES' : 'no'}`);
+
+  /* ── AND NOW SAY IT SOMEWHERE SOMEBODY LOOKS ──────────────────────────────
+   * Everything above is console.log on a job that is about to exit 0. On a
+   * GitHub runner that is a collapsed log inside a green tick, and the two
+   * lines that most need reading — which districts are showing LAST week's
+   * winner, and which of those have gone stale — are the ones nobody ever
+   * sees. Repeated as Actions annotations they land on the run summary, on the
+   * commit, and in the Actions e-mail, without failing the job, which is the
+   * right register: holding is correct behaviour, it just must not be silent.
+   * Outside Actions `annotate` is a no-op and this changes nothing at all.   */
+  for (const line of held) {
+    annotate('Head chef held from a previous run',
+             `${line} — this district was not in its deck on this run, so the frame is showing ` +
+             `the chef already on file. It is dropped for a labelled empty mat at ` +
+             `${STALE_DROP_DAYS} days.`);
+  }
+  for (const c of chefs) {
+    if (!c.stale) continue;
+    annotate(`${c.district}: stale head chef`,
+             `${c.name} has not been confirmed in a deck for ${c.days_since_confirmed} days ` +
+             `(warning at ${STALE_WARN_DAYS}, dropped at ${STALE_DROP_DAYS}). The wall is ` +
+             `presenting a ${c.days_since_confirmed}-day-old winner as this week's.`);
+  }
 
   if (DRY_RUN) {
     console.log('\n--dry-run: nothing written.');

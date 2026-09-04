@@ -1,0 +1,367 @@
+# =============================================================================
+# Cook County Cooks — is anything still feeding the break-room wall?
+# -----------------------------------------------------------------------------
+# The failure this whole pipeline exists to prevent is a wall in the break room
+# confidently showing last week's chefs. Every way that happens is QUIET:
+#
+#   · the pull job fails on every single run while the Actions tab still looks
+#     busy — not hypothetical, that is exactly what the ImageMagick breakage did
+#   · GitHub's scheduler drops the run entirely, which leaves NO row in the
+#     Actions tab at all, so "nothing went wrong" and "nothing happened" look
+#     identical from the outside
+#   · GitHub switches a scheduled workflow off by itself after 60 days without
+#     activity in the repository, which it announces by an email people miss
+#   · a deck gets pushed and simply never gets read
+#
+# None of those produce a red X that anybody is looking at. So this job goes and
+# asks. It needs NO token, NO secret and NO paid service — the automatic
+# GITHUB_TOKEN can read this repository's own run history, and it can read the
+# two deck repositories because those are public.
+#
+# WHAT IT DOES WHEN SOMETHING IS WRONG
+#   It opens ONE issue on this repository, which emails the owner. On every
+#   later check it REWRITES THAT ISSUE'S BODY rather than adding a comment: an
+#   issue that grows a comment every three hours gets muted, and a muted alarm
+#   is not an alarm. When the wall recovers it says so and closes the issue.
+#   It also ends red, so the ordinary "your workflow failed" email fires too —
+#   belt and braces, because the entire point is not being quiet. Turn the red
+#   half off with FAIL_LOUDLY below if the mail gets tiresome; the issue is
+#   opened either way.
+#
+# WHEN IT RUNS
+#   · after EVERY run of "Head chefs", pass or fail — so a broken pull is
+#     reported within about a minute instead of at the next three-hourly check
+#   · every three hours on its own clock — so "the pull never even started" is
+#     caught too, which the trigger above cannot catch by definition, because
+#     a run that never happened never completes
+#   · on the button
+#
+# WHAT IT DOES NOT CATCH, HONESTLY
+#   It is itself partly a scheduled workflow, so a GitHub-wide scheduler outage
+#   stops this as well, and a repository that really has been quiet for 60 days
+#   would have had both workflows switched off together. The `workflow_run`
+#   trigger is the half that survives ordinary scheduler drift, but nothing here
+#   is a check from OUTSIDE GitHub. If the wall ever matters more than this, the
+#   next step up is a free uptime pinger watching
+#   cookcountycooks.com/headchefs/headchefs.json — not more YAML.
+# =============================================================================
+
+name: Wall watchdog
+
+on:
+  # ⚠ `workflows:` matches the pull workflow by its DISPLAY NAME (`name: Head
+  # chefs` at the top of headchefs.yml), not by its filename. If anybody ever
+  # renames that workflow, this fast path quietly stops firing — the three-hourly
+  # schedule below still covers everything, just slower. Rename both together.
+  workflow_run:
+    workflows: ['Head chefs']
+    types: [completed]
+  schedule:
+    # Every three hours, offset off the hour for the same reason the pull job is.
+    - cron: '41 */3 * * *'
+  workflow_dispatch:
+
+# Nothing at file level needs more than read. The one job raises what it needs.
+permissions:
+  contents: read
+
+# One watchdog at a time, so two of them cannot both decide "no alarm is open"
+# and both open one. `cancel-in-progress: false` so a check that is halfway
+# through writing the issue is allowed to finish; GitHub always keeps the NEWEST
+# arrival waiting, so the most recent state of the world is always the one that
+# gets evaluated.
+concurrency:
+  group: headchefs-watchdog
+  cancel-in-progress: false
+
+env:
+  # The workflow being watched. This is the FILE name (the API addresses
+  # workflows by filename), unlike `workflows:` above which is the display name.
+  PULL_WORKFLOW: headchefs.yml
+
+  # Alarm if there has been no SUCCESSFUL pull in this many hours. The baseline
+  # cron is every 30 minutes, so four hours is eight consecutive misses — far
+  # outside GitHub's ordinary scheduler drift, and short enough that a Friday
+  # morning breakage is on his phone before lunch.
+  STALE_HOURS: '4'
+
+  # Alarm if a deck was pushed this many minutes ago and no successful pull has
+  # STARTED since. 45 minutes is one baseline cron interval plus slack, so an
+  # ordinary late-running cron never trips it.
+  DECK_GRACE_MINUTES: '45'
+
+  # The one issue. Found by its exact title, so the alarm still works even if
+  # the label below could not be created; the label is there for humans.
+  ALARM_TITLE: "The break-room wall may be showing last week's chefs"
+  ISSUE_LABEL: wall-stale
+
+  # Set to 'false' to stop the watchdog ending red (and therefore emailing)
+  # while the wall is broken. The issue is still opened and kept current.
+  FAIL_LOUDLY: 'true'
+
+jobs:
+  check:
+    name: Is the wall still being fed?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # A CANCELLED pull run tells us nothing we did not already know, and the
+    # dense Friday cron in headchefs.yml deliberately produces a lot of them
+    # (see the concurrency note in that file). Skipping those keeps Friday's
+    # Actions tab readable. Every other outcome, including success, is worth
+    # checking: a success is what CLOSES an open alarm.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion != 'cancelled'
+
+    permissions:
+      contents: read   # read headchefs/headchefs.json to learn the deck list
+      actions: read    # read this repository's own workflow run history
+      issues: write    # open, update and close the one alarm issue
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ask GitHub what actually happened
+        id: audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Actions runs `run:` blocks with `bash -e`, so ONE failing API call
+          # would abort this step and leave the alarm unraised — which is
+          # precisely the failure this file exists to prevent. Turn -e off on
+          # purpose: every probe below is allowed to fail on its own and be
+          # reported as a fault rather than killing the whole audit.
+          set +e
+          set -u
+          set -o pipefail
+
+          FAULTS=""
+          note() { FAULTS="${FAULTS}- $1"$'\n'; }
+
+          NOW=$(date -u +%s)
+
+          # -- 1. Is the pull workflow even switched on? ------------------------
+          # `disabled_inactivity` is GitHub's 60-days-without-repository-activity
+          # rule for public repos. It is the failure that looks most like nothing
+          # being wrong: the workflow is simply not there any more.
+          STATE=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$PULL_WORKFLOW" \
+                    --jq '.state' 2>/dev/null)
+          [ -n "$STATE" ] || STATE="unreadable"
+          echo "workflow state: $STATE"
+          case "$STATE" in
+            active)
+              ;;
+            disabled_inactivity)
+              note "**GitHub has switched the pull workflow off by itself.** It does that to scheduled workflows in a public repository after 60 days with no activity here. Nothing is re-reading the decks at all. Fix: Actions tab → \`Head chefs\` → **Enable workflow**." ;;
+            disabled_manually)
+              note "**The pull workflow is switched off.** Somebody disabled it. Fix: Actions tab → \`Head chefs\` → **Enable workflow**." ;;
+            *)
+              note "Could not read the state of \`$PULL_WORKFLOW\` (GitHub said \`$STATE\`). Either that file was renamed or the API call did not answer." ;;
+          esac
+
+          # -- 2. When did a pull last SUCCEED? ---------------------------------
+          # Success, not "ran". A run that ended in failure re-read nothing, and
+          # a run that was cancelled re-read nothing either. Asking the API for
+          # status=success directly is better than paging recent runs and
+          # filtering, because it still finds the last good one even after a long
+          # unbroken streak of failures.
+          LAST_OK=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$PULL_WORKFLOW/runs?status=success&per_page=1" \
+                      --jq '.workflow_runs[0] | (.run_started_at // .created_at // "")' 2>/dev/null)
+
+          OK_TS=0
+          if [ -z "$LAST_OK" ]; then
+            note "**There is no successful run of \`$PULL_WORKFLOW\` on record at all.** Either it has never worked, or every run GitHub still remembers failed."
+          else
+            OK_TS=$(date -u -d "$LAST_OK" +%s 2>/dev/null)
+            [ -n "$OK_TS" ] || OK_TS=0
+            AGE_H=$(( (NOW - OK_TS) / 3600 ))
+            echo "last successful pull: $LAST_OK (${AGE_H}h ago)"
+            if [ "$AGE_H" -ge "$STALE_HOURS" ]; then
+              note "**The decks have not been successfully re-read for ${AGE_H} hours.** The last good run started \`$LAST_OK\`. The wall is showing whatever it was showing then."
+            fi
+          fi
+
+          # -- 3. Did the most recent FINISHED run fail? ------------------------
+          # Deliberately only `failure`. A `cancelled` run is normal here — see
+          # the concurrency note in headchefs.yml — and alarming on it would cry
+          # wolf every Friday morning.
+          LAST_DONE=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$PULL_WORKFLOW/runs?status=completed&per_page=1" \
+                        --jq '.workflow_runs[0] | (.conclusion // "") + "\t" + (.html_url // "")' 2>/dev/null)
+          LAST_CONCLUSION=${LAST_DONE%%$'\t'*}
+          LAST_URL=${LAST_DONE#*$'\t'}
+          echo "most recent finished run: ${LAST_CONCLUSION:-none}"
+          if [ "$LAST_CONCLUSION" = "failure" ]; then
+            note "**The most recent pull run failed.** [Open it and read the first red step](${LAST_URL}). The run's own summary says in words what it could not do."
+          fi
+
+          # -- 4. Has a deck moved that we have not looked at since? ------------
+          # This is the exact shape of the complaint on 2026-09-04: the Chicago
+          # deck was pushed at 14:55 and 15:03 UTC and nothing re-read it for
+          # over an hour, while Big South — posted earlier — went up straight
+          # away, so the wall read as "Big South works, Chicago is broken".
+          #
+          # The deck repositories are read OUT OF headchefs.json rather than
+          # typed in here, so this list can never drift away from the list the
+          # parser actually uses. If a deck is added or moved, this follows.
+          #
+          # The claim is deliberately narrow: "we have not LOOKED since it
+          # changed", never "the wall is wrong". A deck edit that does not touch
+          # a head-chef slide is SUPPOSED to produce no commit, and alarming on
+          # that would cry wolf every time he fixes a typo on slide nine.
+          DECKS=$(jq -r '
+            .sources[]? | select(.raw != null)
+            | (.raw | split("/")) as $p
+            | select($p[2] == "raw.githubusercontent.com")
+            | [ ($p[3] + "/" + $p[4]), (.label // .deck // "unnamed") ] | @tsv
+          ' headchefs/headchefs.json 2>/dev/null)
+
+          if [ -z "$DECKS" ]; then
+            note "Could not work out which repositories the decks live in from \`headchefs/headchefs.json\`. That file is missing, unreadable, or has lost its \`sources\` list — in which case the parser is in trouble too."
+          else
+            while IFS=$'\t' read -r REPO LABEL; do
+              [ -n "${REPO:-}" ] || continue
+              # GITHUB_TOKEN can read public repositories in any account, which
+              # is what these are. The unauthenticated retry underneath is there
+              # so that a future change to token policy cannot silently blind
+              # this check — it would just quietly stop noticing.
+              PUSHED=$(gh api "repos/$REPO/commits?per_page=1" \
+                         --jq '.[0].commit.committer.date' 2>/dev/null)
+              if [ -z "$PUSHED" ]; then
+                PUSHED=$(curl -sf --max-time 20 -H 'accept: application/vnd.github+json' \
+                           "https://api.github.com/repos/$REPO/commits?per_page=1" \
+                           | jq -r '.[0].commit.committer.date' 2>/dev/null)
+              fi
+              if [ -z "$PUSHED" ] || [ "$PUSHED" = "null" ]; then
+                note "Could not read when the **$LABEL** deck (\`$REPO\`) was last pushed. If that repository was renamed, deleted or made private, the parser cannot read it either and the wall will freeze."
+                continue
+              fi
+              PUSH_TS=$(date -u -d "$PUSHED" +%s 2>/dev/null)
+              [ -n "$PUSH_TS" ] || PUSH_TS=0
+              LAG_MIN=$(( (NOW - PUSH_TS) / 60 ))
+              echo "deck $LABEL last pushed $PUSHED (${LAG_MIN}m ago)"
+              if [ "$PUSH_TS" -gt "$OK_TS" ] && [ "$LAG_MIN" -ge "$DECK_GRACE_MINUTES" ]; then
+                note "**The $LABEL deck was pushed ${LAG_MIN} minutes ago and nothing has read it since.** Deck pushed \`$PUSHED\`; last successful pull started \`${LAST_OK:-never}\`. If a head chef changed on that deck, the wall is wrong right now."
+              fi
+            done <<< "$DECKS"
+          fi
+
+          # -- 5. Write down the verdict ----------------------------------------
+          if [ -n "$FAULTS" ]; then
+            echo "unhealthy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "unhealthy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # The issue body. Written every time, healthy or not, so the step that
+          # follows always has something to post and never has to guess.
+          {
+            echo "The break-room wall on cookcountycooks.com is fed by"
+            echo "\`.github/workflows/$PULL_WORKFLOW\`, which re-reads the two"
+            echo "Win-The-Weekend decks and commits \`headchefs/\` when a head chef changes."
+            echo ""
+            echo "**This is what is wrong as of $(date -u '+%Y-%m-%d %H:%M') UTC:**"
+            echo ""
+            printf '%s' "$FAULTS"
+            echo ""
+            echo "**What to try, in order:**"
+            echo ""
+            echo "1. Actions tab → **Head chefs** → **Run workflow**. If it goes green the wall is fixed, and this issue will close itself at the next check."
+            echo "2. If it goes red, open the run and read the first red step. The summary at the bottom of the run says in plain words what it could not do."
+            echo "3. If no run appears at all, the workflow is switched off: same page, **Enable workflow**."
+            echo ""
+            echo "_Written and closed automatically by \`.github/workflows/headchefs-watchdog.yml\`. Its body is rewritten on every check, so it always describes what is wrong NOW rather than what was wrong when it opened. Closing it by hand is fine — a fresh one opens if the wall is still starved._"
+          } > "$RUNNER_TEMP/wall-body.md"
+
+          {
+            echo "### Wall watchdog"
+            echo ""
+            if [ -n "$FAULTS" ]; then
+              echo "**The wall may be stale.**"
+              echo ""
+              printf '%s' "$FAULTS"
+            else
+              echo "Healthy. Last successful pull started \`${LAST_OK:-unknown}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # `if: always()` so that an audit which died on its face still reaches
+      # here — see the last branch, which refuses to close an open alarm on the
+      # strength of a verdict that was never actually reached.
+      - name: Open, update or close the alarm
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNHEALTHY: ${{ steps.audit.outputs.unhealthy }}
+        run: |
+          set +e
+          set -u
+          set -o pipefail
+
+          # The label is a convenience for filtering the issue list by eye. It
+          # is NOT how the alarm is found — that is done by exact title below —
+          # so a label that cannot be created never causes a duplicate issue.
+          # Failing because it already exists is the normal case, not a fault.
+          gh label create "$ISSUE_LABEL" \
+            --color 'B60205' \
+            --description 'The break-room chef wall is not being fed' \
+            >/dev/null 2>&1 || true
+
+          NUM=$(gh issue list --state open --limit 100 --json number,title 2>/dev/null \
+                  | jq -r --arg t "$ALARM_TITLE" \
+                      'map(select(.title == $t)) | .[0].number // ""' 2>/dev/null)
+
+          if [ "${UNHEALTHY:-}" = "true" ]; then
+            if [ -n "$NUM" ]; then
+              # Edit, never comment. An issue that grows a comment every three
+              # hours gets muted, and a muted alarm is not an alarm.
+              gh issue edit "$NUM" --body-file "$RUNNER_TEMP/wall-body.md" \
+                && echo "updated the open alarm, issue #$NUM" \
+                || { echo "::error::Could not update the open alarm on issue #$NUM."; exit 1; }
+            else
+              gh issue create \
+                --title "$ALARM_TITLE" \
+                --label "$ISSUE_LABEL" \
+                --body-file "$RUNNER_TEMP/wall-body.md" \
+                || gh issue create \
+                     --title "$ALARM_TITLE" \
+                     --body-file "$RUNNER_TEMP/wall-body.md" \
+                || { echo "::error::The wall is starved and the alarm issue could NOT be opened. Read this run's summary for what is wrong."; exit 1; }
+              echo "opened a new alarm issue"
+            fi
+
+          elif [ "${UNHEALTHY:-}" = "false" ]; then
+            if [ -n "$NUM" ]; then
+              gh issue comment "$NUM" --body \
+                "Recovered — the decks are being re-read again as of $(date -u '+%Y-%m-%d %H:%M') UTC. Closing." \
+                >/dev/null 2>&1 || true
+              gh issue close "$NUM" >/dev/null 2>&1 \
+                && echo "closed issue #$NUM — the wall is being fed again" \
+                || echo "::warning::The wall is healthy but issue #$NUM could not be closed."
+            else
+              echo "Healthy, and no alarm was open. Nothing to do."
+            fi
+
+          else
+            # The audit never reached a verdict at all. Never close an open
+            # alarm on that basis: "we could not tell" is not "it is fine".
+            echo "::error::The audit step reached no verdict, so this check proves nothing. Any open alarm has been left exactly as it was."
+            exit 1
+          fi
+
+      # Deliberately last, and deliberately red. The issue above is the signal
+      # meant to reach the owner; this is the one that reaches anybody watching
+      # the Actions tab, and it makes the repository's own workflow badge tell
+      # the truth. Turn it off with FAIL_LOUDLY at the top if the mail gets
+      # tiresome — the issue is opened either way.
+      - name: End red if the wall is starved
+        if: steps.audit.outputs.unhealthy == 'true'
+        run: |
+          if [ "$FAIL_LOUDLY" = "true" ]; then
+            echo "::error::The break-room chef wall is not being fed — see the open '$ISSUE_LABEL' issue on this repository for what is wrong and what to do."
+            exit 1
+          fi
+          echo "::warning::The wall is starved, but FAIL_LOUDLY is off, so this run is not going red. The alarm issue was still opened."

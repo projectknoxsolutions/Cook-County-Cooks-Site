@@ -13,12 +13,54 @@
 #   memory. So they are read here and the visitor downloads ~13 KB of JSON and
 #   ~80 KB of already-resized WebP.
 #
-# EVERY 30 MINUTES, AT :09 AND :39
-#   Not :00/:30. GitHub's scheduler queues heavily on the hour and the half hour,
-#   and a cron at those minutes routinely lands 10-20 minutes late. An offset
-#   costs nothing and keeps the cadence honest. GitHub does not guarantee
-#   scheduled runs at all under load, which is exactly why the parser holds
-#   last-seen for 14 days rather than trusting any single run.
+# THREE WAYS THIS JOB STARTS, FASTEST FIRST
+#   1. repository_dispatch — the two deck repositories ring this bell the moment
+#      a deck is pushed, so the wall follows within a couple of minutes instead
+#      of waiting for the next tick of the clock. That needs a token living in
+#      the DECK repositories (BREAK_ROOM_TOKEN). If that token is never made, or
+#      expires, nothing here breaks: this bell simply never rings and item 2
+#      carries the whole load exactly as it does today.
+#   2. schedule — the floor. It needs no token, no secret and no setup, so the
+#      wall is never worse than it is now. Dense on Friday morning because that
+#      is when the decks get posted.
+#   3. workflow_dispatch — the button, for when somebody is standing in front of
+#      the wall and wants it now.
+#   These three are independent by construction. Any one of them alone feeds the
+#   wall; none of them can break the other two.
+#
+# WHY THE CRON IS SHAPED THE WAY IT IS
+#   The baseline is every 30 minutes at :09 and :39. Not :00/:30 — GitHub's
+#   scheduler queues heavily on the hour and the half hour, and a cron at those
+#   minutes routinely lands 10-20 minutes late. An offset costs nothing and
+#   keeps the cadence honest.
+#
+#   On top of that, two extra Friday windows. He posts the two decks between
+#   roughly 8am and 11am Chicago time on a Friday, sometimes an hour or more
+#   apart, and a deck that lands at 9:55 should not sit unread until 10:39.
+#
+#   Cron in GitHub Actions is ALWAYS in UTC. Chicago is not: it is UTC-5 in
+#   summer (CDT) and UTC-6 in winter (CST). Rather than write a cron that has to
+#   be re-edited on the two Sundays a year when the clocks move — which is
+#   exactly the sort of maintenance that never gets done — the windows below are
+#   written wide enough to be correct in BOTH:
+#
+#         8am-11am Chicago  =  13:00-16:00 UTC in summer (CDT)
+#         8am-11am Chicago  =  14:00-17:00 UTC in winter (CST)
+#         window used here  =  12:00-17:59 UTC, every 5 minutes
+#
+#   That covers the posting hours in either half of the year with an hour of
+#   slack on each end, and it needs no attention twice a year. The second window
+#   (18:00-21:45 UTC, every 15 minutes) is the afternoon tail, for the Friday he
+#   posts late.
+#
+#   ONE HONEST CAVEAT ABOUT `schedule:`. GitHub documents 5 minutes as the
+#   shortest interval it will ACCEPT. It does not promise to HONOUR it. Under
+#   load, scheduled runs are dropped outright — not queued, not run late, just
+#   never run, leaving no row in the Actions tab at all. People measuring
+#   every-5-minute jobs report them firing a fraction of the time. So read the
+#   dense Friday window as "a lot more chances per hour", not as five-minute
+#   polling. That gap is precisely why way number 1 above exists, and why
+#   headchefs-watchdog.yml exists to notice when nothing has run.
 #
 # NO EMPTY COMMITS
 #   The parser rewrites nothing unless the content a VISITOR could see changed
@@ -38,8 +80,23 @@ name: Head chefs
 
 on:
   schedule:
-    # every 30 minutes, offset off the hour — see the note above
+    # Baseline, every 30 minutes, offset off the hour — see the note above.
     - cron: '9,39 * * * *'
+    # Friday posting window: every 5 minutes, 12:00-17:55 UTC. Wide enough to
+    # cover 8-11am Chicago in BOTH CST and CDT, so it never needs re-editing.
+    - cron: '*/5 12-17 * * 5'
+    # Friday afternoon tail: every 15 minutes, 18:00-21:45 UTC, for a late post.
+    - cron: '*/15 18-21 * * 5'
+
+  # The deck repositories POST here the instant a deck is pushed. `types:` is a
+  # filter, not a label: ONLY an event called `deck-updated` starts this job, so
+  # some other dispatch aimed at this repository cannot wake it by accident.
+  # The sender puts the deck's repository and commit in `client_payload`, which
+  # is read (safely, via env:) further down to say which deck rang and to wait
+  # out the CDN. See .github/workflows/ in the two deck repos for the sender.
+  repository_dispatch:
+    types: [deck-updated]
+
   workflow_dispatch:
     inputs:
       verbose:
@@ -55,6 +112,16 @@ permissions:
 # One run at a time. Two overlapping runs would both rebase onto each other and
 # one would lose. `cancel-in-progress: false` because a run that is already
 # committing must be allowed to finish.
+#
+# ⚠ EXPECT TO SEE CANCELLED RUNS ON FRIDAY MORNINGS, AND DO NOT "FIX" THEM.
+# GitHub holds exactly ONE run waiting per concurrency group. With the dense
+# Friday cron above, a third arrival cancels the one that was waiting — so the
+# Actions tab will show grey cancelled rows around 12:00-18:00 UTC on Fridays.
+# That is the queue working: the cancelled run had nothing to do that the run
+# in front of it was not already doing. The watchdog alarms only on `failure`
+# and never on `cancelled`, for exactly this reason. Do NOT respond to it by
+# setting `cancel-in-progress: true` — that would allow a run to be killed
+# halfway through `git push`.
 concurrency:
   group: headchefs-pull
   cancel-in-progress: false
@@ -63,7 +130,10 @@ jobs:
   pull:
     name: Re-read the decks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Was 10. Raised to leave headroom for the "Wait for the deck CDN" step
+    # below, which is switched off today but can be turned back on and would
+    # then spend up to six minutes before this job does any work at all.
+    timeout-minutes: 20
 
     # The ONLY elevated scope in the workflow, and the smallest one that can
     # commit: no packages, no actions, no id-token, no pull-requests, no issues.
@@ -77,6 +147,142 @@ jobs:
           # Shallow is fine: this job only ever adds one commit on top of HEAD.
           fetch-depth: 1
           persist-credentials: true
+
+      # -----------------------------------------------------------------------
+      # ONLY dispatch-started runs do this, and usually it takes two seconds.
+      #
+      # THE PROBLEM IT SOLVES. The parser reads the decks from
+      # raw.githubusercontent.com, which is a cache in front of GitHub, not
+      # GitHub itself. It answers `cache-control: max-age=300` — so for up to
+      # five minutes after a deck is pushed, that address can still hand out the
+      # copy from BEFORE the push. A cron run does not care: by the time it
+      # fires, the five minutes are long gone. But a dispatch-started run
+      # arrives SECONDS after the push, lands inside that window every single
+      # time, reads the old deck, correctly concludes nothing changed, commits
+      # nothing — and the instant trigger looks broken while working perfectly.
+      #
+      # WHAT DOES NOT SOLVE IT. Adding `?something=123` to the address, or
+      # sending `cache-control: no-cache`. Both were measured against the live
+      # service on 2026-09-04: the cache ignores them and serves the same aged
+      # copy (identical ETag, identical `source-age`). Do not add either and
+      # assume it worked.
+      #
+      # WHO SOLVES IT NOW, AND WHY THIS STEP IS SWITCHED OFF.
+      #   build/pull-headchefs.mjs asks for the deck under a URL spelling the
+      #   cache has never been asked for before, which forces a fresh copy, and
+      #   falls back to the ordinary address if that ever stops working. That is
+      #   the right place for it: the parser is what reads the deck, so the
+      #   parser is what should guarantee the read is fresh. So this step is set
+      #   to zero and does nothing — a dispatch-started run reads immediately,
+      #   which is the entire point of a dispatch.
+      #
+      #   IT IS LEFT HERE, TESTED AND READY, AS A LEVER. The symptom that means
+      #   "pull it" is very specific: deck pushes ring the bell, the run goes
+      #   green within a minute, and it commits NOTHING — and then the ordinary
+      #   half-hourly run picks the same change up later. That is the signature
+      #   of the parser being handed the pre-push copy. Set SETTLE_MAX_SECONDS
+      #   below to 360 and the problem goes away while somebody looks at the
+      #   parser's cache trick.
+      #
+      # WHAT DOES. Every address on raw.githubusercontent.com carries an ETag
+      # which is a hash of the file's CONTENT. The same file pinned to a commit
+      # id — .../<commit>/index.html — is a different address that has never
+      # been cached before, so it is always fetched fresh, and it is by
+      # definition the version that was just pushed. Ask both addresses for
+      # their ETag and compare: when they agree, the cache has caught up and the
+      # parser is guaranteed to read the new deck. Usually that is true almost
+      # at once; at worst it takes the five minutes.
+      #
+      # If anything about the probe cannot be worked out — no commit id in the
+      # payload, deck not listed in headchefs.json, the deck repo unreachable —
+      # this step says so and carries on rather than idling. A deck repo that is
+      # unreachable will fail loudly in the parser a few steps down anyway, and
+      # the cron is still the floor underneath all of this.
+      # -----------------------------------------------------------------------
+      - name: Wait for the deck CDN to catch up
+        if: github.event_name == 'repository_dispatch'
+        env:
+          # Read through env, never inlined into the script. Everything in
+          # client_payload was typed by whoever holds the token, and text that
+          # arrives from outside must never be pasted into a shell command.
+          DECK: ${{ github.event.client_payload.deck }}
+          DECK_SHA: ${{ github.event.client_payload.sha }}
+          # 0 = do not wait at all (the parser defeats the cache itself; see
+          # the note above). 360 = wait up to six minutes for the cache to catch
+          # up, which is the 300 seconds it promises plus a minute of slack.
+          # Those are the only two values worth using.
+          SETTLE_MAX_SECONDS: '0'
+          SETTLE_POLL_SECONDS: '15'
+        run: |
+          # -e is ON by default in Actions. Turn it off here on purpose: every
+          # probe below is allowed to fail and be reported, because failing to
+          # check the cache must never stop us reading the decks.
+          set +e
+          set -u
+          set -o pipefail
+
+          echo "Deck that rang: ${DECK:-(not stated)}"
+          echo "Commit it pushed: ${DECK_SHA:-(not stated)}"
+
+          if [ "${SETTLE_MAX_SECONDS:-0}" -le 0 ]; then
+            echo "Not waiting for the cache: build/pull-headchefs.mjs defeats it"
+            echo "itself, so this run reads the decks now. See the note above this"
+            echo "step for the one symptom that means this should be turned back on."
+            exit 0
+          fi
+
+          # Which address does the parser read for that deck? Taken out of
+          # headchefs.json rather than typed here, so it cannot drift away from
+          # what the parser actually uses.
+          RAW=$(jq -r --arg repo "${DECK:-}" '
+            .sources[]? | select(.raw != null)
+            | (.raw | split("/")) as $p
+            | select($p[2] == "raw.githubusercontent.com")
+            | select(($p[3] + "/" + $p[4]) == $repo)
+            | .raw
+          ' headchefs/headchefs.json 2>/dev/null | head -1)
+
+          if [ -z "$RAW" ]; then
+            echo "::warning::'${DECK:-unknown}' is not one of the decks listed in headchefs/headchefs.json, so there is no file to watch and this run reads the decks straight away. If a deck repository was renamed, headchefs.json needs to be told."
+            exit 0
+          fi
+          if [ -z "${DECK_SHA:-}" ]; then
+            echo "::warning::The bell did not say which commit was pushed, so there is nothing to compare the cache against and this run reads the decks straight away. If the deck was pushed in the last five minutes it may read the copy from just before the push and find nothing to do; the next scheduled run will pick it up."
+            exit 0
+          fi
+
+          # Same file, pinned to the commit that was just pushed. Field 6 of the
+          # address is the branch name: https:/ / host / owner / repo / BRANCH / file
+          PINNED=$(printf '%s\n' "$RAW" | awk -F/ -v sha="$DECK_SHA" 'BEGIN { OFS = "/" } { $6 = sha; print }')
+
+          etag_of() {
+            curl -sS -I --max-time 30 --retry 2 "$1" 2>/dev/null \
+              | tr -d '\r' \
+              | awk 'tolower($1) == "etag:" { print $2 }' \
+              | tail -1
+          }
+
+          TARGET=$(etag_of "$PINNED")
+          if [ -z "$TARGET" ]; then
+            echo "::warning::Could not read the just-pushed copy of the deck at $PINNED, so this run reads the decks straight away without waiting for the cache. If the deck repository is genuinely unreachable the parser will say so loudly in a moment."
+            exit 0
+          fi
+          echo "Just-pushed deck fingerprint: $TARGET"
+
+          DEADLINE=$(( $(date -u +%s) + SETTLE_MAX_SECONDS ))
+          while : ; do
+            LIVE=$(etag_of "$RAW")
+            if [ "$LIVE" = "$TARGET" ]; then
+              echo "The cache is serving the new deck. Reading now."
+              exit 0
+            fi
+            if [ "$(date -u +%s)" -ge "$DEADLINE" ]; then
+              echo "::warning::Waited ${SETTLE_MAX_SECONDS}s and raw.githubusercontent.com is still serving an older copy of the deck. Reading anyway — if that copy is the pre-push one this run will simply find nothing to do, and the next scheduled run will catch it."
+              exit 0
+            fi
+            echo "Cache still has the old copy (${LIVE:-no answer}); waiting ${SETTLE_POLL_SECONDS}s."
+            sleep "$SETTLE_POLL_SECONDS"
+          done
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -177,11 +383,45 @@ jobs:
       # table under a red X, with an empty "Committed:", is the same trap one
       # screen further on. The table below is the state ON DISK, which after a
       # failed pull is the LAST GOOD state, not this run's — say that too.
+      #
+      # THE FIRST LINE SAYS WHAT STARTED THE RUN. With three ways in, that is
+      # the first question anybody asks when the wall looks wrong: did the deck
+      # push actually ring the bell, or is this just the clock coming round? It
+      # is answered here so nobody has to go and read the run's metadata.
       - name: Summary
         if: always()
+        env:
+          # Again via env, not inlined: DECK and DECK_SHA are text from outside.
+          TRIGGER: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+          DECK: ${{ github.event.client_payload.deck }}
+          DECK_SHA: ${{ github.event.client_payload.sha }}
+          ACTOR: ${{ github.actor }}
         run: |
           {
             echo "### Head chef pull"
+            echo ""
+            case "$TRIGGER" in
+              repository_dispatch)
+                echo "**Started by a deck push.** \`${DECK:-deck not named}\` at commit \`${DECK_SHA:-unknown}\` rang the bell, so this run happened within a minute or two of the push rather than waiting for the clock."
+                ;;
+              schedule)
+                case "$CRON" in
+                  '9,39 * * * *')
+                    echo "**Started by the clock** — the ordinary every-30-minutes check (\`$CRON\`)." ;;
+                  '')
+                    echo "**Started by the clock.**" ;;
+                  *)
+                    echo "**Started by the clock** — the dense Friday-morning window (\`$CRON\`), which runs while the decks are being posted." ;;
+                esac
+                ;;
+              workflow_dispatch)
+                echo "**Started by hand** — @${ACTOR:-somebody} pressed Run workflow."
+                ;;
+              *)
+                echo "**Started by \`$TRIGGER\`.**"
+                ;;
+            esac
             echo ""
             if [ "${{ steps.pull.outcome }}" != "success" ]; then
               echo "> **THE DECKS WERE NOT RE-READ** — the pull step ended \`${{ steps.pull.outcome }}\`."
