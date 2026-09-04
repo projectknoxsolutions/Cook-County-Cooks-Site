@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-28T14:30:10.145Z",
+  "generated_at": "2026-09-04T13:43:15.737Z",
   "generator": "build/pull-headchefs.mjs",
   "note": "GENERATED FILE — do not hand-edit. Rebuilt from the Win-The-Weekend decks by .github/workflows/headchefs.yml every 30 minutes.",
   "policy": {
@@ -31,8 +31,8 @@
       "label": "Big South",
       "page": "https://blufoxmobile.github.io/Win-The-Weekend---Big-South/",
       "raw": "https://raw.githubusercontent.com/BlufoxMobile/Win-The-Weekend---Big-South/main/index.html",
-      "fetched_at": "2026-08-28T14:30:10.511Z",
-      "bytes": 4975584,
+      "fetched_at": "2026-09-04T13:43:17.186Z",
+      "bytes": 9406311,
       "head_chef_slides": 1,
       "districts": [
         "Big South"
@@ -43,8 +43,8 @@
       "label": "Chicago",
       "page": "https://blufoxmobile.github.io/Win-The-Weekend---Chicago/",
       "raw": "https://raw.githubusercontent.com/BlufoxMobile/Win-The-Weekend---Chicago/main/index.html",
-      "fetched_at": "2026-08-28T14:30:10.690Z",
-      "bytes": 5634864,
+      "fetched_at": "2026-09-04T13:43:17.968Z",
+      "bytes": 5634832,
       "head_chef_slides": 4,
       "districts": [
         "North Side",
@@ -63,8 +63,8 @@
       "slide_title": "Head Chef Of The Week — Big South",
       "present_this_run": true,
       "first_seen": "2026-08-28T14:30:10.145Z",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
-      "last_changed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
+      "last_changed": "2026-09-04T13:43:15.737Z",
       "days_since_confirmed": 0
     },
     "west-side": {
@@ -75,7 +75,7 @@
       "slide_title": "Head Chef Of The Week — West Side",
       "present_this_run": true,
       "first_seen": "2026-08-28T14:30:10.145Z",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0
     },
@@ -87,7 +87,7 @@
       "slide_title": "Head Chef Of The Week — Outlawz",
       "present_this_run": true,
       "first_seen": "2026-08-28T14:30:10.145Z",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0
     },
@@ -99,7 +99,7 @@
       "slide_title": "Head Chef Of The Week — North Side",
       "present_this_run": true,
       "first_seen": "2026-08-28T14:30:10.145Z",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0
     },
@@ -111,7 +111,7 @@
       "slide_title": "Head Chef Of The Week — The South Side",
       "present_this_run": true,
       "first_seen": "2026-08-28T14:30:10.145Z",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0
     },
@@ -125,7 +125,7 @@
       "first_seen": "2026-08-26T04:16:23.645Z",
       "last_confirmed": "2026-08-26T04:16:23.645Z",
       "last_changed": "2026-08-26T04:16:23.645Z",
-      "days_since_confirmed": 2.4
+      "days_since_confirmed": 9.4
     }
   },
   "headchefs": [
@@ -136,37 +136,37 @@
       "region_deck": "Big South",
       "slide_title": "Head Chef Of The Week — Big South",
       "slide_index": 0,
-      "name": "Demarcus McKamey",
-      "store_role": "South Knoxville • Assistant Manager/Team Lead",
+      "name": "Nicholes Gilland",
+      "store_role": "Greeneville • Senior Lead Sales",
       "stats": [
         {
-          "value": "$22,879",
+          "value": "$1,110",
           "label": "GP $"
         },
         {
-          "value": "29%",
+          "value": "100%",
           "label": "Plus"
         },
         {
-          "value": "80%",
+          "value": "50%",
           "label": "GIG Attach"
         },
         {
-          "value": "$5.02",
+          "value": "$8.98",
           "label": "Accy $/Box"
         }
       ],
-      "writeup": "Over $20K in GP 2 months back to back\nSold 113 XM month to date\nAlways willing to help where the market needs him\nAlways has a great attitude",
+      "writeup": "He always has the best attitude and whenever he finds his groove he knows the best time to sell a phone is immediately after he just sold one! And any advice or constructive criticism we ever give the man, he always takes it and hits the ground running with it immediately.",
       "is_xfinity": false,
       "vacant": false,
       "has_photo": true,
       "photo_file": "photos/big-south.webp",
       "photo_w": 384,
       "photo_h": 576,
-      "photo_bytes": 17990,
-      "photo_sha": "d2101c945d4b3c9e22006ab25cf164ca8a92415a5ad4788dbb14567adee4c469",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
-      "last_changed": "2026-08-28T14:30:10.145Z",
+      "photo_bytes": 14944,
+      "photo_sha": "fca063e109041a0fa10968a49c86609090a8789793f1cae6db0e50edb08b0775",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
+      "last_changed": "2026-09-04T13:43:15.737Z",
       "days_since_confirmed": 0,
       "stale": false
     },
@@ -222,7 +222,7 @@
       "photo_h": 265,
       "photo_bytes": 9126,
       "photo_sha": "cf1e602ef9e7c4a5a05a0b0060493152b684bcf6679754a3f733f007c38fec17",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0,
       "stale": false
@@ -246,7 +246,7 @@
       "photo_h": 538,
       "photo_bytes": 22982,
       "photo_sha": "38567e0b9da1b98cf5225025612ec1d2e47a454d7f5a747c9d69602dfe877aa3",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0,
       "stale": false
@@ -287,7 +287,7 @@
       "photo_h": 164,
       "photo_bytes": 3964,
       "photo_sha": "a3c81435b4d3ad427e72298650958646bce7324ce9dd2dcff6b5c86b83ace1f1",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0,
       "stale": false
@@ -328,7 +328,7 @@
       "photo_h": 389,
       "photo_bytes": 12814,
       "photo_sha": "621affe203366173845b6f93042561d28af61151ff28898e3e1046c7a7f375f9",
-      "last_confirmed": "2026-08-28T14:30:10.145Z",
+      "last_confirmed": "2026-09-04T13:43:15.737Z",
       "last_changed": "2026-08-28T14:30:10.145Z",
       "days_since_confirmed": 0,
       "stale": false
@@ -349,13 +349,14 @@
       "district_key": "xfinity",
       "district_short": "Xfinity",
       "vacant": false,
-      "days_since_confirmed": 2.4,
-      "stale": false,
+      "days_since_confirmed": 9.4,
+      "stale": true,
       "photo_w": 384,
       "photo_h": 512,
       "photo_bytes": 15104,
       "photo_sha": null,
-      "last_changed": "2026-08-26T04:16:23.645Z"
+      "last_changed": "2026-08-26T04:16:23.645Z",
+      "source_deck": "chicago"
     }
   ]
 }
