@@ -68,6 +68,14 @@
    "blurb": "Today's board: print it at open and track the store against goal as the sales land."
   },
   {
+   "file": "Welcome Sign-In Sheet - Xfinity.pdf",
+   "label": "Welcome Sign-In Sheet",
+   "type": "pdf",
+   "group": "ops",
+   "bytes": 78959,
+   "blurb": "The visitor log for the front counter — 25 numbered lines for name and time. Print one at open, clip it to the board by the door, start a fresh sheet each day."
+  },
+  {
    "file": "Brinks Pick Up Log.png",
    "label": "Brinks Pick-Up Log",
    "type": "image",
